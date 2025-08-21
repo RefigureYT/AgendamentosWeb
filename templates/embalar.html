@@ -1,0 +1,140 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{{ url_for("static", filename="embalar/embalar.css") }}
+{% endblock %}
+
+{% block content %}
+<br>
+<div class="container">
+    <div class="header-bar mb-3 p-3 rounded" data-id-ml="{{ dados_agend.id_agend_ml }}"
+        data-id-bd="{{ dados_agend.id_bd }}" data-empresa="{{ dados_agend.empresa }}"
+        data-centro="{{ dados_agend.centro_distribuicao or '' }}">
+        <h5 class="mb-2">Embalagem</h5>
+        <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
+            <div><strong>Empresa:</strong>
+                {% if dados_agend.empresa == 0 %}Nenhuma
+                {% elif dados_agend.empresa == 1 %}Jaú Pesca
+                {% elif dados_agend.empresa == 2 %}Jaú Fishing
+                {% elif dados_agend.empresa == 3 %}L.T. Sports
+                {% endif %}
+            </div>
+            <div><strong>Agendamento:</strong> {{ dados_agend.id_agend_ml }}</div>
+            <div><strong>Colaborador:</strong> {{ dados_agend.colaborador or 'Nenhum' }}</div>
+            {% set data = dados_agend.entrada %}
+            <div><strong>Data:</strong> {{ data.strftime('%d/%m/%y') }}</div>
+            <div><strong>Hora:</strong> {{ data.strftime('%Hh%M') }}</div>
+            <div><strong>Centro:</strong> {{ dados_agend.centro_distribuicao }}</div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-5">
+            <div class="mb-3" style="padding-right: 10px;">
+                <div style="display: flex; justify-content: space-between;">
+                    <label for="input-embalar" class="form-label fw-bold">Código ou SKU</label>
+                    <label class="form-label"><span style="font-weight: 600;">F1</span> = Etiqueta ML + JP</label>
+                    <label class="form-label"><span style="font-weight: 600;">F2</span> = Etiqueta ML</label>
+                </div>
+                <input type="text" id="input-embalar" class="form-control" placeholder="Digite aqui o GTIN ou SKU">
+            </div>
+
+            <div class="d-flex justify-content-between flex-wrap gap-3 p-3 mb-3 border rounded bg-white"
+                style="margin-right: 10px;">
+                <p id="tempoP" class="mb-0"><strong>🕒 Tempo:</strong> 00h 00m 00s</p>
+                <p id="finalizadosP" class="mb-0"><strong>✅ Finalizados:</strong> 0</p>
+            </div>
+
+            <div id="caixa-actions-container">
+                <template id="template-nova-caixa">
+                    <div id="btn-nova-caixa" class="card add-new-box text-center text-decoration-none">
+                        <div class="card-body nova_caixa">
+                            <i class="bi bi-plus-circle me-2"></i> Nova Caixa
+                        </div>
+                    </div>
+                </template>
+
+                <template id="template-finalizar-embalagem">
+                    <a href="#" id="btn-finalizar-embalagem"
+                        class="card add-new-box text-center text-decoration-none bg-success text-white ajuste_btn_finalizar">
+                        <div class="card-body nova_caixa">
+                            <i class="bi bi-check-circle-fill me-2"></i> Finalizar Embalagem
+                        </div>
+                    </a>
+                </template>
+                <div>
+                    <div id="caixas-container" class="mb-4 d-flex flex-column gap-3">
+                    </div>
+                </div>
+            </div>
+
+            <!-- <template id="template-nova-caixa">
+                <div id="btn-nova-caixa" class="card add-new-box text-center text-decoration-none">
+                    <div class="card-body nova_caixa">
+                        <i class="bi bi-plus-circle me-2"></i> Nova Caixa
+                    </div>
+                </div>
+            </template> -->
+        </div>
+
+        <div class="col-md-7">
+            <ul id="lista-anuncios">
+                {% for produto in dados.produtos %}
+                <li class="produto-item" data-original-sku="{{ produto.sku }}" data-sku="{{ produto.sku }}"
+                    data-id-ml="{{ produto.id_ml }}" data-gtin="{{ produto.gtin }}" data-id-tiny="{{ produto.id_tiny }}"
+                    data-unidades="{{ produto.unidades }}">
+                    <div class="produto-info">{{ produto.nome }}</div>
+                    <div class="produto-meta">
+                        <span class="sku">{{ produto.sku }}</span>
+                        <i class="bi bi-info-circle"></i>
+                        <span class="unidades">Unidades: {{ produto.unidades }}</span>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+
+            <div id="window-right">
+                <ul id="lista-anuncio-selecionado"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalSelecioneAnuncio" tabindex="-1" aria-labelledby="modalSelecioneAnuncioLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalSelecioneAnuncioLabel">Selecione o anúncio</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body" id="modalSelecioneAnuncioBody">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalConfirmeAnuncio" tabindex="-1" aria-labelledby="modalConfirmeAnuncioLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalConfirmeAnuncioLabel">Confirme o anúncio selecionado</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body" id="modalConfirmeAnuncioBody">
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="btnConfirmarAnuncio" class="btn btn-primary">Confirmar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<div id="js-data" data-comps='{{ comps | tojson | safe }}' style="display:none;"></div>
+<div id="placeholder-image" data-url="{{ url_for('static', filename='resources/sem_img.webp') }}"></div>
+{% endblock %}
+{% block scriptpath %}
+{{ url_for("static", filename="embalar/embalar.js") }}
+{% endblock %}

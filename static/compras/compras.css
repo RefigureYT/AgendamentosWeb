@@ -1,0 +1,244 @@
+body {
+    font-weight: 500;
+}
+
+/* --- Card Wrapper --- */
+.card {
+    border: none;
+    border-radius: 0.5rem;
+}
+
+.card-body {
+    padding: 0;
+}
+
+/* --- Estilos gerais de tabela --- */
+.table {
+    font-size: 0.95rem;
+    margin-bottom: 0;
+}
+
+.table-hover tbody tr:hover {
+    background-color: #f1f5f9;
+}
+
+/* --- Wrapper responsivo com cantos arredondados --- */
+.table-responsive {
+    overflow: hidden;
+    border-radius: 0.5rem;
+}
+
+.table-responsive table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+/* --- Cabeçalho azul + branco --- */
+.table thead {
+    background-color: #007bff;
+}
+
+.table thead th {
+    color: #fff;
+    border: none;
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+}
+
+/* --- Arredonda só o topo do thead --- */
+.table thead th:first-child {
+    border-top-left-radius: 0.5rem;
+}
+
+.table thead th:last-child {
+    border-top-right-radius: 0.5rem;
+}
+
+/* --- Listras “zebra” e células --- */
+.table tbody tr:nth-child(even) {
+    background-color: #fbfcfd;
+}
+
+.table td,
+.table th {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+}
+
+/* Melhorias visuais do dropdown */
+.dropdown-menu {
+    min-width: 200px;
+    font-size: 0.95rem;
+}
+
+.dropdown-menu .dropdown-item {
+    padding: 0.6rem 1rem;
+    transition: background 0.2s ease;
+}
+
+.dropdown-menu .dropdown-item:hover {
+    background-color: #f1f5f9;
+}
+
+input[type="number"] {
+    width: 70px;
+    padding: 4px 8px;
+    margin-top: 5px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    text-align: center;
+    font-weight: bold;
+    color: #333;
+    background-color: #f9f9f9;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+input[type="number"]:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+    outline: none;
+    background-color: #fff;
+}
+
+
+/* --- Responsividade para telas pequenas --- */
+@media screen and (max-width: 1024px) {
+    .table thead {
+        display: none;
+    }
+
+    .table tbody,
+    .table tr,
+    .table td {
+        display: block;
+        width: 100%;
+    }
+
+    .table tr {
+        margin-bottom: 1rem;
+        background: #fff;
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        padding: 0.75rem;
+    }
+
+    .table td {
+        padding: 1.5rem 1rem 0.5rem 1rem;
+        border: none;
+        text-align: left;
+        position: relative;
+    }
+
+    .table td::before {
+        content: attr(data-label);
+        position: absolute;
+        left: 1rem;
+        top: 0.5rem;
+        font-weight: bold;
+        color: #6c757d;
+        font-size: 0.85rem;
+        display: block;
+        width: 100%;
+        margin-bottom: 0.25rem;
+        color: #0D6EFD;
+    }
+}
+
+.input-wrapper {
+    display: inline-block;
+    position: relative;
+    max-width: 100%;
+}
+
+.input-wrapper input[type="number"] {
+    width: auto;
+    min-width: 60px;
+    max-width: 100px;
+    box-sizing: content-box;
+}
+
+.input-wrapper .input-mirror {
+    position: absolute;
+    top: 0;
+    left: 0;
+    visibility: hidden;
+    white-space: pre;
+    font-weight: bold;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 4px 8px;
+}
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+
+    #container-table,
+    #container-table * {
+        visibility: visible;
+    }
+
+    #container-table {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        overflow: visible !important;
+        max-height: none !important;
+    }
+
+    .table-responsive {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+
+    input[type="number"] {
+        border: none !important;
+        background: transparent !important;
+        font-weight: normal;
+        width: auto !important;
+    }
+
+    .input-wrapper .input-mirror {
+        display: none !important;
+    }
+}
+
+/* Esconde o cabeçalho de impressão na tela normal */
+.print-header {
+    display: none;
+}
+
+/* Estiliza o cabeçalho apenas na impressão */
+@media print {
+    .print-header {
+        display: block;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+
+    .print-logo {
+        max-width: 150px;
+        margin-bottom: 1rem;
+    }
+
+    .print-title {
+        font-size: 1.5rem;
+        font-weight: bold;
+    }
+}
+
+@media print {
+    .print-meta {
+        font-size: 0.9rem;
+        margin-top: -1rem;
+        margin-bottom: 2rem;
+        color: #444;
+    }
+
+    .print-meta span {
+        font-weight: bold;
+    }
+}

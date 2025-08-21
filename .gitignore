@@ -1,0 +1,12 @@
+.qodo
+__pycache__/
+__pycache__
+**/__pycache__
+venv/
+base_jp_lab/
+jp_bd.sql
+# Ignorar toda a pasta uploads
+uploads/*
+
+# Exceto o arquivo marcador
+!uploads/UPLOADS_DE_PDFS_VEM_AQUI

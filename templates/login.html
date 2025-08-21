@@ -1,0 +1,62 @@
+{% extends "base_template.html" %}
+
+{% block title %}Login{% endblock %}
+
+{% block stylepath %}
+{{ url_for('static', filename='login/login.css') }}
+{% endblock %}
+
+{% block content %}
+<div class="container vh-100">
+    <div class="row h-100 justify-content-center align-items-center">
+        <div class="col-12 col-sm-8 col-md-6 col-lg-4">
+            <div class="card shadow login-card">
+                <div class="card-body p-4">
+                    <div class="text-center mb-4">
+                        <img src="https://cdn-icons-png.flaticon.com/512/17468/17468680.png" class="avatar"
+                            alt="Avatar do usuário">
+                    </div>
+                    <form action="" method="post" novalidate>
+                        <div class="mb-3">
+                            <label for="usuario" class="form-label">Usuário</label>
+                            <input type="text" class="form-control" id="usuario" name="usuario"
+                                placeholder="Digite seu usuário" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="senha" class="form-label">Senha</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="senha" name="senha"
+                                    placeholder="Digite sua senha" required>
+                                <button class="btn btn-outline-secondary" type="button" id="togglePassword">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-success">Entrar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scriptpath %}
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="{{ url_for('static', filename='login/login.js') }}"></script>
+
+{% if login_error %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        Swal.fire({
+            icon: 'error',
+            title: 'Falha no login',
+            text: '{{ login_error }}',
+            confirmButtonText: 'Ok'
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{{ url_for('static', filename='alterar_agendamento/alt_agend.css') }}
+{% endblock %}
+
+{% block content %}
+<form id="form_alt" method="post" action="/alterar-agendamento">
+    <div class="row g-3">
+        <!-- <div class="col-md-6">
+            <label for="inp_col" class="form-label">Nome do colaborador:</label>
+            <input name="inp_col" id="inp_col" class="form-control" type="text" value="{{ dados.colaborador }}">
+        </div> -->
+
+        <input name="inp_ml" type="hidden" value="{{ dados.id_agend_ml }}">
+
+        <div class="col-md-6">
+            <label for="inp_mktp" class="form-label">Loja do agendamento:</label>
+            <select name="inp_mktp" id="inp_mktp" class="form-control">
+                <option value="4" {% if dados.id_mktp==4 %} selected {% endif %}>Amazon</option>
+                <option value="2" {% if dados.id_mktp==2 %} selected {% endif %}>Magalu</option>
+                <option value="1" {% if dados.id_mktp==1 %} selected {% endif %}>Mercado Livre</option>
+                <option value="3" {% if dados.id_mktp==3 %} selected {% endif %}>Shopee</option>
+            </select>
+        </div>
+
+        <div class="col-md-6">
+            <label for="inp_emp" class="form-label">Empresa do agendamento:</label>
+            <select name="inp_emp" id="inp_emp" class="form-control">
+                <option value="2" {% if dados.empresa==2 %} selected {% endif %}>Jaú Fishing</option>
+                <option value="3" {% if dados.empresa==3 %} selected {% endif %}>L.T. Sports</option>
+                <option value="1" {% if dados.empresa==1 %} selected {% endif %}>Jaú Pesca</option>
+            </select>
+        </div>
+
+        <div class="col-md-6">
+            <label for="inp_tipo" class="form-label">Fase do agendamento:</label>
+            <select name="inp_tipo" id="inp_tipo" class="form-control">
+                <option value="1" {% if dados.id_tipo==1 %} selected {% endif %}>Limpeza</option>
+                <option value="3" {% if dados.id_tipo==3 %} selected {% endif %}>Conferência</option>
+                <option value="4" {% if dados.id_tipo==4 %} selected {% endif %}>Embalar</option>
+                <option value="5" {% if dados.id_tipo==5 %} selected {% endif %}>Expedição</option>
+                <option value="2" {% if dados.id_tipo==2 %} selected {% endif %}>Finalizado</option>
+            </select>
+        </div>
+    </div>
+
+    <input name="inp_id" type="hidden" value="{{ dados.id_bd }}">
+
+    <div class="row mt-4">
+        <div class="col">
+            <input type="submit" class="btn btn-primary-custom w-100" value="Salvar Alterações"
+                style="background: #0B5ED7; color: white">
+        </div>
+    </div>
+</form>
+{% endblock %}
+
+{% block scriptpath %}
+{{ url_for('static', filename='alterar_agendamento/alt_agend.js') }}
+{% endblock %}

@@ -1,0 +1,376 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{{ url_for('static', filename='agendamentos/agendamentos.css') }}
+{% endblock %}
+
+{% block content %}
+<!-- Colaborador já logado -->
+<input type="hidden" id="nome_colaborador" value="{{ session.nome_display_usuario }}">
+<div class="container pt-4">
+
+    <!-- 1) Botão “Filtros” — só aparece em telas < md -->
+    <div class="d-md-none text-end mb-3">
+        <button class="btn btn-outline-primary new-agend" type="button" data-bs-toggle="collapse"
+            data-bs-target="#filterPanel" aria-expanded="false" aria-controls="filterPanel">
+            <i class="bi bi-funnel-fill"></i> Filtros
+        </button>
+    </div>
+
+    <!-- 2) Painel de filtros:
+     - collapse esconde em mobile
+     - d-md-block anula o collapse em ≥768px -->
+    <div class="collapse d-md-block card mb-4 p-3" id="filterPanel">
+        <div class="row g-3 row-cols-1 row-cols-sm-2 row-cols-md-4 new-agend mb-2">
+            <div class="col">
+                <label class="form-label">Status</label>
+                <select id="inp_status_pedido" class="form-select" onchange="setFiltros()">
+                    <option selected>Todos</option>
+                    <option value="1">Limpeza</option>
+                    <option value="3">Conferência</option>
+                    <option value="4">Embalar</option>
+                    <option value="5">Expedição</option>
+                    <option value="2">Finalizado</option>
+                </select>
+            </div>
+            <div class="col">
+                <label class="form-label">Empresa</label>
+                <select id="inp_emp_pedido" class="form-select" onchange="setFiltros()">
+                    <option selected>Todas</option>
+                    <option value="0">Nenhuma</option>
+                    <option value="1">Jaú Pesca</option>
+                    <option value="2">Jaú Fishing</option>
+                    <option value="3">L.T. Sports</option>
+                </select>
+            </div>
+            <div class="col">
+                <label class="form-label">Loja</label>
+                <select id="inp_mktp_pedido" class="form-select" onchange="setFiltros()">
+                    <option selected>Todas</option>
+                    <option value="1">Mercado Livre</option>
+                    <option value="2">Magalu</option>
+                    <option value="3">Shopee</option>
+                    <option value="4">Amazon</option>
+                </select>
+            </div>
+            <div class="col">
+                <label class="form-label">Nº Pedido</label>
+                <input id="inp_num_pedido" type="text" class="form-control" placeholder="Digite o número do pedido"
+                    oninput="setFiltros()">
+            </div>
+        </div>
+    </div>
+
+    <!-- 
+    <form action="/upload-excel" method="post" enctype="multipart/form-data">
+        <input type="file" name="file"
+            accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel">
+        <input type="submit" value="Upload">
+    </form>
+
+    <br><br> -->
+
+    <!-- Botão “Novo Agendamento” -->
+    <a href="/agendamentos/criar" class="card add-new-agendamento mb-3 text-center text-decoration-none">
+        <div class="card-body new-agend">
+            <i class="bi bi-plus-circle me-2"></i> Novo Agendamento
+        </div>
+    </a>
+
+
+    <div class="container p-1 list-scroll">
+        {% for agendamento in dados %}
+        <div class="card mb-3 agendamento-container emp-{{ agendamento.empresa }} tipo-{{ agendamento.id_tipo }} id-{{ agendamento.id_agend_ml }} id_mktp-{{ agendamento.id_mktp }}"
+            data-centro="{{ agendamento.centro_distribuicao or '' }}">
+            <div class="card-body d-block d-sm-flex justify-content-between align-items-center">
+                <div>
+                    <span class="badge
+                        {% if agendamento.id_tipo == 1 %} status-limpeza
+                        {% elif agendamento.id_tipo == 2 %} status-finalizado
+                        {% elif agendamento.id_tipo == 3 %} status-conferencia
+                        {% elif agendamento.id_tipo == 4 %} status-embalar
+                        {% elif agendamento.id_tipo == 5 %} status-expedicao
+                        {% else %} bg-dark
+                        {% endif %}">
+                        {% if agendamento.id_tipo == 1 %} LIMPEZA
+                        {% elif agendamento.id_tipo == 2 %} FINALIZADO
+                        {% elif agendamento.id_tipo == 3 %} CONFERÊNCIA
+                        {% elif agendamento.id_tipo == 4 %} EMBALAR
+                        {% elif agendamento.id_tipo == 5 %} EXPEDIÇÃO
+                        {% else %} ERRO
+                        {% endif %}
+                    </span> |
+
+                    <strong>Pedido:</strong> <span class="pedido-numero">{{ agendamento.id_agend_ml }}</span> |
+
+                    {% if agendamento.empresa is none %}
+                    <span class="text-primary">Nenhuma</span> |
+                    {% else %}
+                    <span class="badge
+                        {% if agendamento.empresa == 0 %}empresa-nenhuma
+                        {% elif agendamento.empresa == 1 %}empresa-jaupesca
+                        {% elif agendamento.empresa == 2 %}empresa-jaufishing
+                        {% elif agendamento.empresa == 3 %}empresa-ltsports
+                        {% else %}bg-dark{% endif %}">
+                        {% if agendamento.empresa == 0 %}
+                        Nenhuma
+                        {% elif agendamento.empresa == 1 %}
+                        Jaú Pesca
+                        {% elif agendamento.empresa == 2 %}
+                        Jaú Fishing
+                        {% elif agendamento.empresa == 3 %}
+                        L.T. Sports
+                        {% else %}
+                        Erro
+                        {% endif %}
+                    </span> |
+                    {% endif %}
+
+                    {% if agendamento.id_mktp is none %}
+                    <span class="text-primary">Nenhuma</span> |
+                    {% else %}
+                    <span class="badge
+                        {% if agendamento.id_mktp == 1 %}id_mktp-mercadolivre
+                        {% elif agendamento.id_mktp == 2 %}id_mktp-magalu
+                        {% elif agendamento.id_mktp == 3 %}id_mktp-shopee
+                        {% elif agendamento.id_mktp == 4 %}id_mktp-amazon
+                        {% else %}bg-dark{% endif %}">
+                        {% if agendamento.id_mktp == 1 %}
+                        Mercado Livre
+                        {% elif agendamento.id_mktp == 2 %}
+                        Magalu
+                        {% elif agendamento.id_mktp == 3 %}
+                        Shopee
+                        {% elif agendamento.id_mktp == 4 %}
+                        Amazon
+                        {% else %}
+                        Erro
+                        {% endif %}
+                    </span> |
+                    {% endif %}
+
+                    <strong>Colaborador:</strong>
+                    {% if agendamento.colaborador == '' %}
+                    <span class="text-primary">Nenhum</span>
+                    {% else %}
+                    {% set my_list = agendamento.colaborador.split(' ') %}
+                    {% if my_list|length >= 2 %}
+                    <span class="text-primary">{{ my_list[0] }} {{ my_list[1][0] }}.</span>
+                    {% else %}
+                    <span class="text-primary">{{ my_list[0] }}</span>
+                    {% endif %}
+                    {% endif %}
+                </div>
+
+                <div class="d-flex flex-wrap justify-content-end flex-md-nowrap flex-md-row gap-2">
+
+                    <!-- Botão excluir -->
+                    <button class="btn btn-outline-danger btn-sm" onclick="iniciarExclusao('{{ agendamento.id_bd }}')"
+                        title="Excluir Agendamento">
+                        <i class="bi bi-eraser"></i>
+                    </button>
+
+                    <!-- Botão composição -->
+                    <a class="btn btn-outline-secondary btn-sm" href="/imprimir-comp/{{ agendamento.id_bd }}"
+                        title="Imprimir composição">
+                        <i class="bi bi-box-seam"></i>
+                    </a>
+
+                    <!-- Botão visualizar -->
+                    <a class="btn btn-outline-secondary btn-sm"
+                        href="/retirado?id={{ agendamento.id_bd }}&tipo={{ agendamento.id_tipo }}&mudar=False"
+                        title="Visualizar">
+                        <i class="bi bi-eye"></i>
+                    </a>
+
+                    <!-- Botão editar -->
+                    <button class="btn btn-outline-secondary btn-sm"
+                        onclick="abrirModalAlteracoes('{{ agendamento.id_bd }}')" title="Editar">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+
+                    <!-- Botão atualizar-->
+                    <button class="btn btn-outline-secondary btn-sm"
+                        onclick="abrirModalAtualizarPDF('{{ agendamento.id_bd }}', '{{ agendamento.id_agend_ml }}')"
+                        id="btn-modal--{{ agendamento.id_bd }}--" title="Atualizar PDF do Pedido">
+                        <i class="bi bi-arrow-repeat"></i>
+                    </button>
+
+
+                    <!-- Botão iniciar -->
+                    {% if agendamento.empresa == 0 and agendamento.colaborador == '' %}
+                    <button type="button" id="btn-modal--{{ agendamento.id_bd }}--{{ agendamento.id_tipo }}"
+                        class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalSelecionarEmpresa"
+                        onclick="changeIdAgendamento(this)">
+                        Começar
+                    </button>
+                    {% else %}
+                    <button type="button" id="btn-modal--{{ agendamento.id_bd }}--{{ agendamento.id_tipo }}"
+                        class="btn btn-primary btn-sm" onclick="continuePhase(this)">
+                        Continuar
+                    </button>
+                    {% endif %}
+                </div>
+
+            </div>
+        </div>
+
+        {% endfor %}
+    </div>
+
+    <!-- Modal Selecionar Empresa -->
+    <!-- MODAL 1: Selecionar empresa -->
+    <div class="modal fade" id="modalSelecionarEmpresa" tabindex="-1" aria-labelledby="modalSelecionarEmpresaLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content text-center">
+                <div class="modal-header justify-content-between">
+                    <h5 class="modal-title" id="modalSelecionarEmpresaLabel">Selecione a empresa</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- <h5 class="fw-bold">Antes de colocar a empresa, confirme o número do agendamento</h5>
+
+                    <div id="modal-emp-agend" class="bg-primary text-white py-2 mb-3 fw-bold rounded">
+                    </div>
+
+                    <p class="text-muted">Por favor selecione a empresa</p> -->
+
+                    <select id="nome_empresa" class="form-select mb-3">
+                        <option selected disabled>Selecione a empresa</option>
+                        <option value=2>Jaú Fishing</option>
+                        <option value=3>L.T. Sports</option>
+                        <option value=1>Pesca Jaú</option>
+                    </select>
+
+                    <button class="btn btn-secondary" onclick="abrirModalMarketplace()">OK</button>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: Selecionar Marketplace -->
+    <div class="modal fade" id="modalSelecionarMarketplace" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-center">
+                <div class="modal-header">
+                    <h5 class="modal-title">Selecione o Marketplace</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- <h5 class="fw-bold">Confirme o número do agendamento</h5>
+                    <div id="modal-mktp-agend" class="bg-primary text-white py-2 mb-3 fw-bold rounded"></div> -->
+                    <select id="nome_marketplace" class="form-select mb-3">
+                        <option selected disabled>Selecione o Marketplace</option>
+                        <option value=4>Amazon</option>
+                        <option value=2>Magalu</option>
+                        <option value=1>Mercado Livre</option>
+                        <option value=3>Shopee</option>
+                    </select>
+
+                    <button class="btn btn-secondary" onclick="abrirModalAgendamento()">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalCentroDistribuicao" tabindex="-1" aria-labelledby="modalCentroDistribuicaoLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-center">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalCentroDistribuicaoLabel">Escolher Centro de Distribuição</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <select id="nome_centro_distribuicao" class="form-select mb-3">
+                        <option selected disabled>Selecione o centro</option>
+                        <option value="BRSP11">Guarulhos – BRSP11</option>
+                        <option value="BRRC02">Sumaré – BRRC02</option>
+                        <option value="BRRC01">Perus – BRRC01</option>
+                        <option value="BRSP10">SP10 – BRSP10</option>
+                        <option value="SP06">Araçariguama – SP06</option>
+                    </select>
+                    <button class="btn btn-secondary" onclick="confirmarCentro()">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: Tipo de Agendamento -->
+    <div class="modal fade" id="modalTipoAgendamento" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-center">
+                <div class="modal-header">
+                    <h5 class="modal-title">Tipo de Agendamento</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <select id="nome_tipo" class="form-select mb-3">
+                        <option selected disabled>Selecione o agendamento</option>
+                        <option value=1>Limpeza</option>
+                        <option value=3>Conferência</option>
+                        <option value=4>Embalar</option>
+                        <option value=5>Expedição</option>
+                    </select>
+                    <button class="btn btn-secondary" onclick="abrirModalUpload()">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 5: Upload (PDF ou Excel) -->
+    <div class="modal fade" id="modalUploadPdf" tabindex="-1" aria-labelledby="modalUploadPdfLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-center">
+                <div class="modal-header justify-content-between">
+                    <h5 class="modal-title" id="modalUploadPdfLabel">Upload do Pedido</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small" id="upload_help_text">Selecione o arquivo para upload:</p>
+                    <div id="info-atualizacao-pdf" class="mb-2 text-start text-muted small" style="display: none;">
+                    </div>
+                    <form id="form_upload_pdf" action="/upload-pdf" method="POST" enctype="multipart/form-data">
+                        <input type="file" name="path" accept="application/pdf" class="form-control mb-3" required>
+                        <!-- hidden inputs preenchidos pelos modais anteriores -->
+                        <input type="hidden" name="id_bd" id="upload_id_bd">
+                        <input type="hidden" name="colaborador" id="upload_colaborador"
+                            value="{{ session.nome_display_usuario }}">
+                        <input type="hidden" name="empresa" id="upload_empresa">
+                        <input type="hidden" name="marketplace" id="upload_marketplace">
+                        <input type="hidden" name="centro_distribuicao" id="inp_centro_distribuicao">
+                        <input type="hidden" name="tipo" id="upload_tipo">
+                        <button type="submit" class="btn btn-primary w-100">Enviar PDF</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <div class="modal fade" id="modalEditarAgendamento" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-body text-center">
+                    <div id="editarAgendamentoContent">Carregando...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form id="form_retirado" action="/agendamentos/criar" method="POST" style="display: none;">
+        <input type="text" id="inp_id_pedido" name="inp_id_pedido">
+        <input type="text" id="inp_tipo_pedido" name="inp_tipo_pedido">
+        <input type="text" id="inp_nome_emp" name="inp_nome_emp">
+        <input type="text" id="inp_nome_col" name="inp_nome_col">
+        <input type="text" id="inp_mktp_pedido" name="inp_mktp_pedido">
+    </form>
+
+    {% endblock %}
+
+    {% block scriptpath %}
+    {{ url_for('static', filename='agendamentos/agendamentos.js') }}
+    {% endblock %}

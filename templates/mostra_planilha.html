@@ -1,0 +1,11 @@
+{% extends "base_template.html" %}
+
+{% block content %}
+<div class="container pt-4">
+    <h2>Visualização da Planilha Excel</h2>
+    <div class="table-responsive">
+        {{ html_table | safe }}
+    </div>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mt-4">Voltar</a>
+</div>
+{% endblock %}

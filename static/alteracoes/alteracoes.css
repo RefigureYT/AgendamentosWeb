@@ -1,0 +1,144 @@
+body {
+    font-weight: 500;
+}
+
+/* Card Wrapper */
+.card {
+    border: none;
+    border-radius: 0.5rem;
+}
+
+.card-body {
+    padding: 0;
+}
+
+/* Table Base Styles */
+.table {
+    font-size: 0.95rem;
+    margin-bottom: 0;
+}
+
+.table-responsive {
+    overflow-x: auto;
+    /* permite scroll lateral sempre que necessário */
+    border-radius: 0.5rem;
+}
+
+.table-responsive table {
+    border-collapse: separate;
+    border-radius: 0.5rem 0.5rem 0 0;
+}
+
+/* Header: blue background + white text */
+.table thead {
+    background-color: #007bff;
+}
+
+.table thead th {
+    color: #fff;
+    border: none;
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+}
+
+/* Zebra stripes & hover */
+.table tbody tr:nth-child(even) {
+    background-color: #fbfcfd;
+}
+
+.table tbody tr:hover {
+    background-color: #f1f5f9;
+}
+
+.table td,
+.table th {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+}
+
+/* “Abrir no Tiny” link */
+.tiny-link {
+    color: #4da6ff;
+    text-decoration: none;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+}
+
+.tiny-link i {
+    margin-right: 4px;
+    font-size: 1em;
+}
+
+.tiny-link:hover {
+    text-decoration: underline;
+    color: #4091e8;
+}
+
+/* REMOVIDO: bloco @media que transformava em cards no mobile */
+
+/* Garante que a tabela permita cantos arredondados */
+.table-responsive table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+/* Aplica raio apenas nos cantos superiores */
+.table thead th:first-child {
+    border-top-left-radius: 0.5rem;
+}
+
+.table thead th:last-child {
+    border-top-right-radius: 0.5rem;
+}
+
+/* Para que o wrapper "corte" corretamente os cantos da tabela */
+.table-responsive {
+    overflow: hidden;
+    border-radius: 0.5rem;
+}
+
+@media (max-width: 768px) {
+    .table thead {
+        display: none;
+        /* esconde os headers */
+    }
+
+    .table tbody,
+    .table tr,
+    .table td {
+        display: block;
+        width: 100%;
+    }
+
+    .table tr {
+        margin-bottom: 1rem;
+        background: #fff;
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        padding: 0.75rem;
+    }
+
+    .table td {
+        padding: 0.5rem 1rem;
+        border: none;
+        text-align: left;
+        position: relative;
+    }
+
+    .table td::before {
+        content: attr(data-label);
+        position: absolute;
+        left: 1rem;
+        top: 0.5rem;
+        font-weight: bold;
+        color: #6c757d;
+        font-size: 0.85rem;
+        color: #0D6EFD;
+    }
+
+    .table td {
+        padding-left: 7rem;
+        /* espaço para o label */
+    }
+}

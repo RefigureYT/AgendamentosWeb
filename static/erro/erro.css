@@ -1,0 +1,43 @@
+.erro-container {
+    height: 80vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background-color: #fff;
+}
+
+.erro-titulo {
+    text-shadow: -5px 5px 0px #0E2C76;
+    font-size: 10rem;
+    font-weight: bold;
+    color: #fbbf24;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.erro-mensagem {
+    font-size: 1.8rem;
+    color: #0d2d75;
+    font-weight: 700;
+}
+
+#err-title {
+    color: black;
+
+}
+
+#err-msg-pri {
+    font-weight: bold;
+}
+
+#err-msg-sec {
+    font-weight: bold;
+}
+
+#err-code {
+    font-weight: 400;
+}

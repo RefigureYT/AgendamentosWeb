@@ -1,0 +1,19 @@
+{% extends "base_template.html" %}
+
+{% block content %}
+    {% for i in dados %}
+        {{ i.id_bd}} // {{ i.id_agend_ml }}
+        <br>
+        {% for produto in i.produtos  %}
+            {% for composicao in produto.composicao %}
+                {{ composicao.nome }}
+                <br>
+            {% endfor %}
+            <br>
+        {% endfor %}
+        <br>
+        <br>
+        <br>
+    {% endfor %}
+    
+{% endblock %}

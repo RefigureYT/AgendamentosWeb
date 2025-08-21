@@ -1,0 +1,25 @@
+body {
+    background-color: #e9f1fb;
+}
+
+.display-hidden {
+    display: none;
+}
+
+a {
+    text-decoration: underline;
+    color: black;
+}
+
+.rotated {
+    transform: rotate(180deg);
+}
+
+.header-bar {
+    background-color: #007bff;
+    color: white;
+    padding: 10px;
+    font-weight: bold;
+    border-radius: 4px 4px 0 0;
+    margin-bottom: 10px;
+}

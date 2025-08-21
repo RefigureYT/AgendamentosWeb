@@ -1,0 +1,104 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{{ url_for('static', filename='expedicao/expedicao.css') }}
+{% endblock %}
+
+{% block content %}
+<div class="container pt-4">
+    <div class="header-bar mb-3 p-3 rounded bg-primary text-white" data-id-ml="{{ dados_agend.id_agend_ml }}"
+        data-id-bd="{{ dados_agend.id_bd }}">
+        <h5 class="mb-2">Expedição</h5>
+        <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
+            <div>
+                <strong style="color: #FDD484;">Empresa:</strong>
+                {% if dados_agend.empresa == 0 %}Nenhuma
+                {% elif dados_agend.empresa == 1 %}Jaú Pesca
+                {% elif dados_agend.empresa == 2 %}Jaú Fishing
+                {% elif dados_agend.empresa == 3 %}L.T. Sports
+                {% endif %}
+            </div>
+            <div>
+                <strong style="color: #FDD484;">Agendamento:</strong>
+                {{ dados_agend.id_agend_ml }}
+            </div>
+            <div>
+                <strong style="color: #FDD484;">Colaborador:</strong>
+                {{ dados_agend.colaborador or 'Nenhum' }}
+            </div>
+            {% set data = dados_agend.entrada %}
+            <div>
+                <strong style="color: #FDD484;">Data:</strong>
+                {{ data.strftime('%d/%m/%y') }}
+            </div>
+            <div>
+                <strong style="color: #FDD484;">Hora:</strong>
+                {{ data.strftime('%Hh%M') }}
+            </div>
+        </div>
+    </div>
+
+    <h4>Caixas para Expedir</h4>
+
+    <div>
+        {% if caixas %}
+        <div class="row row-cols-1 row-cols-md-4 g-4 mt-1"
+            style="max-height: 62vh !important; overflow-y: auto !important; padding-bottom: 1rem;">
+            {% for caixa in caixas %}
+            <div class="col">
+                <div class="card h-100 shadow-sm caixa-card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">Caixa #{{ caixa.caixa_num }}</h6>
+                        <img class="card-icon" src="{{ url_for('static', filename='resources/caixa.png') }}" width="32"
+                            height="32" alt="Ícone da caixa">
+                    </div>
+                    <div class="card-body d-flex flex-column justify-content-center align-items-center text-center">
+                        <div class="info-item mb-2">
+                            <span class="badge bg-secondary rounded-pill fs-6">{{ caixa.itens|length }} tipo(s) de
+                                produto</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="badge bg-primary rounded-pill fs-6">{{ caixa.total_unidades }} unidade(s) no
+                                total</span>
+                        </div>
+                    </div>
+                    <div class="card-footer text-end bg-white border-top-0 pt-0">
+                        <button class="btn btn-outline-secondary btn-sm js-visualizar-itens"
+                            data-caixa='{{ caixa | tojson | safe }}'>
+                            <i class="bi bi-eye"></i> Visualizar Itens
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="alert alert-warning text-center" role="alert">
+            <i class="bi bi-info-circle-fill me-2"></i>
+            Nenhuma caixa foi registrada para este agendamento no processo de embalagem.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="modal fade" id="modalDetalhesCaixa" tabindex="-1" aria-labelledby="modalDetalhesCaixaLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalDetalhesCaixaLabel">Detalhes da Caixa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body" id="modalDetalhesCaixaBody">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="js-data-produtos" data-produtos='{{ todos_os_produtos_json | safe }}' style="display: none;"></div>
+<div id="js-data-placeholder" data-url="{{ url_for('static', filename='resources/sem_img.webp') }}"
+    style="display: none;"></div>
+{% endblock %}
+{% block scriptpath %}
+{{ url_for('static', filename='expedicao/expedicao.js') }}
+{% endblock %}

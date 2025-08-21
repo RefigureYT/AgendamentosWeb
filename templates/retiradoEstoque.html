@@ -1,0 +1,134 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{{ url_for('static', filename='retiradoEstoque/retiradoEstoque.css') }}
+{% endblock %}
+
+{% block content %}
+<br>
+<div class="container">
+  <!-- Header -->
+  <div>
+    <div class="header-bar bg-primary text-white p-3 rounded mb-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Retirada do estoque</h5>
+        <button id="btnToggleRetirada" class="btn btn-link text-white p-0 d-block d-md-none" type="button"
+          data-bs-toggle="collapse" data-bs-target="#detalhesRetirada" aria-expanded="false"
+          aria-controls="detalhesRetirada">
+          <i class="bi bi-chevron-down fs-4"></i>
+        </button>
+      </div>
+      <div id="detalhesRetirada" class="collapse d-md-block mt-3">
+        <div class="d-flex flex-wrap align-items-center gap-3">
+          <div>
+            <strong style="color: #FDD484;">Empresa:</strong>
+            {% if dados_agend.empresa == 0 %}Nenhuma
+            {% elif dados_agend.empresa == 1 %}Jaú Pesca
+            {% elif dados_agend.empresa == 2 %}Jaú Fishing
+            {% elif dados_agend.empresa == 3 %}L.T. Sports
+            {% endif %}
+          </div>
+          <div><strong style="color: #FDD484;">Agendamento:</strong> {{ dados_agend.id_agend_ml }}</div>
+          <div><strong style="color: #FDD484;">Colaborador:</strong> {{ dados_agend.colaborador or 'Nenhum' }}</div>
+          {% set data = dados_agend.entrada %}
+          <div><strong style="color: #FDD484;">Data:</strong> {{ data.strftime('%d/%m/%y') }}</div>
+          <div><strong style="color: #FDD484;">Hora:</strong> {{ data.strftime('%Hh%M') }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main row -->
+  <div class="row">
+    <!-- Coluna de inputs e indicadores -->
+    <div class="col-md-5">
+      <div class="mb-3">
+        <div class="row">
+          <div class="col">
+            <label class="form-label fw-bold">Código ou SKU</label>
+            <input type="text" id="skuInput" class="form-control" placeholder="Digite aqui" {% if not pode_mudar
+              %}disabled{% endif %}>
+          </div>
+          <div class="col">
+            <label class="form-label fw-bold">Insira a quantidade</label>
+            <input type="number" id="quantidadeInput" class="form-control" value="1" min="1" {% if not pode_mudar
+              %}disabled{% endif %}>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between flex-wrap gap-3 p-3 mb-3 border rounded bg-white">
+        <p id="tempoP" class="mb-0"><strong>🕒 Tempo:</strong> 00h 00m 00s</p>
+        <p id="andamentoP" class="mb-0"><strong>🔄 Em andamento:</strong> Nenhum</p>
+        <p id="estimadoP" class="mb-0"><strong>⏳ Estimado:</strong> 00h 45m 00s</p>
+        <p id="finalizadosP" class="mb-0"><strong>✅ Finalizados:</strong> Nenhum</p>
+        <div id="finalizarContainer" class="d-none mt-2 w-100">
+          <button id="btnFinalizar" class="btn btn-outline-success btn-lg w-100" onclick="finalizarAgendamento()">
+            <i class="bi bi-check-circle me-2"></i>Finalizar Agendamento
+          </button>
+        </div>
+      </div>
+
+      <!-- Bloco para itens concluídos -->
+      <div id="concluidosContainer" class="info-box mb-3 overflow-auto" style="max-height: 30vh;">
+        <!-- JS injeta aqui os itens com bipados >= total -->
+         <!-- <button style="width: 200px; height: 30px;" onclick="transferirEstoque();">CLICK MEEEEEEEE</button> -->
+      </div>
+    </div>
+
+    <!-- Lista de produtos pendentes -->
+    <div class="col-md-7">
+      <div id="pendentesContainer" class="overflow-auto" style="max-height: 70vh;">
+        {% for composicao in dados %}
+        <div class="produto-item d-flex flex-column mb-3 me-2" 
+          data-sku="{{ composicao.sku }}" 
+          data-gtin=""
+          data-total="{{ composicao.unidades_totais }}" 
+          data-bipados="0">
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="text-truncate d-inline-block w-100" style="max-width: 400px;" title="{{ composicao.nome }}">
+              {{ composicao.comp_origem[0].nome }}
+            </span>
+            <div id="btnEquivalente-{{ composicao.sku }}" onclick="adicionarEquivalente('{{ composicao.sku }}');"
+              style="width: 25px; height: 25px; font-size: 40px; color: red; margin-top: -40px;"> + </div>
+            <div id="equivalente-{{ composicao.sku }}" class="input-equivalente-off"
+              style="width: 300px; height: 30px; border: 2px solid red;">
+              <input id="inputEquivalente-{{ composicao.sku }}" type="text">
+            </div>
+            <div class="d-flex align-items-center gap-3">
+              <span class="text-success">{{ composicao.sku }}</span>
+              <span class="bipados text-nowrap">Bipados: 0</span>
+            </div>
+          </div>
+          <div class="progress mt-2" style="height: 12px;">
+            <div class="progress-bar bg-warning text-secondary" role="progressbar" style="width: 0%;" aria-valuenow="0"
+              aria-valuemin="0" aria-valuemax="{{ composicao.unidades_totais }}">
+              0%
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Exemplo de ERRO ao buscar um produto equivalente -->
+  <div id="erroBuscaEquivalenteDiv" class="input-equivalente-off"
+    style="position: fixed; border: 1px solid red; width: 100px; height: 100px" ;></div>
+
+  <!-- Esse daqui é para substituir o modal que mostra o produto bipado como Equivalente -->
+  <div id="confirmaEquivalente" class="input-equivalente-off" style="border: 3px solid red; width: 500px; height: 650px; position: fixed; top: 25%; left: 40%; background-color: white;"></div>
+</div>
+<div id="js-data" data-comps='{{ comps | tojson | safe }}' data-dados="{{ dados }}" style="display:none;"></div>
+<div id="infoAgend" 
+  data-empresa='{{ dados_agend.empresa }}' 
+  data-agendamento='{{ dados_agend.id_agend_ml }}'
+  data-colaborador='{{ dados_agend.colaborador or ' Nenhum' }}' 
+  data-marketplace='{{ marketplace_nome }}'
+  style="display: none;"></div>
+{% endblock %}
+
+{% block scriptpath %}
+{{ url_for('static', filename='retiradoEstoque/retiradoEstoque.js') }}
+{% endblock %}

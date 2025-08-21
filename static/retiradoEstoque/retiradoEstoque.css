@@ -1,0 +1,112 @@
+body {
+  background-color: #e9f1fb;
+}
+
+.titulo-vermelho {
+  color: #e63946 !important;
+}
+
+.produto-item {
+  background-color: #f8f9fa;
+  border: 1px solid #ccc;
+  padding: 10px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
+.header-bar {
+  background-color: #007bff;
+  color: white;
+  padding: 10px;
+  font-weight: bold;
+  border-radius: 4px 4px 0 0;
+  margin-bottom: 10px;
+}
+
+.info-box {
+  background-color: #f8f9fa;
+  border: 1px solid #ccc;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.input-equivalente-off {
+  display: none;
+}
+
+  .toast-container {
+    position: fixed;
+    inset: auto 16px 16px auto; /* bottom-right */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    z-index: 9999;
+    pointer-events: none; /* só o toast recebe clique */
+  }
+
+  .toast {
+    pointer-events: auto;
+    background: #fff;
+    color: #0f172a;
+    border: 1px solid #e5e7eb;
+    border-left: 6px solid var(--accent, #3b82f6);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(2, 6, 23, 0.15);
+    padding: 12px 14px;
+    max-width: min(420px, calc(100vw - 40px));
+    width: fit-content;
+    font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    position: relative;
+    overflow: hidden;
+  }
+
+  .toast--info    { --accent: #3b82f6; } /* azul */
+  .toast--success { --accent: #16a34a; } /* verde */
+  .toast--warning { --accent: #f59e0b; } /* amarelo */
+  .toast--error   { --accent: #ef4444; } /* vermelho */
+
+  .toast__message {
+    white-space: pre-wrap; /* mantém \n */
+    word-wrap: break-word;
+  }
+
+  .toast__close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    border: 0;
+    background: transparent;
+    font-size: 16px;
+    line-height: 1;
+    color: #64748b;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+  }
+  .toast__close:hover { background: rgba(100,116,139,.1); }
+
+  /* barra de progresso reversa (100% -> 0%) */
+  .toast__progress {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 3px;
+    background: var(--accent, #3b82f6);
+    transform-origin: left;
+    animation: toastShrink var(--dur, 2s) linear forwards;
+  }
+  @keyframes toastShrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+  /* Dark mode automático */
+  @media (prefers-color-scheme: dark) {
+    .toast {
+      background: #0b1020;
+      color: #e5e7eb;
+      border-color: #1f2937;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    .toast__close { color: #94a3b8; }
+    .toast__close:hover { background: rgba(148,163,184,.12); }
+  }

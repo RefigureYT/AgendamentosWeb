@@ -1,0 +1,92 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{{ url_for('static', filename='imprimir_composicoes/imprimir_composicoes.css') }}
+{% endblock %}
+
+{% block content %}
+<div class="container p-4">
+    <div class="header-bar bg-primary text-white p-3 rounded mb-2">
+        <div class="d-flex justify-content-between align-items-center">
+            <!-- Título sempre visível -->
+            <h5 class="mb-0 id-{{ agendamento.id_agend_ml }}">Composição - Pedido {{ agendamento.id_agend_ml }}</h5>
+            <div class="dropdown">
+                <button class="btn btn-outline-light d-flex align-items-center gap-2 dropdown-toggle px-3 py-2"
+                    type="button" id="dropdownMenuDownload" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-download"></i> Baixar
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm rounded-3 animate__animated animate__fadeIn"
+                    aria-labelledby="dropdownMenuDownload">
+                    <li>
+                        <button class="dropdown-item d-flex align-items-center gap-2" href="#"
+                            onclick="turnTableDataToJson('csv')">
+                            <i class="bi bi-filetype-csv"></i> CSV
+                        </button>
+                    </li>
+                    <li>
+                        <button class="dropdown-item d-flex align-items-center gap-2" href="#"
+                            onclick="turnTableDataToJson('excel')">
+                            <i class="bi bi-file-earmark-excel"></i> Excel
+                        </button>
+                    </li>
+                    <li>
+                        <button class="dropdown-item d-flex align-items-center gap-2" href="#" onclick="window.print()">
+                            <i class="bi bi-printer"></i> Imprimir
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <!-- src="{{ url_for('static', filename='/resources/logo.png') }}" -->
+        </div>
+    </div>
+    <div id="container-table" class="card-body p-0">
+        <div class="print-header">
+            <img src="{{ url_for('static', filename='/resources/logo.png') }}" alt="Logo" class="print-logo">
+            <h2 class="print-title id-{{ agendamento.id_agend_ml }}" style="margin-bottom: 15px;">Composição - Pedido {{
+                agendamento.id_agend_ml }}</h2>
+            <div class="print-meta" style="margin-bottom: 10px;">
+                <span id="data-hoje"></span> &nbsp;|&nbsp;
+                <span id="nome-colaborador">{{ agendamento.colaborador }}</span>
+            </div>
+        </div>
+        <div class="table-responsive" style="max-height:70vh; overflow-y:auto;">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Nome</th>
+                        <th>Total</th>
+                        <th class="hdr-loc">Localização</th>
+                        <th class="hdr-151i">Inferior</th>
+                        <th class="hdr-151m">Mezanino</th>
+                        <th class="hdr-cx">Caixa</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for composicao in comps %}
+                    <tr>
+                        <td class="print-font">{{ composicao.sku }}</td>
+                        <td class="print-font" id_tiny="{{ composicao.id_tiny }}">{{ composicao.comp_origem[0].nome }}
+                        </td>
+                        <td class="print-position">{{ composicao.unidades_totais }}</td>
+
+                        {% if composicao.comp_origem[0].localizacao == "" %}
+                        <td class="print-font">Nenhum</td>
+                        {% else %}
+                        <td class="print-position  print-font">{{ composicao.comp_origem[0].localizacao }}</td>
+                        {% endif %}
+
+                        <td class="print-position" id="qnt-151i">Buscando...</td>
+                        <td class="print-position" id="qnt-151m">Buscando...</td>
+                        <td class="print-position" id="qnt-177">Buscando...</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endblock %}
+
+    {% block scriptpath %}
+    {{ url_for('static', filename='imprimir_composicoes/imprimir_composicoes.js') }}
+    {% endblock %}

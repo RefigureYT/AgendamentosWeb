@@ -1,0 +1,37 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{# Você pode adicionar um CSS específico se precisar #}
+<style>
+    .table-container { 
+        max-height: 80vh; 
+        overflow: auto; 
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        background-color: white;
+        padding: 1rem;
+        border-radius: 8px;
+    }
+    h1 {
+        border-bottom: 2px solid #dee2e6; 
+        padding-bottom: 10px; 
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid pt-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>Conteúdo do Arquivo: <span class="text-primary">{{ filename }}</span></h1>
+        <a href="{{ url_for('agendamentos', acao='ver') }}" class="btn btn-secondary">Voltar aos Agendamentos</a>
+    </div>
+
+    <div class="table-container my-3">
+        {{ data_table|safe }}
+    </div>
+</div>
+{% endblock %}
+
+{% block scriptpath %}
+{# Você pode adicionar um JS específico se precisar #}
+{% endblock %}

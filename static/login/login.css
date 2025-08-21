@@ -1,0 +1,32 @@
+/* esconde a navbar herdada do base_template */
+nav {
+    display: none !important;
+}
+
+/* garante altura total da viewport, fundo claro */
+body {
+    min-height: 100vh;
+    background-color: #f2f7fb;
+}
+
+/* cartão centralizado */
+.login-card {
+    border: none;
+    border-radius: 0.5rem;
+}
+
+/* avatar circular */
+.avatar {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 50%;
+    border: 3px solid #2c3e50;
+    background-color: #fff;
+    padding: 5px;
+}
+
+/* .input-group .btn {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+} */

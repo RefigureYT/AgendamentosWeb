@@ -1,0 +1,251 @@
+/* embalar.css - Estilos para a página de embalagem */
+
+body {
+  background-color: #e9f1fb;
+}
+
+/* --- CABEÇALHO --- */
+.header-bar {
+  background-color: #0D6EFD;
+  color: #fff;
+  font-weight: bold;
+}
+
+.header-bar h5 {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.header-bar strong {
+  color: #FDD484;
+}
+
+/* --- LISTA DE PRODUTOS PRINCIPAL (DIREITA) --- */
+#lista-anuncios {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 68vh;
+  /* Aumentei um pouco para ocupar mais espaço vertical */
+  overflow-y: auto;
+}
+
+#lista-anuncios .produto-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  transition: background-color 0.3s ease-in-out;
+}
+
+#lista-anuncios .produto-info {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 1rem;
+}
+
+#lista-anuncios .produto-meta {
+  flex-shrink: 0;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+#lista-anuncios .produto-meta .sku {
+  color: #28a745;
+  font-weight: 400;
+}
+
+#lista-anuncios .produto-meta .sku.etiqueta {
+  color: #0D6EFD !important;
+}
+
+#lista-anuncios .produto-item.produto-concluido {
+  background-color: #198754;
+  color: white;
+  border-color: #146c43;
+}
+
+#lista-anuncios .produto-item.produto-concluido .produto-info,
+#lista-anuncios .produto-item.produto-concluido .produto-meta,
+#lista-anuncios .produto-item.produto-concluido .produto-meta .sku,
+#lista-anuncios .produto-item.produto-concluido .bi-info-circle {
+  color: white !important;
+}
+
+/* --- CAIXAS (ESQUERDA) --- */
+#caixas-container {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.caixa-card {
+  transition: all 0.3s ease-in-out;
+  border: 1px solid #dee2e6;
+}
+
+.caixa-aberta {
+  border-color: #0d6efd;
+  border-width: 2px;
+  box-shadow: 0 4px 12px rgba(13, 110, 253, 0.25);
+}
+
+.caixa-aberta .card-header {
+  background-color: #0d6efd;
+  color: white;
+  font-weight: bold;
+}
+
+.caixa-fechada {
+  background-color: #f8f9fa;
+}
+
+.caixa-fechada .card-header {
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
+.caixa-vazia-mensagem {
+  color: #6c757d;
+  font-style: italic;
+  text-align: center;
+  padding: 1rem;
+}
+
+.item-caixa-novo {
+  animation: flash-animation 0.7s ease;
+}
+
+@keyframes flash-animation {
+  0% {
+    background-color: #cfe2ff;
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+.add-new-box {
+  margin: 0px 10px 15px 0px;
+  border: 2px dashed #6c757da1;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.add-new-box:hover {
+  background-color: #f8f9fa;
+  border-color: #0d6efdb8 !important;
+  color: #0d6dfdfd;
+}
+
+.add-new-box.bg-success:hover {
+  background-color: #146c43 !important;
+  /* Um verde mais escuro */
+  border-color: #146c43 !important;
+}
+
+.ajuste_btn_finalizar {
+  margin: 0px 10px 20px 0px;
+}
+
+/*
+--- NOVOS ESTILOS PARA O MODAL DE CONFIRMAÇÃO ---
+*/
+
+/* Aumenta a largura do modal de confirmação */
+#modalConfirmeAnuncio .modal-dialog {
+  max-width: 800px;
+}
+
+/* Layout principal do modal com Flexbox */
+.modal-main-layout {
+  display: flex;
+  gap: 1.5rem;
+  /* Espaço entre a imagem e a lista */
+  align-items: flex-start;
+}
+
+.modal-image-container {
+  flex: 0 0 250px;
+  /* Largura fixa para a imagem */
+  text-align: center;
+}
+
+.modal-image-container img {
+  max-width: 100%;
+  border-radius: 0.25rem;
+  border: 1px solid #dee2e6;
+}
+
+.modal-list-container {
+  flex: 1;
+  /* A lista ocupa o espaço restante */
+}
+
+/* Estilo dos itens da lista de componentes */
+.lista-componentes {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.lista-componentes .componente-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.lista-componentes .componente-item:last-child {
+  border-bottom: none;
+}
+
+.componente-nome {
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.componente-status {
+  font-weight: bold;
+  white-space: nowrap;
+  margin-left: 1rem;
+}
+
+/* Input de bipagem no rodapé do modal */
+.modal-footer-input {
+  margin-top: 1.5rem;
+}
+
+/* Cores de status dinâmicas */
+.status-pendente .componente-nome,
+.status-pendente .componente-status {
+  color: #dc3545;
+  /* Vermelho */
+}
+
+.status-progresso .componente-nome,
+.status-progresso .componente-status {
+  color: #fd7e14;
+  /* Laranja */
+}
+
+.status-concluido .componente-nome,
+.status-concluido .componente-status {
+  color: #198754;
+  /* Verde */
+}
+
+.status-concluido {
+  background-color: #f0fff0;
+  /* Fundo verde bem claro */
+}

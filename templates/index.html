@@ -1,0 +1,20 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+    {{ url_for('static', filename='homepage/homepage.css') }}
+{% endblock %}
+
+{% block content %}
+
+    <br><br><br>
+    <div class="container pt-5">
+    <br><br><br>
+        <div class="row marcador align-items-center">
+            <div class="col mx-auto text-center">
+                <img class="img-fluid" src="{{ url_for('static', filename='resources/wallpaper_jaupesca.svg') }}">
+            </div>
+        </div>
+
+    </div>
+
+{% endblock %}

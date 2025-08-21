@@ -1,0 +1,147 @@
+{% extends "base_template.html" %}
+
+{% block stylepath %}
+{{ url_for('static', filename='limpeza/limpeza.css') }}
+{% endblock %}
+
+{% block content %}
+<br>
+<div class="container">
+    <!-- cabeçalho principal -->
+    <div class="header-bar bg-primary text-white p-3 rounded">
+        <div class="d-flex justify-content-between align-items-center">
+            <!-- sempre visível -->
+            <h5 class="mb-0">Limpeza do agendamento</h5>
+
+            <!-- botão só em sm -->
+            <button id="btnToggleDetalhes" class="btn btn-link text-white p-0 d-block d-md-none" type="button"
+                data-bs-toggle="collapse" data-bs-target="#detalhesAgendamento" aria-expanded="false"
+                aria-controls="detalhesAgendamento">
+                <i class="bi bi-chevron-down fs-4"></i>
+            </button>
+
+
+        </div>
+
+        <!-- detalhes: collapsible -->
+        <div id="detalhesAgendamento" class="collapse d-md-block mt-2" data-bs-parent=".header-bar">
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                {% if dados.empresa == 0 %}
+                <div><strong style="color: #FDD484;">Empresa:</strong> Nenhuma</div>
+                {% elif dados.empresa == 1 %}
+                <div><strong style="color: #FDD484;">Empresa:</strong> Jaú Pesca</div>
+                {% elif dados.empresa == 2 %}
+                <div><strong style="color: #FDD484;">Empresa:</strong> Jaú Fishing</div>
+                {% elif dados.empresa == 3 %}
+                <div><strong style="color: #FDD484;">Empresa:</strong> L.T. Sports</div>
+                {% endif %}
+
+                <div><strong style="color: #FDD484;">Agendamento:</strong> {{ dados.id_agend_ml }}</div>
+                <div><strong style="color: #FDD484;">Colaborador:</strong> {{ dados.colaborador or 'Nenhum' }}</div>
+
+                {% set data_formatada = dados.entrada.strftime('%d/%m/%y') %}
+                {% set hora_formatada = dados.entrada.strftime('%Hh%M') %}
+
+                <div><strong style="color: #FDD484;">Data:</strong> {{ data_formatada }}</div>
+                <div><strong style="color: #FDD484;">Hora:</strong> {{ hora_formatada }}</div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+
+<div class="container pt-4">
+    <div class="overflow-auto" style="max-height: 70vh;">
+
+        {% for produto in dados.produtos %}
+        <div class="produto-item d-flex flex-column me-2" data-sku="{{ produto.sku }}"
+            data-total="{{ produto.unidades }}">
+            <div class="card border-2 mb-3
+                {% if produto.estoque_error_flag == 'green' %} border-success
+                {% elif produto.estoque_error_flag == 'yellow' %} border-warning
+                {% elif produto.estoque_error_flag == 'red' %} border-danger
+                {% endif %}">
+
+                <div class="card-body">
+                    <div class="row w-100">
+                        <div class="col-12 col-md-4 mb-2">
+                            <span class="text-truncate d-block" style="color: #007A85; max-width: 100%;"
+                                title="{{ produto.nome }}">
+                                Nome: <span style="color: black;">{{ produto.nome }}</span>
+                            </span>
+                            <span style="color: #007A85;">
+                                SKU: <span style="color: black;">{{ produto.sku }}</span>
+                            </span>
+                        </div>
+
+                        <div class="col-12 col-md-2 mb-2">
+                            <span style="color: #007A85;">ID Tiny: <span style="color: black;">{{ produto.id_tiny
+                                    }}</span></span><br>
+                            <span style="color: #007A85;">GTIN: <span style="color: black;">{{ produto.gtin
+                                    }}</span></span>
+                        </div>
+
+                        <div class="col-12 col-md-2 mb-2">
+                            <span style="color: #007A85;">Etiqueta: <span style="color: black;">{{ produto.id_ml
+                                    }}</span></span><br>
+                            <span style="color: #007A85;">Unidades: <span style="color: black;">{{ produto.unidades
+                                    }}</span></span>
+                        </div>
+
+                        <div
+                            class="d-flex justify-content-md-end justify-content-start align-items-start gap-3 mb-2 col-12 col-md-4">
+
+                            <div id="show-more-arrow-{{ loop.index }}" onclick="showTable(this)">
+                                <img src="{{ url_for('static', filename='resources/seta_baixo.png') }}"
+                                    alt="Seta para baixo" class="img-fluid" style="max-width: 25px; height: auto;">
+                            </div>
+                            <button id="btn-alt-{{ loop.index }}" onclick="altBtn(this)" class="btn btn-primary btn-sm">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+
+                            <button id="btn-corr-{{ loop.index }}" onclick="getEleToCorrection(this)"
+                                class="btn btn-success btn-sm shadow-sm" disabled>
+                                <i class="bi bi-check2-square"></i>
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div id="table-{{ loop.index }}" class="table-comp table-responsive display-hidden shadow-sm p-2 bg-white"
+                style="margin: -1rem 0rem 1rem 0rem;">
+            </div>
+        </div>
+        {% endfor %}
+
+    </div>
+</div>
+
+<template id="my-template">
+    <swal-title>
+        Como continuar agora?
+    </swal-title>
+    <swal-icon type="warning" color="red"></swal-icon>
+    <swal-button type="confirm">Salvar agora</swal-button>
+    <swal-button type="cancel">Salvar depois</swal-button>
+    <swal-button type="deny">Cancelar</swal-button>
+    <swal-param name="allowEscapeKey" value="false" />
+    <swal-param name="customClass" value='{ "popup": "my-popup" }' />
+    <swal-function-param name="didOpen" value="popup => console.log(popup)" />
+</template>
+
+<script>
+    agend_id = JSON.parse('{{ request.url | tojson }}').split('?')[1].split('&')[0].split('=')[1]
+    agend_tipo = JSON.parse('{{ request.url | tojson }}').split('?')[1].split('&')[1].split('=')[1]
+    dados = JSON.parse('{{ comps | tojson }}')
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+{% endblock %}
+
+{% block scriptpath %}
+{{ url_for('static', filename='limpeza/limpeza.js') }}
+{% endblock %}

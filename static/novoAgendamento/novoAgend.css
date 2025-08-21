@@ -1,0 +1,13 @@
+.btn-outline-primary {
+    background-color: #0d6efd !important;
+    border-color: #0d6efd !important;
+    color: #fff !important;
+    transition: color .2s ease, background-color .2s ease;
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus {
+    background-color: transparent !important;
+    color: #0d6efd !important;
+    text-decoration: none;
+}

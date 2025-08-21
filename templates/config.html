@@ -1,0 +1,56 @@
+{% extends "base_template.html" %}
+
+{% block title %}Configurações{% endblock %}
+
+{% block stylepath %}
+{{ url_for('static', filename='config/config.css') }}
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row">
+        <!-- Coluna do Usuário -->
+        <div class="col-lg-4 mb-4 text-center">
+            <div class="card perfil-card mx-auto">
+                <img src="https://cdn-icons-png.flaticon.com/512/17468/17468680.png" class="perfil-avatar mt-4"
+                    alt="Avatar de {{ session.nome_display_usuario }}">
+                <div class="card-body">
+                    <h4 class="card-title">{{ session.nome_display_usuario }}</h4>
+                    <a href="{{ url_for('auth.logout') }}"
+                        class="btn btn-outline-danger btn-sm mt-2 d-inline-flex align-items-center">
+                        <i class="bi bi-box-arrow-right me-2"></i>
+                        Sair
+                    </a>
+                </div>
+            </div>
+        </div>
+        <!-- Coluna das Impressoras -->
+        <div class="col-lg-8">
+            <div class="printer-card mb-4">
+                <video width="128" height="128" preload="none"
+                    style="background: transparent url('https://cdn-icons-png.flaticon.com/512/6172/6172550.png') 50% 50% / contain no-repeat;"
+                    autoplay loop muted playsinline>
+                    <source src="https://cdn-icons-mp4.flaticon.com/512/6172/6172550.mp4" type="video/mp4">
+                </video>
+                <div>
+                    <strong>Impressora relatório atual</strong><br>
+                    <span>Nenhuma impressora selecionada</span><br>
+                    <button class="btn btn-outline-secondary btn-sm mt-1 pt-2">Escolher impressora</button>
+                </div>
+            </div>
+            <div class="printer-card mb-4">
+                <video width="128" height="128" preload="none"
+                    style="background: transparent url('https://cdn-icons-png.flaticon.com/512/8717/8717997.png') 50% 50% / contain no-repeat;"
+                    autoplay loop muted playsinline>
+                    <source src="https://cdn-icons-mp4.flaticon.com/512/8717/8717997.mp4" type="video/mp4">
+                </video>
+                <div>
+                    <strong>Impressora etiqueta atual</strong><br>
+                    <span>Nenhuma impressora selecionada</span><br>
+                    <button class="btn btn-outline-secondary btn-sm mt-1 pt-2">Escolher impressora</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
