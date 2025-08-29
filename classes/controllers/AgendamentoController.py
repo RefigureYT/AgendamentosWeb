@@ -637,6 +637,7 @@ class AgendamentoController:
                     
                     # Etapa 3: Extrair a URL do primeiro anexo, se existir
                     if resp_details.get('anexos') and len(resp_details['anexos']) > 0:
+                        print(resp_details)
                         imagem_url = resp_details['anexos'][0].get('url', "")
         except Exception as e:
             # Em um ambiente de produção, seria ideal logar este erro

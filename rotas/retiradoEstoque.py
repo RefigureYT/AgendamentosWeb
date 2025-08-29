@@ -14,7 +14,6 @@ from typing import Literal, Optional
 from datetime import datetime
 import pytz
 
-
 tz = pytz.timezone("America/Sao_Paulo")
 data_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -237,6 +236,7 @@ def api_bipagem_detalhe():
                 sku_original,
                 gtin_original,
                 id_tiny_original,
+                nome_equivalente,
                 sku_bipado,
                 gtin_bipado,
                 id_tiny_equivalente,
@@ -404,6 +404,7 @@ def api_equiv_bipar():
     gtin_bipado         = normalize_gtin(data.get('gtin_bipado'))
     id_tiny_original    = to_int_or_none(data.get('id_tiny_original'))
     id_tiny_equivalente = to_int_or_none(data.get('id_tiny_equivalente'))
+    nome_equivalente    = (data.get('nome_equivalente') or '').strip() or None   # <<< ADICIONADO
     usuario             = (data.get('usuario') or '').strip() or 'Desconhecido'
     observacao          = (data.get('observacao') or '').strip() or None
 
@@ -424,13 +425,17 @@ def api_equiv_bipar():
         return jsonify(error="observacao excede 255 caracteres"), 400
     if usuario and len(usuario) > 100:
         return jsonify(error="usuario excede 100 caracteres"), 400
+    if nome_equivalente and len(nome_equivalente) > 255:                           # <<< ADICIONADO
+        return jsonify(error="nome_equivalente excede 255 caracteres"), 400
 
     insert_sql = """
         INSERT INTO agendamento_produto_bipagem_equivalentes
           (id_agend_ml, sku_original, gtin_original, id_tiny_original,
+           nome_equivalente,                                                   
            sku_bipado,  gtin_bipado,  id_tiny_equivalente,
            bipados, criado_por, observacao)
         VALUES (%s, %s, %s, %s,
+                %s,
                 %s, %s, %s,
                 0, %s, %s)
     """
@@ -441,6 +446,7 @@ def api_equiv_bipar():
         cur.execute(
             insert_sql,
             (id_agend, sku_original, gtin_original, id_tiny_original,
+             nome_equivalente,                                                     # <<< ADICIONADO
              sku_bipado, gtin_bipado, id_tiny_equivalente,
              usuario, observacao)
         )
@@ -451,6 +457,7 @@ def api_equiv_bipar():
             ok=True, created=True,
             id_agend=id_agend,
             sku_original=sku_original, gtin_original=gtin_original, id_tiny_original=id_tiny_original,
+            nome_equivalente=nome_equivalente,                                     # <<< ADICIONADO (não quebra nada)
             sku_bipado=sku_bipado,   gtin_bipado=gtin_bipado,   id_tiny_equivalente=id_tiny_equivalente,
             bipados=0, criado_por=usuario, observacao=observacao
         ), 201
@@ -572,13 +579,19 @@ def api_bipados_total(id_agend):
           x.sku_original,
           SUM(x.bipados) AS bipados_total
         FROM (
-          SELECT sku AS sku_original, bipados
-          FROM agendamento_produto_bipagem
-          WHERE id_agend_ml = %s
+          SELECT
+            apb.sku AS sku_original,
+            COALESCE(apb.bipados, 0) AS bipados
+          FROM agendamento_produto_bipagem apb
+          WHERE apb.id_agend_ml = %s
+
           UNION ALL
-          SELECT sku_original, bipados
-          FROM agendamento_produto_bipagem_equivalentes
-          WHERE id_agend_ml = %s
+
+          SELECT
+            ape.sku_original AS sku_original,
+            COALESCE(ape.bipados, 0) AS bipados
+          FROM agendamento_produto_bipagem_equivalentes ape
+          WHERE ape.id_agend_ml = %s
         ) x
         GROUP BY x.sku_original
         ORDER BY x.sku_original
@@ -604,6 +617,7 @@ def api_equiv_listar(id_agend):
             sku_original,
             gtin_original,
             id_tiny_original,
+            nome_equivalente,                 -- <<< ADICIONADO
             sku_bipado,
             gtin_bipado,
             id_tiny_equivalente,
@@ -618,15 +632,13 @@ def api_equiv_listar(id_agend):
     """
     try:
         conn = mysql.connector.connect(**_db_config)
-        cur  = conn.cursor(dictionary=True)  # 👈 facilita montar o JSON
+        cur  = conn.cursor(dictionary=True)
         cur.execute(sql, (id_agend,))
         rows = cur.fetchall()
         cur.close(); conn.close()
 
-        # Serializa datetime/date -> string
         def serialize(v):
             if isinstance(v, (datetime, date)):
-                # formate como preferir; aqui ISO “YYYY-MM-DD HH:MM:SS”
                 return v.strftime("%Y-%m-%d %H:%M:%S")
             return v
 
@@ -637,7 +649,109 @@ def api_equiv_listar(id_agend):
     except Exception as e:
         app.logger.exception("Erro em /api/equiv/<id>")
         return jsonify(error=str(e)), 500
-    
+
+
+@bp_retirado.route('/api/equiv/delete', methods=['DELETE'])
+def api_equiv_delete():
+    """
+    DELETE /api/equiv/delete
+    Body JSON:
+    {
+        "id_agend": 123,
+        "sku_original": "SKU-ORIG",
+        "sku_bipado": "SKU-BIPADO"
+    }
+
+    Exclui um registro específico da tabela
+    agendamento_produto_bipagem_equivalentes.
+    """
+    data = request.get_json() or {}
+
+    # ----------------------------
+    # 1) Captura e valida entradas
+    # ----------------------------
+    id_agend     = data.get('id_agend')
+    sku_original = (data.get('sku_original') or '').strip()
+    sku_bipado   = (data.get('sku_bipado') or '').strip()
+
+    try:
+        id_agend = int(id_agend)
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="'id_agend' deve ser inteiro"), 400
+
+    if not sku_original or not sku_bipado:
+        return jsonify(ok=False, error="Campos 'sku_original' e 'sku_bipado' são obrigatórios"), 400
+    if len(sku_original) > 30 or len(sku_bipado) > 30:
+        return jsonify(ok=False, error="SKU excede 30 caracteres"), 400
+
+    # ----------------------------
+    # 2) SQL principal
+    # ----------------------------
+    delete_sql = """
+        DELETE FROM agendamento_produto_bipagem_equivalentes
+         WHERE id_agend_ml = %s
+           AND sku_original = %s
+           AND sku_bipado = %s
+    """
+
+    # Após excluir, recalculamos o total de bipados
+    select_diretos_sql = """
+        SELECT COALESCE(bipados,0)
+        FROM agendamento_produto_bipagem
+        WHERE id_agend_ml = %s AND sku = %s
+    """
+    select_equiv_total_sql = """
+        SELECT COALESCE(SUM(bipados),0)
+        FROM agendamento_produto_bipagem_equivalentes
+        WHERE id_agend_ml = %s AND sku_original = %s
+    """
+
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur  = conn.cursor()
+
+        # ----------------------------
+        # 3) Executa exclusão
+        # ----------------------------
+        cur.execute(delete_sql, (id_agend, sku_original, sku_bipado))
+        rows_affected = cur.rowcount
+
+        if rows_affected == 0:
+            cur.close(); conn.close()
+            return jsonify(ok=False, error="Equivalente não encontrado para exclusão"), 404
+
+        conn.commit()
+
+        # ----------------------------
+        # 4) Recalcula totais
+        # ----------------------------
+        cur.execute(select_diretos_sql, (id_agend, sku_original))
+        row = cur.fetchone()
+        bipados_diretos = int(row[0]) if row else 0
+
+        cur.execute(select_equiv_total_sql, (id_agend, sku_original))
+        row = cur.fetchone()
+        bipados_equivalentes_total = int(row[0]) if row and row[0] is not None else 0
+
+        bipados_total = bipados_diretos + bipados_equivalentes_total
+
+        cur.close(); conn.close()
+
+        return jsonify(
+            ok=True,
+            deleted=True,
+            id_agend=id_agend,
+            sku_original=sku_original,
+            sku_bipado=sku_bipado,
+            bipados_diretos=bipados_diretos,
+            bipados_equivalentes_total=bipados_equivalentes_total,
+            bipados_total=bipados_total
+        ), 200
+
+    except Exception as e:
+        app.logger.exception("Erro em /api/equiv/delete")
+        return jsonify(ok=False, error=str(e)), 500
+
 @bp_retirado.route('/retirado', methods=['GET', 'POST'])
 def retirado_estoque():
     if request.method == "GET":

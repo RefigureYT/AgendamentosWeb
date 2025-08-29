@@ -1,0 +1,10 @@
+.git
+.venv
+__pycache__
+*.pyc
+temp
+uploads
+mapa_diretorio.ini
+mapa_conteudo.ini
+gerar_mapa_diretorio.py
+base_jp_lab

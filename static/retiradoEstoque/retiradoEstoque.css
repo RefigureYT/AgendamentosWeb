@@ -6,7 +6,8 @@ body {
   color: #e63946 !important;
 }
 
-.produto-item {
+.produto-item,
+.produto-item-modal {
   background-color: #f8f9fa;
   border: 1px solid #ccc;
   padding: 10px;
@@ -36,77 +37,319 @@ body {
   display: none;
 }
 
-  .toast-container {
-    position: fixed;
-    inset: auto 16px 16px auto; /* bottom-right */
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 10px;
-    z-index: 9999;
-    pointer-events: none; /* só o toast recebe clique */
+.toast-container {
+  position: fixed;
+  inset: auto 16px 16px auto;
+  /* bottom-right */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  z-index: 9999;
+  pointer-events: none;
+  /* só o toast recebe clique */
+}
+
+.toast {
+  pointer-events: auto;
+  background: #fff;
+  color: #0f172a;
+  border: 1px solid #e5e7eb;
+  border-left: 6px solid var(--accent, #3b82f6);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.15);
+  padding: 12px 14px;
+  max-width: min(420px, calc(100vw - 40px));
+  width: fit-content;
+  font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  position: relative;
+  overflow: hidden;
+}
+
+.toast--info {
+  --accent: #3b82f6;
+}
+
+/* azul */
+.toast--success {
+  --accent: #16a34a;
+}
+
+/* verde */
+.toast--warning {
+  --accent: #f59e0b;
+}
+
+/* amarelo */
+.toast--error {
+  --accent: #ef4444;
+}
+
+/* vermelho */
+
+.toast__message {
+  white-space: pre-wrap;
+  /* mantém \n */
+  word-wrap: break-word;
+}
+
+.toast__close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.toast__close:hover {
+  background: rgba(100, 116, 139, .1);
+}
+
+/* barra de progresso reversa (100% -> 0%) */
+.toast__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--accent, #3b82f6);
+  transform-origin: left;
+  animation: toastShrink var(--dur, 2s) linear forwards;
+}
+
+@keyframes toastShrink {
+  from {
+    transform: scaleX(1);
   }
 
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* Dark mode automático */
+@media (prefers-color-scheme: dark) {
   .toast {
-    pointer-events: auto;
-    background: #fff;
-    color: #0f172a;
-    border: 1px solid #e5e7eb;
-    border-left: 6px solid var(--accent, #3b82f6);
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(2, 6, 23, 0.15);
-    padding: 12px 14px;
-    max-width: min(420px, calc(100vw - 40px));
-    width: fit-content;
-    font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
-    position: relative;
-    overflow: hidden;
-  }
-
-  .toast--info    { --accent: #3b82f6; } /* azul */
-  .toast--success { --accent: #16a34a; } /* verde */
-  .toast--warning { --accent: #f59e0b; } /* amarelo */
-  .toast--error   { --accent: #ef4444; } /* vermelho */
-
-  .toast__message {
-    white-space: pre-wrap; /* mantém \n */
-    word-wrap: break-word;
+    background: #0b1020;
+    color: #e5e7eb;
+    border-color: #1f2937;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
   }
 
   .toast__close {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    border: 0;
-    background: transparent;
-    font-size: 16px;
-    line-height: 1;
-    color: #64748b;
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 6px;
+    color: #94a3b8;
   }
-  .toast__close:hover { background: rgba(100,116,139,.1); }
 
-  /* barra de progresso reversa (100% -> 0%) */
-  .toast__progress {
-    position: absolute;
-    left: 0; right: 0; bottom: 0;
-    height: 3px;
-    background: var(--accent, #3b82f6);
-    transform-origin: left;
-    animation: toastShrink var(--dur, 2s) linear forwards;
+  .toast__close:hover {
+    background: rgba(148, 163, 184, .12);
   }
-  @keyframes toastShrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+}
 
-  /* Dark mode automático */
-  @media (prefers-color-scheme: dark) {
-    .toast {
-      background: #0b1020;
-      color: #e5e7eb;
-      border-color: #1f2937;
-      box-shadow: 0 10px 30px rgba(0,0,0,.35);
-    }
-    .toast__close { color: #94a3b8; }
-    .toast__close:hover { background: rgba(148,163,184,.12); }
-  }
+
+/* Base do overlay do modal */
+.modal {
+  display: none;
+  /* começa escondido */
+  position: fixed;
+  inset: 0;
+  /* top/right/bottom/left: 0 */
+  background: rgba(0, 0, 0, .5);
+  z-index: 10000;
+  /* alto para ficar acima de tudo */
+  overflow: hidden;
+}
+
+/* Caixa do modal */
+.modal-content {
+  background: #fff;
+  color: #000;
+  /* garante texto visível */
+  margin: 8% auto;
+  /* centraliza vertical/horizontal */
+  padding: 20px;
+  border-radius: 8px;
+  width: 90%;
+  height: 70%;
+  max-width: 1000px;
+  max-height: 700px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .3);
+}
+
+.close {
+  float: right;
+  cursor: pointer;
+  font-size: 24px;
+}
+
+.close:hover {
+  opacity: .7;
+}
+
+/* Grid interno do modal: coluna info (esq) + lista (dir) */
+.modal-grid {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 20px;
+}
+
+/* Coluna direita com rolagem vertical quando exceder */
+.produtos-scroll {
+  max-height: 600px;
+  /* mesmo alto do painel esquerdo */
+  overflow-y: auto;
+  padding-right: 6px;
+  /* respiro para não colar na barra */
+}
+
+/* Badge simples (se não estiver usando Bootstrap) */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #111827;
+  font-size: 0.8rem;
+  vertical-align: middle;
+}
+
+/* Rodapé do modal com botão fixo/visível */
+.modal-actions {
+  position: sticky;
+  bottom: 0px;
+  /* compensa o padding do .modal-content */
+  margin: 16px -20px -20px;
+  /* encosta nas bordas do modal-content */
+  padding: 12px 50px;
+  background: linear-gradient(#ffffffcc, #ffffff);
+  /* leve destaque */
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  align-items: center;
+  z-index: 1;
+}
+
+/* Botões básicos (se não estiver usando Bootstrap) */
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter .15s ease, transform .02s ease;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  background: #0d6efd;
+  /* azul */
+  color: #fff;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.btn-outline {
+  background: #fff;
+  color: #111827;
+  border-color: #d1d5db;
+}
+
+.btn-outline:hover {
+  filter: brightness(0.98);
+}
+
+/* Botão de lixeira (ícone vermelho) */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: #ef4444;
+  /* vermelho */
+  cursor: pointer;
+}
+
+.btn-icon:hover {
+  background: #fff1f1;
+}
+
+/* Garantir posicionamento do botão de lixeira no card */
+.produto-item-modal {
+  position: relative;
+}
+
+/* Container de ações do card (canto superior direito) */
+/* .card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+} */
+
+/* Linha de controles do card */
+.produto-item-modal .controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Conjunto lixeira + texto, ancorado à direita */
+.controls .last-action-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* espaço entre lixeira e texto */
+  margin-left: auto;
+  /* empurra o grupo para a direita */
+  font-size: 0.85rem;
+  color: #6b7280;
+  min-width: 0;
+  /* evita overflow em flex */
+}
+
+/* Só o texto pode encolher/expandir, a lixeira mantém tamanho fixo */
+.controls .last-action-wrap .status {
+  min-width: 0;
+  white-space: nowrap;
+  /* não quebra em várias linhas */
+  text-overflow: ellipsis;
+  /* se quiser reticências em casos extremos */
+  overflow: hidden;
+}
+
+/* Botão de lixeira já está ok; mantendo tua versão */
+.controls .btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: #ef4444;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.controls .btn-icon:hover {
+  background: #fff1f1;
+}

@@ -1,8 +1,21 @@
 #!/bin/bash
-# Nome da imagem com o endereço do repositório privado
-IMAGE_NAME="192.168.15.102:5000/agendamentos-web:latest"
-echo "⏳ Buildando imagem Docker..."
-docker build -t $IMAGE_NAME .
-echo "✅ Build finalizado. Enviando para o registry..."
-docker push $IMAGE_NAME
-echo "🚀 Imagem enviada com sucesso: $IMAGE_NAME"
+set -euo pipefail
+
+IP="192.168.15.121"
+REG_PORT="5000"          # Porta do Registry
+NAME="agendamentos-web"
+VERSION="latest"
+IMAGE_NAME="${IP}:${REG_PORT}/${NAME}:${VERSION}"
+APP_PORT="8345"          # Porta do app Flask
+
+echo "⏳ Iniciando build da imagem: ${IMAGE_NAME}..."
+docker build -t "${IMAGE_NAME}" .
+echo "✅ Build finalizado."
+
+echo "📦 Enviando imagem para o registry privado em ${IP}:${REG_PORT}..."
+docker push "${IMAGE_NAME}"
+echo "🚀 Enviado com sucesso!"
+
+echo
+echo "🔗 Para rodar o container do app:"
+echo "    docker run -d --name ${NAME} -p ${APP_PORT}:${APP_PORT} ${IMAGE_NAME}"

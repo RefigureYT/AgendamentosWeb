@@ -2,6 +2,7 @@
 import pandas as pd
 import camelot
 import os
+import re
 from typing import List, Dict
 
 class PdfService:
@@ -31,15 +32,16 @@ class PdfService:
             for _, row in combined_df.iterrows():
                 product_str = row['PRODUTO'].replace('\n', ' ').replace(' ', ',')
                 parts = product_str.split(',')
-                
+
                 product_data = {
                     'id_ml': parts[2],
                     'codigo_uni': parts[5],
                     'sku': parts[7],
                     'nome': ' '.join(parts[8:]).replace(',', ' ').strip(),
                     'unidades': row['UNIDADES'],
-                    'etiqueta': row['ETIQUETA #'].split('#')[1]
+                    'etiqueta': parts[2]
                 }
+                print(product_data)
                 products.append(product_data)
             
             os.remove(pdf_path)

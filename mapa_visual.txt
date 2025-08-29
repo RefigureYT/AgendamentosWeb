@@ -1,0 +1,137 @@
+Teste_web/
+├─ .dirignore
+├─ .gitignore
+├─ Dockerfile
+├─ README.md
+├─ build.sh
+├─ classes
+│  ├─ __init__.py
+│  ├─ controllers
+│  │  ├─ AgendamentoController.py
+│  │  ├─ DatabaseController.py
+│  │  └─ __init__.py
+│  ├─ models
+│  │  ├─ AgendamentoModel.py
+│  │  ├─ ComposicaoModel.py
+│  │  ├─ DatabaseModel.py
+│  │  ├─ JoinedAgendamentoModel.py
+│  │  ├─ JoinedComposicaoModel.py
+│  │  ├─ ProdutoModel.py
+│  │  └─ __init__.py
+│  ├─ services
+│  │  ├─ PdfService.py
+│  │  ├─ SpreadsheetService.py
+│  │  └─ __init__.py
+│  └─ views
+│     ├─ AgendamentoView.py
+│     └─ __init__.py
+├─ exceptions.py
+├─ git
+├─ main.py
+├─ migrations
+├─ patch
+├─ requirements.txt
+├─ rotas
+│  ├─ __init__.py
+│  ├─ agendamentos.py
+│  ├─ alteracoes.py
+│  ├─ alterar_agendamento.py
+│  ├─ atualizar_agend.py
+│  ├─ atualizar_pdf.py
+│  ├─ auth.py
+│  ├─ config.py
+│  ├─ downloads.py
+│  ├─ embalar.py
+│  ├─ erro.py
+│  ├─ excluir_agendamento.py
+│  ├─ expedicao.py
+│  ├─ health_check.py
+│  ├─ homepage.py
+│  ├─ imprimir_composicoes.py
+│  ├─ process_pdf.py
+│  ├─ reservados.py
+│  ├─ retiradoEstoque.py
+│  ├─ teste.py
+│  ├─ upload_excel.py
+│  ├─ upload_pdf.py
+│  └─ view_excel.py
+├─ static
+│  ├─ agendamentos
+│  │  ├─ agendamentos.css
+│  │  └─ agendamentos.js
+│  ├─ alteracoes
+│  │  ├─ alteracoes.css
+│  │  └─ alteracoes.js
+│  ├─ alterar_agendamento
+│  │  ├─ alt_agend.css
+│  │  └─ alt_agend.js
+│  ├─ compras
+│  │  ├─ compras.css
+│  │  └─ compras.js
+│  ├─ config
+│  │  └─ config.css
+│  ├─ embalar
+│  │  ├─ BrowserPrint-3.1.250.min.js
+│  │  ├─ BrowserPrint-Zebra-1.1.250.min.js
+│  │  ├─ embalar.css
+│  │  └─ embalar.js
+│  ├─ erro
+│  │  ├─ erro.css
+│  │  └─ erro.js
+│  ├─ expedicao
+│  │  ├─ expedicao.css
+│  │  └─ expedicao.js
+│  ├─ global.css
+│  ├─ global.js
+│  ├─ homepage
+│  │  ├─ homepage.css
+│  │  └─ homepage.js
+│  ├─ imprimir_composicoes
+│  │  ├─ imprimir_composicoes.css
+│  │  └─ imprimir_composicoes.js
+│  ├─ limpeza
+│  │  ├─ limpeza.css
+│  │  └─ limpeza.js
+│  ├─ login
+│  │  ├─ login.css
+│  │  └─ login.js
+│  ├─ novoAgendamento
+│  │  └─ novoAgend.css
+│  ├─ reservados
+│  │  ├─ reservados.css
+│  │  └─ reservados.js
+│  ├─ resources
+│  │  ├─ caixa.png
+│  │  ├─ caixa2.png
+│  │  ├─ caixa_jp.png
+│  │  ├─ caixa_ml.png
+│  │  ├─ logo.png
+│  │  ├─ sem_img.webp
+│  │  ├─ seta_baixo.png
+│  │  └─ wallpaper_jaupesca.svg
+│  └─ retiradoEstoque
+│     ├─ retiradoEstoque.css
+│     └─ retiradoEstoque.js
+├─ templates
+│  ├─ agendamentos.html
+│  ├─ alteracoes.html
+│  ├─ alterar_agendamento.html
+│  ├─ base_template.html
+│  ├─ compras.html
+│  ├─ config.html
+│  ├─ embalar.html
+│  ├─ erro.html
+│  ├─ expedicao.html
+│  ├─ imprimir_composicoes.html
+│  ├─ index.html
+│  ├─ limpeza.html
+│  ├─ login.html
+│  ├─ mostra_planilha.html
+│  ├─ novoAgendamento.html
+│  ├─ partials
+│  │  └─ form_editar_agendamento.html
+│  ├─ reservados.html
+│  ├─ retiradoEstoque.html
+│  ├─ teste.html
+│  └─ view_excel.html
+└─ teste.js

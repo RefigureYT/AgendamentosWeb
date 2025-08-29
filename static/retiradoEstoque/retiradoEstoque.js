@@ -913,12 +913,14 @@ async function addDbEquivalente(sku, valorBipado) {
   console.log('Produto Referência >', prodRef);
 
   const equivalente = produtoEquivalente.itens[0];
-
+  console.log('Produto REQUI DO TINY >', prodRef);
+  console.log('Produto REQUI DO TINY Equivalente >', produtoEquivalente);
   const payload = {
     id_agend: idAgend,
     sku_original: prodRef.sku,
     gtin_original: prodRef.gtin,
     id_tiny_original: prodRef.id_tiny,
+    nome_equivalente: produtoEquivalente.itens[0].descricao,
     sku_bipado: produtoEquivalente.itens[0].sku,
     gtin_bipado: equivalente.gtin,
     id_tiny_equivalente: equivalente.id,
@@ -1398,3 +1400,382 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
   // notify.error('Saldo insuficiente para Saída.');
   // notify('Processando...\nAguarde.', { type: 'info', duration: 5000 });
 })();
+
+async function editarProdutoCompLapis(sku) {
+  // Se precisar popular algo dinamicamente:
+  // document.querySelector('#conteudoModalEditarProduto p:nth-child(2) strong').textContent = sku;
+
+  const listaProdutos = document.getElementById('listaProdutos');
+  const bipados = document.querySelector(`[data-sku="${sku}"]`).dataset.bipados;
+
+  console.log('listaProdutos >', listaProdutos);
+
+  const raw = document.getElementById("js-data").dataset.comps;
+  const produtos = JSON.parse(raw);
+
+  console.log('Produtos >', produtos);
+
+  const comp = produtos.flatMap(p => p.composicoes ?? []).find(c => c.sku === sku);
+  
+
+  console.log('Este é o produto composição >', comp);
+
+  const response = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${sku}`);
+  const data = await response.json();
+  console.log('data >', data);
+  let totalBipadosOriginal = 0;
+
+  if (data.bipagem === null || data.bipagem === undefined) {
+    totalBipadosOriginal = 0;
+  } else {
+    totalBipadosOriginal = data.bipagem.bipados;
+  }
+
+  const porcento = comp.unidades_totais > 0 ? Math.min(100, Math.round((totalBipadosOriginal / comp.unidades_totais) * 100)) : 0;
+  
+  console.log('Total Bipados Original >', totalBipadosOriginal);
+  const nomeProdOrigView = document.getElementById('master-nome');
+  const skuView = document.getElementById('master-sku-view');
+  const gtinView = document.getElementById('master-gtin');
+  const img = document.getElementById('master-img');
+  
+  console.log('Valor de comp.nome:', comp.nome);
+  nomeProdOrigView.innerHTML = comp.nome;
+  skuView.innerHTML = comp.sku;
+  gtinView.innerHTML = comp.gtin;
+
+  // Exemplo para mudar a imagem
+  // img.src = "https://blog.abler.com.br/wp-content/uploads/2022/08/Teste-de-Perfil-Comportamental.jpg"
+
+  console.log('Total Bipados original 2>', data);
+  console.log('Total Bipados original 3>', totalBipadosOriginal);
+  listaProdutos.innerHTML = `
+  <!-- ============ PRODUTO ORIGINAL (o primeiro da lista) ============ -->
+          <div id="produto-ORIGINAL-${comp.id_tiny}" class="produto-item-modal" data-role="original">
+            <div class="d-flex" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <div>
+                <strong id="nome-${sku}">${comp.nome}</strong>
+                <span id="sku-${sku}" class="badge">${sku}</span>
+                <span id="tipo-${sku}" class="badge">Original</span>
+              </div>
+              <div class="small" style="font-size:.85rem; color:#6b7280;">
+                Bipado: <strong id="bipado-${sku}">${totalBipadosOriginal}</strong> /
+                Total: <strong id="total-${sku}">${comp.unidades_totais}</strong>
+                (<span id="percent-${sku}">${porcento}</span>%)
+              </div>
+            </div>
+
+            <!-- Barra de progresso -->
+            <div id="progressWrap-${sku}" class="progress"
+              style="height:10px; background:#e5e7eb; border-radius:6px; overflow:hidden; margin:8px 0;">
+              <div id="progressFill-${sku}" class="progress-bar" role="progressbar"
+                style="width:0%; background:#f59e0b; height:10px;" aria-valuenow="0" aria-valuemin="0"
+                aria-valuemax="100"></div>
+            </div>
+
+            <!-- Controles de quantidade -->
+            <div class="controls" style="display:flex; align-items:center; gap:8px;">
+              <button id="menos-${sku}" class="btn btn-outline" onclick="removeUnEditarProduto('${sku}');" type="button">−</button>
+              <input id="quantidade-${sku}" type="number" value="${totalBipadosOriginal}" min="0" step="1" style="width:100px;">
+              <button id="mais-${sku}" class="btn btn-outline" onclick="addUnEditarProduto('${sku}');" type="button">+</button>
+
+              <div class="ms-auto" style="margin-left:auto; font-size:.85rem; color:#6b7280;">
+                Última ação: <strong id="status-${sku}">—</strong>
+              </div>
+            </div>
+          </div>
+          `;
+
+
+  console.log('Req to DB | View EQUIVALENTES >', data);
+
+  const fill = document.getElementById(`progressFill-${sku}`);
+  fill.style.width = `${porcento}%`;
+  fill.setAttribute('aria-valuenow', bipados);
+  fill.setAttribute('aria-valuemax', comp.unidades_totais);
+
+
+
+  data.equivalentes.forEach(p => {
+    console.log('data,equivalentes <', p);
+
+    const porcentoEquiv = comp.unidades_totais > 0 ? Math.min(100, Math.round((p.bipados / comp.unidades_totais) * 100)) : 0;
+
+    listaProdutos.innerHTML += `
+      <!-- ============ PRODUTO EQUIVALENTE ============ -->
+      <div id="produto-EQV-${p.id_tiny_equivalente}" class="produto-item-modal" data-role="equivalente">
+        <!-- lixeira no canto direito -->
+
+        <div class="d-flex" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div>
+            <strong id="nome-${p.sku_bipado}">${p.nome_equivalente}</strong>
+            <span id="sku-${p.sku_bipado}" class="badge">${p.sku_bipado}</span>
+            <span id="tipo-${p.sku_bipado}" class="badge">Equivalente</span>
+          </div>
+          <div class="small" style="font-size:.85rem; color:#6b7280;">
+            Bipado: <strong id="bipado-${p.sku_bipado}">${p.bipados}</strong> /
+            Total: <strong id="total-${p.sku_bipado}">${comp.unidades_totais}</strong>
+            (<span id="percent-${p.sku_bipado}">${porcentoEquiv}</span>%)
+          </div>
+        </div>
+
+        <!-- Barra de progresso -->
+        <div id="progressWrap-${p.sku_bipado}" class="progress"
+          style="height:10px; background:#e5e7eb; border-radius:6px; overflow:hidden; margin:8px 0;">
+          <div id="progressFill-${p.sku_bipado}" class="progress-bar" role="progressbar"
+            style="width:0%; background:#3b82f6; height:10px;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+          </div>
+        </div>
+
+        <!-- Controles de quantidade -->
+        <div class="controls" style="display:flex; align-items:center; gap:8px;">
+          <button id="menos-${p.sku_bipado}" onclick="removeUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">−</button>
+          <input id="quantidade-${p.sku_bipado}" type="number" value="${p.bipados}" min="0" step="1" style="width:100px;">
+          <button id="mais-${p.sku_bipado}" onclick="addUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">+</button>
+
+
+          <div class="last-action-wrap">
+            <button id="excluir-${p.sku_bipado}" class="btn-icon"
+                    aria-label="Excluir equivalente"
+                    title="Excluir equivalente"
+                    data-sku-original="${sku}"
+                    data-sku-equivalente="${p.sku_bipado}"
+                    data-id-tiny="${p.id_tiny_equivalente}"
+                    onclick="excluirEquivalente(this)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M9 3h6a1 1 0 0 1 1 1v1h4v2H4V5h4V4a1 1 0 0 1 1-1Zm2 5h2v11h-2V8Zm-4 0h2v11H7V8Zm8 0h2v11h-2V8Z"/>
+              </svg>
+            </button>
+
+            <span class="status">
+              Última ação: <strong id="status-${p.sku_bipado}">—</strong>
+            </span>
+          </div>
+
+
+        </div>
+      </div>
+            `;
+
+
+    const fillEquiv = document.getElementById(`progressFill-${p.sku_bipado}`);
+    fillEquiv.style.width = `${porcentoEquiv}%`;
+    fillEquiv.setAttribute('aria-valuenow', p.bipados);
+    fillEquiv.setAttribute('aria-valuemax', comp.unidades_totais);
+
+  });
+
+  // Mostra o modal
+  document.getElementById('modal-editar-produto').style.display = 'block';
+
+  // Evita o scroll de fundo (opcional)
+  document.body.style.overflow = 'hidden';
+}
+
+async function excluirEquivalente(obj) {
+  console.log('Este é o OBJETO à ser excluído:', obj);
+  const skuExcloi = obj.id.replace("excluir-", "");
+  const skuOriginal = obj.dataset.skuOriginal;
+  console.log('Este é o SKU do objeto:', skuExcloi);
+  console.log('Este é o SKU Original do objeto:', skuOriginal);
+
+
+  const payload = {
+    id_agend: idAgend,
+    sku_original: skuOriginal,
+    sku_bipado: skuExcloi
+  };
+
+  const resp = await fetch('/api/equiv/delete', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+
+  const data = await resp.json();
+  console.log('Resposta da exclusão:', data);
+
+  if (data.ok) {
+    notify.success(`O produto com o SKU "${skuExcloi}" foi excluído com sucesso!`);
+
+    const id_tiny_equivalente = obj.dataset.idTiny;
+    const div = document.getElementById(`produto-EQV-${id_tiny_equivalente}`);
+
+    div.remove();
+  } else {
+    notify.error(`Ocorreu um erro ao tentar excluir o produto. Contate um Desenvolvedor.`);
+    console.log('Erro ao tentar excluir produto equivalente do agendamento:', data);
+  }
+
+}
+
+function addUnEditarProduto(sku) {
+  const input = document.getElementById(`quantidade-${sku}`);
+  let value = Number(input.value)
+  value++;
+  let totalBipados = 0;
+  const produtos = document.querySelectorAll('#listaProdutos [id^="produto-"]');
+  const totalPermitido = Number(produtos[0].querySelector('[id^="total-"]').textContent.trim());
+  console.log(produtos);
+
+  produtos.forEach(prod => {
+    const bipadoElement = prod.querySelector('[id^="quantidade-"]');
+
+    if (bipadoElement) {
+      const bipadoValue = Number(bipadoElement.value.trim());
+      console.log(`Produto: Sla → Bipado: ${bipadoValue}`);
+      totalBipados += bipadoValue;
+    }
+  });
+  console.log('Total Existente:', totalBipados);
+  console.log('Total Permitido', totalPermitido);
+
+  if (++totalBipados <= totalPermitido) {
+    input.value = value;
+  } else {
+    notify.error('Você não pode adicionar mais produtos do que o agendamento está pedindo.');
+  }
+}
+
+function removeUnEditarProduto(sku) {
+  const input = document.getElementById(`quantidade-${sku}`);
+  let value = Number(input.value)
+  value--;
+
+  if (value >= 0) {
+    input.value = value;
+  } else {
+    notify.error('Não é possível adicionar unidades negativas ao agendamento! \nPor favor, nem tente ;-)');
+  }
+}
+
+async function salvarAlteracoes() {
+  // Aqui, para otimizar a quantidade de requisições feitas ao banco  
+  // Ele deve verificar o que houve mudanças, para isso, verifica se os valores são iguais 
+  // ou seja, se bipados e a quantidade que está no input são iguais, se sim então ignora, caso contrário faz a alteração
+
+  const confirmado = await salvarAlteracoesConfirmacaoGerente();
+  const listaProdutos = document.querySelectorAll('#listaProdutos [id^="produto-"]');
+  const listaEditados = [];
+
+  for (let i = 0; i < listaProdutos.length; i++) {
+    const bipadosOriginal = Number(listaProdutos[i].querySelector('[id^="bipado-"]').textContent.trim());
+    // console.log(`Bipados de cada um #${i+1}>`, bipadosOriginal);
+    const bipadosEditado = listaProdutos[i].querySelector('[id^="quantidade-"]').value;
+    // console.log(`Bipados editado >`, bipadosEditado);
+
+    if (Number(bipadosOriginal) !== Number(bipadosEditado)) {
+      console.log(`Índice ${i} foi editado`);
+      listaEditados.push(listaProdutos[i]);
+    }
+  }
+  console.log('Estes foram editados >', listaEditados);
+
+  console.log('listaProdutos >', listaProdutos);
+
+  if (listaEditados.length > 0) {
+    for (const prod of listaEditados) {
+      console.log('>', prod);
+
+      if (prod.id.includes("EQV")) {
+        console.log('EQV');
+        const input = prod.querySelector('[id^="quantidade-"]');
+        const skuOriginal = document.getElementById('master-sku-view').textContent.trim();
+        const skuBipado = input.id.replace("quantidade-", "");
+        console.log('Esse é o SKU >', skuOriginal);
+
+
+        const bipadosOriginal = Number(prod.querySelector('[id^="bipado-"]').textContent.trim());
+        const bipadosEditado = prod.querySelector('[id^="quantidade-"]').value;
+        const delta = bipadosEditado - bipadosOriginal;
+
+        const payload = {
+          id_agend: idAgend,
+          sku_original: skuOriginal,
+          sku_bipado: skuBipado,
+          quant: delta
+        }
+
+        console.log('Este será o payload >', payload);
+
+        console.log('Fazendo requisição');
+        const req = await fetch('/api/equiv/add-unidades', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await req.json();
+
+        console.log('Essa foi a resposta da requisição de edit >', data);
+        if (data.ok) {
+          notify.success(`Edição do produto: ${skuBipado}               \nRealizado com sucesso!`);
+        } else {
+          notify.success(`Ocorreu um erro ao editar o produto: ${skuBipado}               \n`);
+          console.log('Erro >', data);
+        }
+      } else if (prod.id.includes("ORIGINAL")) {
+        console.log('ORIGINAL');
+        const skuOriginal = document.getElementById('master-sku-view').textContent.trim();
+        const input = prod.querySelector(`[id^="quantidade-${skuOriginal}"]`);
+
+        console.log('Esse é o SKU >', skuOriginal);
+        console.log(`bipado-${skuOriginal}`);
+
+
+        const bipadosOriginal = Number(document.getElementById(`bipado-${skuOriginal}`).textContent.trim());
+        const bipadosEditado = document.getElementById(`quantidade-${skuOriginal}`).value;
+
+        const delta = bipadosEditado - bipadosOriginal;
+        console.log('Delta T>', delta);
+
+        const payload = {
+          id_agend: idAgend,
+          sku: skuOriginal,
+          quant: delta
+        };
+        console.log('Payload ORiginal >', payload);
+
+        const req = await fetch('/api/bipar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await req.json();
+        console.log('Data Resposta para o produto original >', data);
+
+        if (data.ok) {
+          notify.success(`Edição do produto original: ${skuOriginal}           \nRealizado com sucesso!`);
+        } else {
+          notify.success(`Ocorreu um erro ao editar o produto: ${skuOriginal}               \n`);
+          console.log('Erro >', data);
+        }
+      }
+    };
+    fecharModal();
+  } else {
+    fecharModal();
+    notify('Não houve nenhuma alteração no produto.');
+  }
+}
+
+async function salvarAlteracoesConfirmacaoGerente() {
+  
+  return true
+}
+
+function fecharModal() {
+  document.getElementById('modal-editar-produto').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// Fecha clicando fora
+window.addEventListener('click', (e) => {
+  const modal = document.getElementById('modal-editar-produto');
+  if (e.target === modal) fecharModal();
+});
+
+// Fecha com ESC
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') fecharModal();
+});

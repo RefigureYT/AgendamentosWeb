@@ -72,7 +72,7 @@
       <!-- Bloco para itens concluídos -->
       <div id="concluidosContainer" class="info-box mb-3 overflow-auto" style="max-height: 30vh;">
         <!-- JS injeta aqui os itens com bipados >= total -->
-         <!-- <button style="width: 200px; height: 30px;" onclick="transferirEstoque();">CLICK MEEEEEEEE</button> -->
+        <!-- <button style="width: 200px; height: 30px;" onclick="transferirEstoque();">CLICK MEEEEEEEE</button> -->
       </div>
     </div>
 
@@ -80,17 +80,18 @@
     <div class="col-md-7">
       <div id="pendentesContainer" class="overflow-auto" style="max-height: 70vh;">
         {% for composicao in dados %}
-        <div class="produto-item d-flex flex-column mb-3 me-2" 
-          data-sku="{{ composicao.sku }}" 
-          data-gtin=""
-          data-total="{{ composicao.unidades_totais }}" 
-          data-bipados="0">
+        <div class="produto-item d-flex flex-column mb-3 me-2" data-sku="{{ composicao.sku }}" data-gtin=""
+          data-total="{{ composicao.unidades_totais }}" data-bipados="0">
           <div class="d-flex justify-content-between align-items-center">
             <span class="text-truncate d-inline-block w-100" style="max-width: 400px;" title="{{ composicao.nome }}">
               {{ composicao.comp_origem[0].nome }}
             </span>
+            <div id="editarProdutoComp-id[{{ composicao.sku }}]"
+              onclick="editarProdutoCompLapis('{{ composicao.sku }}')" style="margin-left: 70px; cursor: pointer;">✏️
+            </div>
             <div id="btnEquivalente-{{ composicao.sku }}" onclick="adicionarEquivalente('{{ composicao.sku }}');"
-              style="width: 25px; height: 25px; font-size: 40px; color: red; margin-top: -40px;"> + </div>
+              style="width: 25px; height: 25px; font-size: 40px; color: red; margin-top: -40px; cursor: pointer;"> +
+            </div>
             <div id="equivalente-{{ composicao.sku }}" class="input-equivalente-off"
               style="width: 300px; height: 30px; border: 2px solid red;">
               <input id="inputEquivalente-{{ composicao.sku }}" type="text">
@@ -111,21 +112,58 @@
       </div>
     </div>
   </div>
+  <!-- Modal -->
+  <div id="modal-editar-produto" class="modal">
+    <div class="modal-content">
+      <!-- <span class="close" onclick="fecharModal()" aria-label="Fechar">&times;</span> -->
+      <h2 class="titulo-vermelho">Editar Produto</h2>
+
+      <!-- Layout do conteúdo do modal: esquerda = info master | direita = lista rolável -->
+      <div id="modalEditorWrap" class="modal-grid">
+        <!-- Painel esquerdo: informações do produto em edição -->
+        <aside id="conteudoModalEditarProduto" class="info-box">
+          <p>Produto: <strong id="master-nome">Teste1</strong></p>
+          <p>SKU: <strong id="master-sku-view">API1</strong></p>
+          <p>GTIN/EAN: <strong id="master-gtin">123456789</strong></p>
+          <img id="master-img" style="max-width:100%;height:auto"
+            src="https://www.heart.org/-/media/Images/Health-Topics/Congenital-Heart-Defects/50_1683_44a_ASD.jpg?h=551&w=572&sc_lang=en"
+            alt="Teste1">
+        </aside>
+
+        <!-- Coluna direita: lista de produtos (original + equivalentes) com rolagem -->
+        <section id="listaProdutos" class="produtos-scroll">
+          <div class="header-bar">Produtos neste conjunto</div>
+      </div>
+
+      <!-- Você pode clonar o bloco acima e trocar o sufixo do ID pelo SKU correspondente -->
+      </section>
+    </div>
+
+    <!-- Rodapé do modal: ações -->
+    <div class="modal-actions">
+      <button type="button" class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
+      <button id="btn-salvar-edicoes" type="button" class="btn btn-primary" onclick="salvarAlteracoes()">
+        Salvar Alterações
+      </button>
+    </div>
+
+  </div>
+</div>
 
 
-  <!-- Exemplo de ERRO ao buscar um produto equivalente -->
-  <div id="erroBuscaEquivalenteDiv" class="input-equivalente-off"
-    style="position: fixed; border: 1px solid red; width: 100px; height: 100px" ;></div>
 
-  <!-- Esse daqui é para substituir o modal que mostra o produto bipado como Equivalente -->
-  <div id="confirmaEquivalente" class="input-equivalente-off" style="border: 3px solid red; width: 500px; height: 650px; position: fixed; top: 25%; left: 40%; background-color: white;"></div>
+<!-- Exemplo de ERRO ao buscar um produto equivalente -->
+<div id="erroBuscaEquivalenteDiv" class="input-equivalente-off"
+  style="position: fixed; border: 1px solid red; width: 100px; height: 100px" ;></div>
+
+<!-- Esse daqui é para substituir o modal que mostra o produto bipado como Equivalente -->
+<div id="confirmaEquivalente" class="input-equivalente-off"
+  style="border: 3px solid red; width: 500px; height: 650px; position: fixed; top: 25%; left: 40%; background-color: white;">
+</div>
 </div>
 <div id="js-data" data-comps='{{ comps | tojson | safe }}' data-dados="{{ dados }}" style="display:none;"></div>
-<div id="infoAgend" 
-  data-empresa='{{ dados_agend.empresa }}' 
-  data-agendamento='{{ dados_agend.id_agend_ml }}'
-  data-colaborador='{{ dados_agend.colaborador or ' Nenhum' }}' 
-  data-marketplace='{{ marketplace_nome }}'
+<div id="infoAgend" data-empresa='{{ dados_agend.empresa }}' data-agendamento='{{ dados_agend.id_agend_ml }}'
+  data-colaborador='{{ dados_agend.colaborador or ' Nenhum' }}' data-marketplace='{{ marketplace_nome }}'
   style="display: none;"></div>
 {% endblock %}
 

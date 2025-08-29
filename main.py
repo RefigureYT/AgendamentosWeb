@@ -87,4 +87,4 @@ from rotas import *
 if __name__ == "__main__":
     # veja seu mapa de URLs já com retiradoEstoque registrado
     # print(app.url_map)
-    app.run(host='0.0.0.0', port=2232, debug=True)
+    app.run(host='0.0.0.0', port=8345, debug=True)
