@@ -1,6 +1,7 @@
 anyio==4.9.0
 asgiref==3.8.1
 attrs==25.3.0
+base_jp_lab @ file:///home/ubuntujp/Desenvolvedores/kelvinho/agendamentosWeb_Sandbox/Teste_web/base_jp_lab
 bidict==0.23.1
 blinker==1.9.0
 cachetools==5.5.2
