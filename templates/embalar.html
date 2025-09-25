@@ -131,6 +131,44 @@
     </div>
 </div>
 
+<!-- Modal: Escolher Impressora (estático, com loading) -->
+<div class="modal fade" id="printerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
+    aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width: 520px">
+        <div class="modal-content shadow-lg">
+            <div class="modal-header">
+                <h5 class="modal-title">Escolher impressora</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+
+            <div class="modal-body">
+                <!-- Loading -->
+                <div id="printerLoading" class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                    <span>Procurando impressoras instaladas…</span>
+                </div>
+
+                <!-- Lista -->
+                <div id="printerListWrap" class="d-none">
+                    <div class="list-group" id="printerList" role="radiogroup" aria-label="Lista de impressoras"></div>
+
+                    <!-- Estado vazio -->
+                    <div id="printerEmpty" class="alert alert-warning mt-3 d-none mb-0">
+                        Nenhuma impressora foi detectada pelo BrowserPrint neste computador.
+                    </div>
+                </div>
+
+                <!-- Erro -->
+                <div id="printerError" class="alert alert-danger d-none mb-0"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" id="btnConfirmPrinter" class="btn btn-primary" disabled>Usar esta</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div id="js-data" data-comps='{{ comps | tojson | safe }}' style="display:none;"></div>
 <div id="placeholder-image" data-url="{{ url_for('static', filename='resources/sem_img.webp') }}"></div>

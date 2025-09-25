@@ -1,4 +1,156 @@
 document.addEventListener("DOMContentLoaded", async () => {
+
+  // ---- Modal de seleção de impressoras (BrowserPrint) ----
+  (() => {
+    // Mapa das chaves persistidas por tipo
+    const KEY_BY_TIPO = { relatorio: 'printer_relatorio', caixa: 'printer_caixa', id: 'printer_id' };
+
+    let currentKey = null;
+    let selectedName = null;
+    let isFetching = false; // guarda contra requisições concorrentes
+
+    const modalEl = document.getElementById("printerModal");
+    const btnOk = document.getElementById("btnConfirmPrinter");
+    const loadingEl = document.getElementById("printerLoading");
+    const listWrap = document.getElementById("printerListWrap");
+    const listEl = document.getElementById("printerList");
+    const emptyEl = document.getElementById("printerEmpty");
+    const errorEl = document.getElementById("printerError");
+
+    // Exponho globalmente para você poder usar em qualquer função
+    window.bsModal = modalEl ? new bootstrap.Modal(modalEl) : null;
+
+    function resetUI() {
+      btnOk.disabled = true;
+      selectedName = null;
+      loadingEl.classList.remove("d-none");
+      listWrap.classList.add("d-none");
+      emptyEl.classList.add("d-none");
+      errorEl.classList.add("d-none");
+      errorEl.textContent = "";
+      listEl.innerHTML = "";
+    }
+
+    function createItem(name, preselect = false) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "list-group-item list-group-item-action d-flex justify-content-between align-items-center";
+      item.setAttribute("role", "radio");
+      item.setAttribute("aria-checked", preselect ? "true" : "false");
+      item.textContent = name;
+
+      const mark = document.createElement("span");
+      mark.className = "badge text-bg-light";
+      mark.textContent = preselect ? "Atual" : "Selecionar";
+      item.appendChild(mark);
+
+      if (preselect) {
+        item.classList.add("active");
+        selectedName = name;
+        btnOk.disabled = false;
+      }
+
+      item.addEventListener("click", () => {
+        listEl.querySelectorAll(".list-group-item").forEach(el => {
+          el.classList.remove("active");
+          el.setAttribute("aria-checked", "false");
+          const b = el.querySelector(".badge");
+          if (b) b.textContent = "Selecionar";
+        });
+        item.classList.add("active");
+        item.setAttribute("aria-checked", "true");
+        mark.textContent = "Selecionado";
+        selectedName = name;
+        btnOk.disabled = false;
+      });
+
+      return item;
+    }
+
+    function openPrinterModalForKey(key) {
+      if (!window.bsModal) { console.warn("Modal de impressoras não encontrado."); return; }
+      if (isFetching) return; // evita múltiplas buscas/listagens
+
+      isFetching = true;
+      currentKey = key;
+      resetUI();
+      bsModal.show(); // abre já em modo "loading" e bloqueia a UI
+
+      if (!window.BrowserPrint || typeof BrowserPrint.getLocalDevices !== "function") {
+        loadingEl.classList.add("d-none");
+        errorEl.textContent = "Zebra BrowserPrint não detectado. Instale/abra o BrowserPrint para listar impressoras.";
+        errorEl.classList.remove("d-none");
+        isFetching = false;
+        return;
+      }
+
+      BrowserPrint.getLocalDevices(
+        (devicesObject) => {
+          const printers = devicesObject?.printer || [];
+          const saved = localStorage.getItem(key);
+
+          loadingEl.classList.add("d-none");
+          listWrap.classList.remove("d-none");
+          listEl.innerHTML = "";
+
+          if (!printers.length) {
+            emptyEl.classList.remove("d-none");
+          } else {
+            printers.forEach(p => listEl.appendChild(createItem(p.name, saved && p.name === saved)));
+            btnOk.disabled = !listEl.querySelector(".list-group-item.active");
+          }
+
+          isFetching = false;
+        },
+        (err) => {
+          loadingEl.classList.add("d-none");
+          errorEl.textContent = "Falha ao comunicar com o BrowserPrint. Verifique a instalação e tente novamente.";
+          errorEl.classList.remove("d-none");
+          console.error("[BrowserPrint] getLocalDevices error:", err);
+          isFetching = false;
+        }
+      );
+    }
+
+    btnOk.addEventListener("click", () => {
+      if (!currentKey || !selectedName) return;
+      localStorage.setItem(currentKey, selectedName);
+
+      // dispara evento para quem quiser ouvir e atualizar UI
+      document.dispatchEvent(new CustomEvent("printer:selected", {
+        detail: { key: currentKey, name: selectedName }
+      }));
+
+      bsModal.hide();
+    });
+
+    // Exponho uma função por tipo (relatorio|caixa|id)
+    window.openPrinterModalByTipo = function (tipo) {
+      const key = KEY_BY_TIPO[tipo];
+      if (!key) return;
+      openPrinterModalForKey(key);
+    };
+  })();
+  // Para fins de DEBUG
+  // Abaixo tem o código que quando todo o DOM é carregado
+  // Surge um ALERTA dizendo as impressoras que estão salvas no localStorage /* para conferência */
+  // (pode ser removido depois de testado)
+
+  // const savedPrinters = [
+  //     { key: "printer_relatorio" },
+  //     { key: "printer_caixa" },
+  //     { key: "printer_id" },
+  // ].map(cfg => {  
+  //     const v = localStorage.getItem(cfg.key);
+  //     return `${cfg.key}: ${v ? v : "(nenhuma)"}`;
+  // }).join("\n");
+  // if (savedPrinters) {
+  //     alert("Impressoras salvas:\n" + savedPrinters);
+  // } else {
+  //     alert("Nenhuma impressora salva.");
+  // }
+  // Fim do código de DEBUG
+  // ===================================================================
   // 1) Dados iniciais e imagem padrão
   const raw = document.getElementById("js-data").dataset.comps;
   const produtos = JSON.parse(raw);
@@ -8,6 +160,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   const idAgendBd = headerBar ? headerBar.dataset.idBd : null;
 
   const agendamentoCompleto = {};
+
+  // Crie uma fila 1-shot no escopo do arquivo
+  let pendingPrint = null
+
+  document.addEventListener("printer:selected", () => {
+    if (!pendingPrint) return;
+    const job = pendingPrint;
+    pendingPrint = null;           // evita loop/duplicidade
+    setTimeout(() => imprimirEtiqueta(job.zpl, job.tipo), 0);
+  });
 
   // Pega os dados principais dos atributos data-* do cabeçalho
   if (headerBar) {
@@ -54,18 +216,37 @@ document.addEventListener("DOMContentLoaded", async () => {
   let caixaAtivaIndex = -1;
   let caixaStartTime = null;
 
+  // Outra função que também será descontinuada
+  // Utilize sempre a função imprimirEtiqueta(zpl, tipo) (UNIVERSAL)
   function imprimirNaImpressoraDeRede(zpl) {
     BrowserPrint.getLocalDevices(
       devices => {
-        const termos = ['deskjp12', '192.168.15.152'];
-        const printer = devices.find(d =>
-          d.connection === 'driver' &&
-          termos.some(t => d.uid.toLowerCase().includes(t))
-        );
+        // Termo de busca alterado para apenas deskjp12
+        // const termos = ['deskjp12', '192.168.15.152'];
+        // Não deu certo, vamos procurar pelo nome da impressora
+        // const hostComputador  = 'deskjp12';
+        const nomeExatoDaImpressora = 'Impressora Etiqueta Conferencia01 em deskjp12'.toLowerCase();
+
+        console.log("Procurando pela impressora com nome exato:", nomeExatoDaImpressora);
+        console.log('Devices encontrados ->', devices);
+        const printer = devices.find(d => {
+          // Condição 1: A impressora deve ser gerenciada por um driver no pc do usuário
+          // const isDriver = d.connection === 'driver';
+
+          // Condição 2: O nome do computador host ('deskjp12') deve estar no nome ou UID da impressora.
+          // O UID de impressoras de driver compartilhadas costuma ser algo como:
+          // "\\deskjp12\ZebraPrinter" ou "Zebra (Cópia 1) em deskjp12"
+          // const hasHostName = d.uid.toLowerCase().includes(hostComputador);
+          // termos.some(t => d.uid.toLowerCase().includes(t))
+          // return isDriver && hasHostName;
+          return d.name.toLowerCase() === nomeExatoDaImpressora;
+        });
         if (!printer) {
           console.error("❌ Impressora compartilhada não encontrada.");
+          console.log("Verifique se a impressora compartilhada a partir de 'deskjp12' está instalada neste computador e online.");
           return;
         }
+        console.log("✅ Impressora compartilhada encontrada:", printer);
         printer.send(
           zpl,
           () => console.log("✅ Enviado via driver Windows!"),
@@ -77,8 +258,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     );
   }
 
-
-  function printViaBrowserPrint(zpl) {
+  // Essa função será removida
+  // Será usada uma outra função universal que utilizará a impressora salva no localStorage
+  function printViaBrowserPrint(zpl) { // Para gerar as etiquetas dos produtos (Mercado Livre Full)
     BrowserPrint.getDefaultDevice("printer", function (printer) {
       printer.send(zpl,
         () => console.log("enviado!"),
@@ -86,6 +268,46 @@ document.addEventListener("DOMContentLoaded", async () => {
       );
     }, err => console.error("nenhuma impressora:", err));
   }
+
+  // Função universal para a impressão de etiquetas
+  function imprimirEtiqueta(zpl, tipo) {
+    const keyMap = { relatorio: 'printer_relatorio', caixa: 'printer_caixa', id: 'printer_id' };
+    const key = keyMap[tipo];
+    if (!key) return console.error("Tipo inválido:", tipo);
+
+    const saved = localStorage.getItem(key);
+    if (!saved) {
+      console.error("Nenhuma impressora salva para:", key);
+      if (!pendingPrint) pendingPrint = { zpl, tipo };
+      if (typeof window.openPrinterModalByTipo === "function") window.openPrinterModalByTipo(tipo);
+      return;
+    }
+
+    if (!window.BrowserPrint || typeof BrowserPrint.getLocalDevices !== "function") {
+      console.error("BrowserPrint indisponível.");
+      return;
+    }
+
+    BrowserPrint.getLocalDevices(
+      (devices) => {
+        const dev = devices.find(d => d.uid === saved || d.name === saved);
+        if (!dev) {
+          console.error("Impressora salva não encontrada:", saved);
+          if (!pendingPrint) pendingPrint = { zpl, tipo };
+          if (typeof window.openPrinterModalByTipo === "function") window.openPrinterModalByTipo(tipo);
+          return;
+        }
+        dev.send(zpl,
+          () => console.log("✅ Enviado para:", dev.name || dev.uid),
+          err => console.error("❌ Erro ao imprimir:", err)
+        );
+      },
+      err => console.error("❌ Erro ao listar impressoras:", err),
+      "printer"
+    );
+  }
+  // Fim da função universal de impressão
+
 
   if (!idAgendMl) {
     console.error("Não foi possível encontrar o ID do Agendamento (id_agend_ml) no HTML.");
@@ -364,7 +586,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     ].join('\n');
 
     console.log(zpl);
-    imprimirNaImpressoraDeRede(zpl);
+    imprimirEtiqueta(zpl, 'caixa');
   }
 
 
@@ -435,7 +657,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const zpl = linhas.join('\n');
     console.log(zpl)
-    imprimirNaImpressoraDeRede(zpl);
+    imprimirEtiqueta(zpl, 'caixa');
   }
 
 
@@ -908,7 +1130,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const zpl = zplAndamento.join("\n");
     console.log(zpl);
-    printViaBrowserPrint(zpl);
+    imprimirEtiqueta(zpl, "id");
   }
 
 

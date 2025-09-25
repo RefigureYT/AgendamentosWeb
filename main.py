@@ -16,6 +16,7 @@ from flask import (
 from flask import session as flask_session, request as flask_request, redirect as flask_redirect, url_for as flask_url_for
 
 from base_jp_lab import Access, Caller
+
 from classes import AgendamentoController, DatabaseController
 from flask_cors import CORS
 import pandas as pd
@@ -48,6 +49,7 @@ def require_login():
         'static',                   # arquivos estáticos
         'retirado.api_bipar',       # POST /api/bipar
         'retirado.api_bipados_agend'# GET  /api/bipados/<id_agend>
+        'health_check'              # rota de health check
     }
     ep = flask_request.endpoint or ''
     if ep not in open_endpoints and 'id_usuario' not in flask_session:
@@ -65,6 +67,19 @@ access = Access(
 
 # 2) passa essa instância para o Caller (não a classe!)
 caller = Caller(access, "tiny")
+
+# # =====================================================================
+# # === INÍCIO DO CÓDIGO DE TESTE (TEMPORÁRIO) ===
+# # =====================================================================
+# print("\n--- SIMULANDO TOKEN EXPIRADO ---")
+# # Força um token inválido no header da sessão do Caller.
+# # Isso fará com que a primeira requisição falhe com erro 403.
+# caller.session.headers.update({'Authorization': 'Bearer aaaa'}) 
+# print(f"Header de autorização foi forçado para: {caller.session.headers['Authorization']}")
+# print("--- FIM DA SIMULAÇÃO ---\n")
+# # =====================================================================
+# # === FIM DO CÓDIGO DE TESTE ===
+# # =====================================================================
 
 # 3) cria os controllers usando a mesma instância de Access
 db_controller         = DatabaseController(access)

@@ -147,8 +147,10 @@ class DatabaseController:
         )
         
     def exists_agendamento_ml(self, ml_id: str) -> bool:
-        sql = f"SELECT 1 FROM agendamento WHERE id_agend_ml = '{ml_id}'"
-        return bool(self.access.custom_select_query(sql))
+        """Verifica se um agendamento com um id_agend_ml específico já existe."""
+        # CORREÇÃO: Usa um placeholder (%s) em vez de f-string para segurança.
+        sql = f"SELECT 1 FROM agendamento WHERE id_agend_ml = %s LIMIT 1"
+        return bool(self.access.custom_select_query(sql, (ml_id,)))
 
     def delete_agendamento_completo(self, id_agend_bd: int):
         """
@@ -164,34 +166,51 @@ class DatabaseController:
         produtos_result = self.access.custom_select_query("SELECT id_prod FROM produtos_agend WHERE id_agend_prod = %s;", (id_agend_bd,))
         id_produtos = tuple([row[0] for row in produtos_result])
 
-        # --- INÍCIO DA CORREÇÃO ---
-        if id_produtos:
-            # Cria a string de placeholders, ex: "(%s, %s, %s)"
-            placeholders = ', '.join(['%s'] * len(id_produtos))
+        # # --- INÍCIO DA CORREÇÃO ---
+        # if id_produtos:
+        #     # Cria a string de placeholders, ex: "(%s, %s, %s)"
+        #     placeholders = ', '.join(['%s'] * len(id_produtos))
 
-            # 1. Limpa tabelas de logs/tracking usando a nova query formatada
-            query_alteracoes = f"DELETE FROM alteracoes_agend WHERE id_prod_alt IN ({placeholders})"
-            # O método custom_i_u_query espera uma lista de tuplas, então passamos [id_produtos]
-            self.access.custom_i_u_query(query_alteracoes, [id_produtos])
+        #     # 1. Limpa tabelas de logs/tracking usando a nova query formatada
+        #     #    Limpa tabelas filhas que dependem dos produtos
+        #     query_alteracoes = f"DELETE FROM alteracoes_agend WHERE id_prod_alt IN ({placeholders})"
+        #     # O método custom_i_u_query espera uma lista de tuplas, então passamos [id_produtos]
+        #     self.access.custom_i_u_query(query_alteracoes, [id_produtos])
 
-            query_compras = f"DELETE FROM compras_agend WHERE id_prod_compra IN ({placeholders})"
-            self.access.custom_i_u_query(query_compras, [id_produtos])
+        #     query_compras = f"DELETE FROM compras_agend WHERE id_prod_compra IN ({placeholders})"
+        #     self.access.custom_i_u_query(query_compras, [id_produtos])
             
-            # 2. Limpa as composições dos produtos
-            query_composicoes = f"DELETE FROM comp_agend WHERE id_prod_comp IN ({placeholders})"
-            self.access.custom_i_u_query(query_composicoes, [id_produtos])
+        #     # 2. Limpa as composições dos produtos
+        #     query_composicoes = f"DELETE FROM comp_agend WHERE id_prod_comp IN ({placeholders})"
+        #     self.access.custom_i_u_query(query_composicoes, [id_produtos])
 
-            # 4. Limpa os produtos do agendamento (este DELETE estava correto, mas movemos para o final do bloco)
+        #     # 4. Limpa os produtos do agendamento (este DELETE estava correto, mas movemos para o final do bloco)
+        #     self.access.custom_i_u_query("DELETE FROM produtos_agend WHERE id_agend_prod = %s;", [(id_agend_bd,)])
+        # # --- FIM DA CORREÇÃO ---
+
+
+        # if id_agend_ml:
+        #     # 3. Limpa tabelas que usam o id_agend_ml (esta parte já estava correta)
+        #     self.access.custom_i_u_query("DELETE FROM agendamento_produto_bipagem WHERE id_agend_ml = %s;", [(id_agend_ml,)])
+        #     self.access.custom_i_u_query("DELETE FROM relatorio_agend WHERE id_agend_ml = %s;", [(id_agend_ml,)])
+        
+        # # 5. Finalmente, exclui o agendamento principal (esta parte já estava correta)
+        # self.access.custom_i_u_query("DELETE FROM agendamento WHERE id_agend = %s;", [(id_agend_bd,)])
+        
+        # return True
+        
+        # LÓGICA CORRIGIDA APLICADA
+        if id_produtos:
+            placeholders = ', '.join(['%s'] * len(id_produtos))
+            self.access.custom_i_u_query(f"DELETE FROM alteracoes_agend WHERE id_prod_alt IN ({placeholders})", [id_produtos])
+            self.access.custom_i_u_query(f"DELETE FROM compras_agend WHERE id_prod_compra IN ({placeholders})", [id_produtos])
+            self.access.custom_i_u_query(f"DELETE FROM comp_agend WHERE id_prod_comp IN ({placeholders})", [id_produtos])
             self.access.custom_i_u_query("DELETE FROM produtos_agend WHERE id_agend_prod = %s;", [(id_agend_bd,)])
-        # --- FIM DA CORREÇÃO ---
-
 
         if id_agend_ml:
-            # 3. Limpa tabelas que usam o id_agend_ml (esta parte já estava correta)
             self.access.custom_i_u_query("DELETE FROM agendamento_produto_bipagem WHERE id_agend_ml = %s;", [(id_agend_ml,)])
             self.access.custom_i_u_query("DELETE FROM relatorio_agend WHERE id_agend_ml = %s;", [(id_agend_ml,)])
         
-        # 5. Finalmente, exclui o agendamento principal (esta parte já estava correta)
         self.access.custom_i_u_query("DELETE FROM agendamento WHERE id_agend = %s;", [(id_agend_bd,)])
         
         return True

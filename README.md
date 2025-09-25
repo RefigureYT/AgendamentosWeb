@@ -1,4 +1,5 @@
 # AgendamentosWeb
+[![wakatime](https://wakatime.com/badge/user/db4a2800-e564-4201-9406-b98e170a6764/project/96ca3246-1153-4315-882c-4663d870ca5c.svg)](https://wakatime.com/badge/user/db4a2800-e564-4201-9406-b98e170a6764/project/96ca3246-1153-4315-882c-4663d870ca5c)
 
 Sistema de Agendamentos WEB desenvolvido exclusivamente para a **Jaú Pesca**.
 

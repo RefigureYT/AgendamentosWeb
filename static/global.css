@@ -26,3 +26,21 @@ img {
     user-select: none;
 }
 
+/* Modal - lista clicável com foco acessível */
+#printerList .list-group-item {
+    cursor: pointer;
+    border-radius: .5rem !important;
+}
+
+#printerList .list-group-item.active {
+    border-color: rgba(13, 110, 253, .25);
+}
+
+/* Espaços e estados */
+#printerLoading {
+    min-height: 40px;
+}
+
+#printerList .list-group-item { cursor: pointer; border-radius: .5rem !important; }
+#printerList .list-group-item.active { border-color: rgba(13,110,253,.25); }
+#printerLoading { min-height: 40px; }

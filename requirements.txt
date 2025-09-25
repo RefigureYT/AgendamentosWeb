@@ -1,7 +1,6 @@
 anyio==4.9.0
 asgiref==3.8.1
 attrs==25.3.0
-base_jp_lab @ file:///home/ubuntujp/Desenvolvedores/kelvinho/agendamentosWeb_Sandbox/Teste_web/base_jp_lab
 bidict==0.23.1
 blinker==1.9.0
 cachetools==5.5.2
@@ -44,7 +43,6 @@ outcome==1.3.0.post0
 packaging==25.0
 pandas==2.2.3
 pdfminer.six==20250506
-psycopg2==2.9.10
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycparser==2.22
@@ -79,3 +77,4 @@ Werkzeug==3.1.3
 wsproto==1.2.0
 zope.event==5.0
 zope.interface==7.2
+psycopg2-binary==2.9.10

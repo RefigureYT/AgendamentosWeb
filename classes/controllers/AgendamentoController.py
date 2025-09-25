@@ -534,24 +534,24 @@ class AgendamentoController:
         try:
             # 1) carrega todos os agendamentos do DB em memória
             self.create_agendamento_from_bd_data()
-            agendamento = self.search_agendamento("id_bd", str(id_bd))
-            if not agendamento:
+            agendamento_original = self.search_agendamento("id_bd", str(id_bd))
+            if not agendamento_original:
                 return False, f"Agendamento com id_bd={id_bd} não encontrado."
 
             # --- INÍCIO DA CORREÇÃO ---
             # Guarda o centro de distribuição original antes de qualquer modificação
-            centro_original = agendamento.centro_distribuicao
+            centro_final = centro_distribuicao if centro_distribuicao is not None else agendamento_original.centro_distribuicao
             # --- FIM DA CORREÇÃO ---
 
             # 2) atualiza meta-dados em memória, incluindo o novo número do pedido
-            agendamento.id_agend_ml = new_id_agend_ml
-            agendamento.set_colaborador(colaborador)
-            agendamento.set_empresa(empresa)
-            agendamento.set_mktp(id_mktp)
-            agendamento.set_tipo(id_tipo)
+            agendamento_original.id_agend_ml = new_id_agend_ml
+            agendamento_original.set_colaborador(colaborador)
+            agendamento_original.set_empresa(empresa)
+            agendamento_original.set_mktp(id_mktp)
+            agendamento_original.set_tipo(id_tipo)
             # --- CORREÇÃO ---
             # Usa o valor original que acabamos de guardar
-            agendamento.set_centro(centro_original)
+            agendamento_original.set_centro(centro_final)
 
             # 3) limpa produtos e composições antigas do banco
             self.db_controller.delete_composicoes_by_agendamento(id_bd)
@@ -566,7 +566,7 @@ class AgendamentoController:
                 id_mktp=id_mktp,
                 # --- CORREÇÃO ---
                 # Passa o valor original para o novo agendamento que será criado
-                centro_distribuicao=centro_original,
+                centro_distribuicao=centro_final,
                 colaborador=colaborador
             )
             novo = self.agendamentos[-1]

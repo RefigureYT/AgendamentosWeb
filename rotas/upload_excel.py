@@ -24,10 +24,11 @@ def mime_permitido(filename):
 
 @app.route('/upload-excel', methods=['POST'])
 def upload_excel():
+    save_path = None
     try:
         file = request.files.get('file')
         if not file or not mime_permitido(file.filename):
-            flash("Arquivo inválido ou não selecionado", 'danger')
+            flash("Arquivo inválido ou não selecionado. Apenas .xlsx, .xls e .csv são permitidos.", 'danger')
             raise ArquivoInvalido()
 
         # salva o arquivo no disco
@@ -68,22 +69,40 @@ def upload_excel():
         # 4) insere os produtos
         agendamento_controller.insert_produto_in_bd(ag)
 
-        # 5) atualiza os produtos em memória com o id_prod que foi gerado no insert
-        for rec in agendamento_controller.return_all_produtos_from_agendamento(ag):
-            inserted_prod_id = rec[0]    # id_prod do BD
-            sku_prod          = rec[4]    # sku_prod vindo do tuple
-            produto_obj = agendamento_controller.search_produto(ag, 'sku', sku_prod)
-            if produto_obj:
+        # ATUALIZAÇÃO E CORREÇÃO: Mapeia os IDs gerados de volta para os objetos em memória #
+        produtos_do_bd = agendamento_controller.return_all_produtos_from_agendamento(ag)
+        
+        # Cria um mapa que agrupa produtos por SKU. Cada SKU aponta para uma lista de objetos.
+        mapa_produtos_memoria = {}
+        for p in ag.produtos:
+            mapa_produtos_memoria.setdefault(p.sku, []).append(p)
+
+        for rec in produtos_do_bd:
+            inserted_prod_id, sku_prod = rec[0], rec[4]
+            
+            # Verifica se há uma lista de produtos para este SKU
+            if sku_prod in mapa_produtos_memoria and mapa_produtos_memoria[sku_prod]:
+                # Pega o primeiro produto da lista que ainda não tem ID e o remove.
+                produto_obj = mapa_produtos_memoria[sku_prod].pop(0)
                 produto_obj.set_id_bd(inserted_prod_id)
                 produto_obj.set_id_bd_for_composicoes()
+            else:
+                # Este aviso agora indica um problema mais sério (descompasso real)
+                app.logger.warning(f"SKU {sku_prod} do BD não correspondeu a nenhum produto pendente em memória.")
+
+        ##########################################################################################
 
         # 6) insere as composições (foreign-key já ajustado pelo passo 5)
         agendamento_controller.insert_composicao_in_bd(ag)
 
-        # 7) redireciona para a view do Excel (ou cleaning) passando o uuid
+        # 7) Define as flags de erro de estoque após tudo estar inserido (NOVO)
+        agendamento_controller.set_error_flags_composicoes(ag)
+        
+        # 8) redireciona para a view do Excel (ou cleaning) passando o uuid
         return redirect(url_for('agendamentos', acao='ver') + "?upload=ok_excel")
 
     except Exception as e:
+        app.logger.error(f"Erro ao processar EXCEL: {e}", exc_info=True)
         print(f"Erro ao processar EXCEL: {e}")
         erro_msg = "erro_desconhecido"
         err_str = str(e).lower()
@@ -96,7 +115,13 @@ def upload_excel():
         elif "database" in err_str:
             erro_msg = "erro_banco"
 
+        flash("Ocorreu um erro inesperado ao processar a planilha.", "danger")
         return redirect(
             url_for('agendamentos', acao='ver')
             + f"?upload=fail&erro={erro_msg}"
         )
+        
+    finally:
+        # Garante que o arquivo temporário seja sempre removido
+        if save_path and os.path.exists(save_path):
+            os.remove(save_path)
