@@ -1,5 +1,12 @@
+<p align="center">
+  <a href="https://wakatime.com/@db4a2800-e564-4201-9406-b98e170a6764">
+    <img src="https://wakatime.com/badge/user/db4a2800-e564-4201-9406-b98e170a6764/project/96ca3246-1153-4315-882c-4663d870ca5c.svg" alt="WakaTime" height="40"/>
+  </a>
+  <img src="https://img.shields.io/badge/made%20with-%F0%9F%92%9C-red" alt="Made with Love" height="40"/>
+  <img src="https://img.shields.io/badge/status-active-success" alt="Status" height="40"/>
+</p>
+
 # AgendamentosWeb
-[![wakatime](https://wakatime.com/badge/user/db4a2800-e564-4201-9406-b98e170a6764/project/96ca3246-1153-4315-882c-4663d870ca5c.svg)](https://wakatime.com/badge/user/db4a2800-e564-4201-9406-b98e170a6764/project/96ca3246-1153-4315-882c-4663d870ca5c)
 
 Sistema de Agendamentos WEB desenvolvido exclusivamente para a **Jaú Pesca**.
 
