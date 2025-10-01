@@ -145,30 +145,34 @@ class AgendamentoController:
 
             # Parse genérico (detecta extensão)
             rows = SpreadsheetService.parse_spreadsheet_to_dict(excel_path)
+            print(">>> DEBUG primeira linha:", rows[0])   # DEBUG
             for row in rows:
                 # --- fluxo Excel (.xlsx/.xls) ---
                 if 'sku_variacao' in row:
                     sku       = row['sku_variacao'] if row['sku_variacao'] != '-' else (row.get('sku_principal') or 'SKU não encontrado')
                     nome      = row.get('produto', '')
                     unidades  = int(row.get('unidades', 0))
-                    id_ml     = str(row.get('item_id', ''))
+                    # UNIFICAÇÃO: tenta usar etiqueta (Shopee); se não tiver, cai pro item_id
+                    id_ml     = str(row.get('id_prod_ml') or row.get('Etiqueta Full') or row.get('item_id') or '').strip()
+
                 # --- fluxo CSV Magalu (.csv) ---
                 elif 'sku' in row:
                     sku       = row['sku']
                     nome      = row.get('produto', '')
                     unidades  = int(row.get('unidades', 0))
-                    id_ml     = ''
+                    id_ml     = ''  # CSV não tem etiqueta/id do item
                 else:
                     # linha inesperada: pula
                     continue
 
                 produto = Produto(
-                    id_ml     = id_ml,
-                    nome      = nome,
-                    sku       = sku,
-                    unidades  = unidades
+                    id_ml    = id_ml,   # <--- sempre preenche o campo único
+                    nome     = nome,
+                    sku      = sku,
+                    unidades = unidades
                 )
                 agendamento.insert_produto(produto)
+
 
             self.agendamentos.append(agendamento)
             self.view.show_agendamento_created(agendamento)

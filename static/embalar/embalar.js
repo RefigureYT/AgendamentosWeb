@@ -158,9 +158,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   const headerBar = document.querySelector(".header-bar");
   const idAgendMl = headerBar ? headerBar.dataset.idMl : null;
   const idAgendBd = headerBar ? headerBar.dataset.idBd : null;
+  const idMktp = headerBar ? headerBar.dataset.idMktp : null;
+  const marketplace = { 1: "Mercado Livre", 2: "Magalu", 3: "Shopee", 4: "Amazon", 5: "Outros" }[parseInt(idMktp, 10)] || "Desconhecido";
 
   const agendamentoCompleto = {};
-
   // Crie uma fila 1-shot no escopo do arquivo
   let pendingPrint = null
 
@@ -198,10 +199,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Finalmente, exibe o objeto completo no console
   console.log("Dados do Agendamento (reconstruídos pelo JS):", agendamentoCompleto);
-
-
-
-
 
   const empresa = parseInt(headerBar.dataset.empresa, 10);
   const sellerIdMap = {
@@ -769,8 +766,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const response = await fetch("/api/embalar/bipar", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // ALTERADO: Envia o id_prod_ml para o backend
+        headers: { "Content-Type": "application/json" },        // ALTERADO: Envia o id_prod_ml para o backend
         body: JSON.stringify({ id_agend_ml: idAgendMl, id_prod_ml: idProdMl }),
       });
       if (!response.ok) {
@@ -943,8 +939,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     modalSelecione.show();
   });
 
-
-
   // ===================================================================
   // FUNÇÕES ORIGINAIS
   // ===================================================================
@@ -1061,6 +1055,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function gerarEtiqueta(sku) {
+    console.log('[ LOG ] Marketplace ID:', idMktp);
+    switch (parseInt(idMktp)) {
+      case 1: // Mercado Livre
+        gerarEtiquetaMeLi(sku);
+        console.log('Mercado Livre');
+        break;
+      case 3: // Shopee
+        gerarEtiquetaShopee(sku);
+        console.log('Shopee');
+        break;
+      default:
+        gerarEtiquetaMeLi(sku); // Padrão para outros marketplaces (SOMENTE ENQUANTO EU NÃO FAÇO AS OUTRAS)
+        console.log('Qualquer outro Marketplace ainda não implementado, usando padrão MeLi');
+        break;
+    }
+  }
+
+  function gerarEtiquetaMeLi(sku) {
     const anuncio = produtos.find((p) => p.sku === sku);
     if (!anuncio) return;
 
@@ -1088,7 +1100,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const zplAndamento = [];
 
     for (let linha = 0; linha < linhasNecessarias; linha++) {
-      zplAndamento.push("^XA^CI28");
+      zplAndamento.push("^XA"); 
+      zplAndamento.push("^CI28"); 
       zplAndamento.push("^LH0,0");
 
       // Coluna esquerda
@@ -1133,7 +1146,50 @@ document.addEventListener("DOMContentLoaded", async () => {
     imprimirEtiqueta(zpl, "id");
   }
 
+  function gerarEtiquetaShopee(sku) {
+    const anuncio = produtos.find((p) => p.sku === sku);
+    if (!anuncio) return;
 
+    const nomeAnuncio = anuncio.nome;
+    const etiqueta = anuncio.id_ml;
+
+    console.log("LOG: Gerando etiqueta Shopee para o SKU:", sku, anuncio);
+
+    const zplConstructor = []; // Array para armazenar as etiquetas (cada índice será separado por quebra de linha "\n")
+
+    console.log('anuncio:', anuncio);
+    console.log('Quantidade:', anuncio.unidades);
+
+    for (let i = 0; i < anuncio.unidades; i++) {
+      zplConstructor.push("^XA");
+      zplConstructor.push("^CI28");
+
+      zplConstructor.push("^FO15,10");
+      zplConstructor.push("^A0N,20,20");
+      zplConstructor.push("^FB450,3,0,C,0");
+      zplConstructor.push(`^FD${nomeAnuncio}^FS`);
+
+      zplConstructor.push("^FO165,70");
+      zplConstructor.push("^BQN,2,7");
+      zplConstructor.push(`^FDLA,${etiqueta}^FS`);
+
+      zplConstructor.push("^FO80,250");
+      zplConstructor.push("^A0N,20,20");
+      zplConstructor.push("^FB450,1,0,L,0");
+      zplConstructor.push(`^FDbarcode:${etiqueta}^FS`);
+
+      zplConstructor.push("^FO80,280");
+      zplConstructor.push("^A0N,20,20");
+      zplConstructor.push("^FB450,1,0,L,0");
+      zplConstructor.push(`^FDwhs skuid:${etiqueta}^FS`);
+
+      zplConstructor.push("^XZ");
+    }
+
+    const zpl = zplConstructor.join("\n");
+    console.log(zpl);
+    imprimirEtiqueta(zpl, "id");
+  }
 
 
 
@@ -1210,5 +1266,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
   // Sincroniza a cada 1 segundos
+
+
+  function funcoesDisponiveis() {
+    console.log('gerarEtiquetaShopee(\"sku\");');
+    console.log('gerarEtiquetaMeLi(\"sku\")');
+  }
+  // 👉 Expor no console:
+  window.gerarEtiquetaShopee = gerarEtiquetaShopee;
+  window.funcoesDisponiveis = funcoesDisponiveis;
+  window.gerarEtiquetaMeLi = gerarEtiquetaMeLi;
 }
 );
+

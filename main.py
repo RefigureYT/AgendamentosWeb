@@ -69,7 +69,7 @@ access = Access(
 caller = Caller(access, "tiny")
 
 # # =====================================================================
-# # === INÍCIO DO CÓDIGO DE TESTE (TEMPORÁRIO) ===
+# # === INÍCIO DO CÓDIGO DE TESTE (TEMPORÁRIO) \===
 # # =====================================================================
 # print("\n--- SIMULANDO TOKEN EXPIRADO ---")
 # # Força um token inválido no header da sessão do Caller.

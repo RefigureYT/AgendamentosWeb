@@ -13,7 +13,9 @@ class Produto:
                 etiqueta:str = '',
                 unidades:int = 0,
                 estoque_error_flag:str = '',
-                imagem_url:str = ''):
+                imagem_url:str = '',
+                id_prod_ml:str = '' # <--- Novo
+                ):
         """
         Instancia um objeto da classe Produto
 
@@ -46,7 +48,8 @@ class Produto:
         self.estoque_error_flag = estoque_error_flag
         self.is_kit:bool = False 
         self.imagem_url = imagem_url
-
+        self.id_prod_ml = id_prod_ml # <--- Novo
+        
         self.composicoes:list[Composicao] = []
 
     def __repr__(self):
@@ -75,23 +78,25 @@ class Produto:
             "unidades": self.unidades,
             "estoque_error_flag": self.estoque_error_flag,
             "imagem_url": self.imagem_url,
+            "id_prod_ml": self.id_prod_ml, # <--- Novo
             "composicao": []
         }
-    
+        
     def to_tuple(self):
         """ Transforma o objeto num tuple """
         return (
-            self.id_agend,
-            self.id_ml,
-            self.id_tiny,
-            self.sku,
-            self.gtin,
-            self.unidades,
-            self.is_kit, 
-            self.nome, 
-            self.estoque_error_flag,
-            self.imagem_url
+            self.id_agend,           # id_agend_prod
+            self.id_ml,              # id_prod_ml  (campo geral, ML ou Shopee)
+            self.id_tiny,            # id_prod_tiny
+            self.sku,                # sku_prod
+            self.gtin,               # gtin_prod
+            self.unidades,           # unidades_prod
+            self.is_kit,             # e_kit_prod
+            self.nome,               # nome_prod
+            self.estoque_error_flag, # estoque_flag_prod
+            self.imagem_url          # imagem_url_prod
         )
+
     
     
     def set_id_tiny(self, id_tiny:str = ''):

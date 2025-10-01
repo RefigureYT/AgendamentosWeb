@@ -16,10 +16,9 @@ class SpreadsheetService:
         ext = os.path.splitext(path)[1].lower()
 
         if ext in (".xls", ".xlsx"):
-            # fluxo atual de Excel (openpyxl)
             df = pd.read_excel(path, engine="openpyxl")
 
-            # normalização de nomes de colunas
+            # 1) Renomear (inclui Etiqueta Full)
             df = df.rename(columns={
                 'ID do Item':        'item_id',
                 'Produto':           'produto',
@@ -27,20 +26,27 @@ class SpreadsheetService:
                 'Nome da Variação':  'nome_variacao',
                 'SKU da Variação':   'sku_variacao',
                 'SKU Principle':     'sku_principal',
-                'Unidades (Pedido pago)': 'unidades'
+                'Unidades (Pedido pago)': 'unidades',
+                'Etiqueta Full':     'id_prod_ml'  # mantém isso
             })
 
-            # descartar linhas sem quantidade
-            df = df[df['unidades'].notna()]
 
-            # agrupar duplicatas somando 'unidades'
+            # 2) Normalizações básicas
+            df = df[df['unidades'].notna()]
+            if 'id_prod_ml' not in df.columns:
+                df['id_prod_ml'] = ''
+            df['id_prod_ml'] = df['id_prod_ml'].fillna('').astype(str).str.strip()
+
+            # 3) Agrupar preservando id_prod_ml (pega o primeiro do grupo)
             df_agg = (
-                df
-                .groupby(
-                    ['item_id','sku_variacao','sku_principal','produto','nome_variacao'],
+                df.groupby(
+                    ['item_id', 'sku_variacao', 'sku_principal', 'produto', 'nome_variacao'],
                     as_index=False
                 )
-                .agg({'unidades':'sum'})
+                .agg({
+                    'unidades': 'sum',
+                    'id_prod_ml': 'first'  # <--- PRESERVA A ETIQUETA
+                })
             )
 
             return df_agg.to_dict(orient='records')

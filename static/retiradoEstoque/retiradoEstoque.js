@@ -207,7 +207,7 @@ async function biparProduto() {
   const qtdEl = document.getElementById('quantidadeInput');
 
   let sku = (skuEl?.value || '').trim();
-  const qtd = Number(qtdEl?.value);
+  let qtd = Number(qtdEl?.value);
 
   if (!sku || !Number.isFinite(qtd) || qtd <= 0) return;
 
@@ -266,8 +266,22 @@ async function biparProduto() {
   }
 
   if (!itemOriginal) {
-    Swal.fire({ icon: 'error', title: 'SKU não encontrado!', timer: 2500, showConfirmButton: false });
-    return;
+    // Ele vai tentar buscar como se fosse uma caixa fechada 
+    // (Pega o KIT verifica se tem apenas um produto como composição e se esse produto está no agendamento)
+    const prod = await verificarSeECaixaFechada(skuOriginalParaValidar);
+
+    if (prod) {
+      qtd = prod.un;
+      sku = prod.sku;
+      // Muito importante: agora o “original” passa a ser o SKU do componente
+      skuOriginalParaValidar = prod.sku;
+      itemOriginal = document.querySelector(`.produto-item[data-sku="${esc(sku)}"]`);
+
+      if (!itemOriginal) {
+        Swal.fire({ icon: 'error', title: 'SKU não encontrado!', timer: 2500, showConfirmButton: false });
+        return;
+      }
+    }
   }
 
   // 5) Valores do DOM (fallback local)
@@ -1416,7 +1430,7 @@ async function editarProdutoCompLapis(sku) {
   console.log('Produtos >', produtos);
 
   const comp = produtos.flatMap(p => p.composicoes ?? []).find(c => c.sku === sku);
-  
+
 
   console.log('Este é o produto composição >', comp);
 
@@ -1432,13 +1446,13 @@ async function editarProdutoCompLapis(sku) {
   }
 
   const porcento = comp.unidades_totais > 0 ? Math.min(100, Math.round((totalBipadosOriginal / comp.unidades_totais) * 100)) : 0;
-  
+
   console.log('Total Bipados Original >', totalBipadosOriginal);
   const nomeProdOrigView = document.getElementById('master-nome');
   const skuView = document.getElementById('master-sku-view');
   const gtinView = document.getElementById('master-gtin');
   const img = document.getElementById('master-img');
-  
+
   console.log('Valor de comp.nome:', comp.nome);
   nomeProdOrigView.innerHTML = comp.nome;
   skuView.innerHTML = comp.sku;
@@ -1588,7 +1602,7 @@ async function excluirEquivalente(obj) {
 
   const resp = await fetch('/api/equiv/delete', {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json'},
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
 
@@ -1759,8 +1773,44 @@ async function salvarAlteracoes() {
   }
 }
 
+async function verificarSeECaixaFechada(skuOriginalParaValidar) {
+  try {
+    const getComp = await fetch(`/api/tiny/composicao-por-sku?sku=${encodeURIComponent(skuOriginalParaValidar)}`, {
+      method: 'GET',
+      headers: { "Accept": "application/json" },
+      credentials: "include"
+    });
+
+    if (!getComp.ok) {
+      // HTTP 4xx/5xx
+      return null;
+    }
+
+    const composicao = await getComp.json();
+    console.log('Resposta composição:', composicao);
+
+    // Guardas
+    if (!composicao || composicao.ok === false) return null;
+    if (!Array.isArray(composicao.kit)) return null;
+    if (composicao.kit.length !== 1) return null;
+
+    const k = composicao.kit[0];
+    if (!k || !k.produto) return null;
+
+    return {
+      id_tiny: k.produto.id,
+      sku: k.produto.sku,
+      nome: k.produto.descricao,
+      un: k.quantidade
+    };
+  } catch (err) {
+    console.error("Falha ao buscar composição:", err);
+    return null;
+  }
+}
+
 async function salvarAlteracoesConfirmacaoGerente() {
-  
+
   return true
 }
 

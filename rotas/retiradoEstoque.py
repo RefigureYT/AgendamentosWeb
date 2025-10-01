@@ -1,6 +1,6 @@
 import json
 import mysql.connector
-from flask import render_template, Blueprint, request, jsonify, current_app as app, redirect, url_for, make_response
+from flask import session, render_template, Blueprint, request, jsonify, current_app as app, redirect, url_for, make_response
 from datetime import datetime
 from classes.models import Agendamento
 from main import agendamento_controller
@@ -1237,3 +1237,144 @@ def _get_fallback_token_from_db() -> Optional[str]:
 
 def _normalize_bearer(token: str) -> str:
     return token if token.lower().startswith("bearer ") else f"Bearer {token}"
+
+@bp_retirado.route('/api/tiny/produto-por-sku-interno', methods=['GET'])
+def tiny_produto_por_sku_interno():
+    """
+    Busca produto no Tiny por SKU, usando o Caller do servidor.
+    Requer usuário logado (session['id_usuario']).
+    Ex.: GET /api/tiny/produto-por-sku-interno?sku=JP123
+    """
+    # Segurança extra (o before_request já bloqueia, mas deixo explícito):
+    if 'id_usuario' not in session:
+        return jsonify(ok=False, error='Não autenticado'), 401
+
+    sku = (request.args.get('sku') or '').strip()
+    if not sku:
+        return jsonify(ok=False, error='Parâmetro "sku" é obrigatório'), 400
+
+    try:
+        # Reaproveita o Caller (Tiny v3) já configurado no main.py
+        # Dica: situacao='A' filtra produto ativo quando houver múltiplos
+        resp = agendamento_controller.caller.make_call(
+            'produtos',
+            params_add={'codigo': sku, 'situacao': 'A'}
+        )
+
+        # Padroniza retorno
+        if not isinstance(resp, dict):
+            return jsonify(ok=False, error='Resposta inesperada do Tiny', raw=resp), 502
+
+        itens = resp.get('itens', []) or []
+        # Se vier mais de um, preferimos o ativo (situacao == 'A')
+        ativo = next((i for i in itens if i.get('situacao') == 'A'), itens[0] if itens else None)
+
+        return jsonify(ok=True, itens=itens, ativo=ativo), 200
+
+    except Exception as e:
+        app.logger.exception("Falha ao consultar Tiny por SKU")
+        return jsonify(ok=False, error=str(e)), 500
+
+
+@bp_retirado.route('/api/tiny/produto/<int:id_tiny>', methods=['GET'])
+def tiny_produto_por_id_interno(id_tiny: int):
+    """
+    Detalhes do produto por ID do Tiny, com sessão obrigatória.
+    Ex.: GET /api/tiny/produto/123456
+    """
+    if 'id_usuario' not in session:
+        return jsonify(ok=False, error='Não autenticado'), 401
+
+    try:
+        resp = agendamento_controller.caller.make_call(f'produtos/{id_tiny}')
+        if not isinstance(resp, dict):
+            return jsonify(ok=False, error='Resposta inesperada do Tiny', raw=resp), 502
+        return jsonify(ok=True, produto=resp), 200
+    except Exception as e:
+        app.logger.exception("Falha ao consultar Tiny por ID")
+        return jsonify(ok=False, error=str(e)), 500
+
+
+@bp_retirado.route('/api/tiny/produto/<int:id_tiny>/kit', methods=['GET'])
+def tiny_produto_kit_interno(id_tiny: int):
+    """
+    Composição (kit) do produto por ID do Tiny, com sessão obrigatória.
+    Ex.: GET /api/tiny/produto/123456/kit
+    """
+    if 'id_usuario' not in session:
+        return jsonify(ok=False, error='Não autenticado'), 401
+
+    try:
+        resp = agendamento_controller.caller.make_call(f'produtos/{id_tiny}/kit')
+        # O Tiny costuma devolver uma lista/nó simples; padronize para JSON
+        return jsonify(ok=True, kit=resp), 200
+    except Exception as e:
+        app.logger.exception("Falha ao consultar kit do Tiny")
+        return jsonify(ok=False, error=str(e)), 500
+    
+@bp_retirado.route('/api/tiny/composicao-por-sku', methods=['GET'])
+def tiny_composicao_por_sku_interno():
+    """
+    GET /api/tiny/composicao-por-sku?sku=JP123
+    - Requer sessão válida (usuário logado).
+    - Busca produto por SKU no Tiny -> pega ID.
+    - Busca composição (kit) por ID.
+    - Retorna {"ok": true, "sku": "...", "id_tiny": 123, "kit": [...]}.
+      Se não for kit, "kit" será [].
+    """
+    # segurança: exige usuário logado (além do before_request do app)
+    if 'id_usuario' not in session:
+        return jsonify(ok=False, error='Não autenticado'), 401
+
+    sku = (request.args.get('sku') or '').strip()
+    if not sku:
+        return jsonify(ok=False, error='Parâmetro "sku" é obrigatório'), 400
+
+    try:
+        # 1) Produto por SKU (preferindo ativo)
+        resp_prod = agendamento_controller.caller.make_call(
+            'produtos',
+            params_add={'codigo': sku, 'situacao': 'A'}
+        )
+        if not isinstance(resp_prod, dict):
+            return jsonify(ok=False, error='Resposta inesperada ao buscar produto', raw=resp_prod), 502
+
+        itens = resp_prod.get('itens') or []
+        if not itens:
+            # tenta sem filtro 'situacao' como fallback
+            resp_prod2 = agendamento_controller.caller.make_call(
+                'produtos',
+                params_add={'codigo': sku}
+            )
+            if isinstance(resp_prod2, dict):
+                itens = resp_prod2.get('itens') or []
+
+        if not itens:
+            return jsonify(ok=False, error='Produto não encontrado pelo SKU', sku=sku), 404
+
+        # escolhe item ativo; se não houver, pega o primeiro
+        ativo = next((i for i in itens if (i or {}).get('situacao') == 'A'), itens[0])
+        id_tiny = (ativo or {}).get('id')
+        if not id_tiny:
+            return jsonify(ok=False, error='Produto encontrado mas sem id Tiny'), 502
+
+        # 2) Composição (kit) por ID
+        # No seu projeto você usa '/produtos/{id}/kit' (mantemos a consistência)
+        resp_kit = agendamento_controller.caller.make_call(f'produtos/{id_tiny}/kit')
+
+        # Normaliza saída: se o Tiny não retornar lista, tenta extrair
+        if isinstance(resp_kit, list):
+            kit = resp_kit
+        elif isinstance(resp_kit, dict) and 'itens' in resp_kit:
+            kit = resp_kit.get('itens') or []
+        elif resp_kit in (None, ''):
+            kit = []
+        else:
+            # formato inesperado, mas não vamos quebrar o front
+            kit = []
+
+        return jsonify(ok=True, sku=sku, id_tiny=id_tiny, kit=kit), 200
+
+    except Exception as e:
+        app.logger.exception("Falha em /api/tiny/composicao-por-sku")
+        return jsonify(ok=False, error=str(e)), 500
