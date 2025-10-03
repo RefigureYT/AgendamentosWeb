@@ -1,5 +1,31 @@
 document.addEventListener("DOMContentLoaded", async () => {
 
+  // ==== util: escapar HTML simples (para innerHTML) ====
+  const esc = (s) => String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+  // ==== util fetch com CSRF + timeout ====
+  const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  async function fetchJSON(url, { method = 'GET', headers = {}, body = null, timeoutMs = 10000 } = {}) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort('timeout'), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method,
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF, ...headers },
+        body: body && typeof body !== 'string' ? JSON.stringify(body) : body,
+        signal: ctrl.signal
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || res.statusText);
+      return data;
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   // ---- Modal de seleção de impressoras (BrowserPrint) ----
   (() => {
     // Mapa das chaves persistidas por tipo
@@ -152,8 +178,140 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Fim do código de DEBUG
   // ===================================================================
   // 1) Dados iniciais e imagem padrão
-  const raw = document.getElementById("js-data").dataset.comps;
-  const produtos = JSON.parse(raw);
+
+  // ===== Modal Fechar Caixa: estado e helpers =====
+  const LAST_PRINT_PREF_KEY = 'preferencia_impressao_caixa';
+  let modalFecharCaixa = null;
+  let selectedOpcaoImpressao = 'ambas'; // default
+  let ultimaCaixaSnapshot = null;       // guarda referência da caixa antes de fechar
+
+  // ==== Globais usadas pelo modal de fechamento ====
+  const FKEY_TO_OPT = { F1: 'ambas', F2: 'ml', F3: 'jp', F4: 'nenhuma' };
+  let isFecharModalOpen = false; // indica se o modal de fechar caixa está aberto
+
+  function inicializarModalFecharCaixa() {
+    const elModal = document.getElementById('modalFecharCaixa');
+    if (!elModal) return;
+
+    // instancia (backdrop travado e sem ESC)
+    modalFecharCaixa = new bootstrap.Modal(elModal, { backdrop: 'static', keyboard: false });
+
+    const labels = Array.from(elModal.querySelectorAll('.fechar-caixa-option'));
+    const btnConfirm = elModal.querySelector('#btnConfirmarFechamento');
+    const btnCancel = elModal.querySelector('#btnCancelarFechamento');
+    const chkLembrar = elModal.querySelector('#guardarOpcaoImpressao');
+
+    function aplicarSelecao(id) {
+      selectedOpcaoImpressao = id;
+      labels.forEach(l => l.classList.toggle('active', l.dataset.value === id));
+      const input = elModal.querySelector(`input[name="optImpressao"][value="${id}"]`);
+      if (input) input.checked = true;
+    }
+    window.__aplicarSelecaoFecharCaixa = aplicarSelecao; // exporta para outros handlers
+
+    // estado de aberto/fechado (evita resets)
+    elModal.addEventListener('shown.bs.modal', () => { isFecharModalOpen = true; });
+    elModal.addEventListener('hidden.bs.modal', () => { isFecharModalOpen = false; });
+
+    // clique nas opções
+    labels.forEach(l => l.addEventListener('click', () => aplicarSelecao(l.dataset.value)));
+
+    // carrega preferência salva (se existir)
+    const saved = localStorage.getItem(LAST_PRINT_PREF_KEY);
+    aplicarSelecao(saved || 'ambas');
+    if (saved) chkLembrar.checked = true;
+
+    // atalhos DENTRO do modal: F1–F4 escolhem, Enter confirma
+    elModal.addEventListener('keydown', (e) => {
+      if (FKEY_TO_OPT[e.key]) {
+        e.preventDefault();
+        aplicarSelecao(FKEY_TO_OPT[e.key]);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        btnConfirm.click();
+      }
+    });
+
+    // confirmar
+    btnConfirm.addEventListener('click', async () => {
+      // lembrar preferência
+      if (chkLembrar.checked) {
+        localStorage.setItem(LAST_PRINT_PREF_KEY, selectedOpcaoImpressao);
+      }
+
+      // precisa ter caixa aberta
+      if (caixaAtivaIndex === -1 || !caixas[caixaAtivaIndex] || caixas[caixaAtivaIndex].fechada) {
+        Swal.fire("Atenção", "Nenhuma caixa aberta para fechar.", "warning");
+        return;
+      }
+
+      // snapshot antes de fechar
+      const caixaAtual = caixas[caixaAtivaIndex];
+      ultimaCaixaSnapshot = caixaAtual;
+
+      // fecha (seta endTime, atualiza UI, zera caixaAtivaIndex)
+      fecharCaixaAtiva();
+
+      // imprime conforme a seleção
+      try {
+        if (selectedOpcaoImpressao === 'ambas') {
+          gerarEtiquetaCustom(ultimaCaixaSnapshot); // ML inbound
+          gerarEtiquetaCaixa(ultimaCaixaSnapshot);  // JP interna
+        } else if (selectedOpcaoImpressao === 'ml') {
+          gerarEtiquetaCustom(ultimaCaixaSnapshot);
+        } else if (selectedOpcaoImpressao === 'jp') {
+          gerarEtiquetaCaixa(ultimaCaixaSnapshot);
+        } // 'nenhuma' => não imprime
+      } catch (e) {
+        console.error('Erro ao imprimir etiqueta(s):', e);
+        Swal.fire("Erro", "Falha ao imprimir etiqueta(s). Verifique a impressora.", "error");
+      }
+
+      modalFecharCaixa.hide();
+      atualizarPainelEsquerdo();
+    });
+
+    // cancelar
+    btnCancel.addEventListener('click', () => modalFecharCaixa.hide());
+  }
+
+  // abre o modal (se houver caixa aberta)
+  function abrirModalFecharCaixa() {
+    if (!modalFecharCaixa) inicializarModalFecharCaixa();
+    const elModal = document.getElementById('modalFecharCaixa');
+    if (!elModal) return;
+
+    // sem caixa aberta
+    if (caixaAtivaIndex === -1 || !caixas[caixaAtivaIndex] || caixas[caixaAtivaIndex].fechada) {
+      Swal.fire("Atenção", "Nenhuma caixa aberta para fechar.", "warning");
+      return;
+    }
+
+    // se já está aberto, não reconfigura (evita reset por re-render)
+    if (elModal.classList.contains('show') || isFecharModalOpen) return;
+
+    // aplica a seleção salva APENAS se não houver uma ativa
+    const hasActive = !!elModal.querySelector('.fechar-caixa-option.active');
+    if (!hasActive) {
+      const saved = localStorage.getItem(LAST_PRINT_PREF_KEY) || 'ambas';
+      window.__aplicarSelecaoFecharCaixa?.(saved);
+      elModal.querySelector('#guardarOpcaoImpressao').checked = !!localStorage.getItem(LAST_PRINT_PREF_KEY);
+    }
+
+    modalFecharCaixa.show();
+  }
+
+  let produtos = [];
+  try {
+    const raw = document.getElementById("js-data").dataset.comps ?? "[]";
+    produtos = JSON.parse(raw);
+    if (!Array.isArray(produtos)) produtos = [];
+  } catch (e) {
+    console.error("JSON inválido em #js-data:", e);
+    Swal.fire("Erro", "Falha ao preparar os produtos. Recarregue a página.", "error");
+    return;
+  }
+
   const placeholderImage = document.getElementById("placeholder-image").dataset.url;
   const headerBar = document.querySelector(".header-bar");
   const idAgendMl = headerBar ? headerBar.dataset.idMl : null;
@@ -332,37 +490,36 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   async function carregarCaixasSalvas() {
     try {
-      const resp = await fetch(`/api/embalar/caixa/${idAgendMl}`);
-      if (!resp.ok) return;
-      const caixasData = await resp.json();
+      const caixasData = await fetchJSON(`/api/embalar/caixa/${idAgendMl}`);
       caixasData.forEach(box => {
-        // recria cada caixa fechada no DOM
         const num = box.caixa_num;
-        const totalItens = box.itens.reduce((s, i) => s + i.quantidade, 0);
-        // adiciona ao state
+        const totalItens = box.itens.reduce((s, i) => s + Number(i.quantidade || 0), 0);
+
         const idx = caixas.length;
         caixas.push({
           id: num,
-          itens: box.itens.reduce((acc, i) => ({ ...acc, [i.sku]: i.quantidade }), {}),
+          codigo: box.codigo_unico_caixa || null,
+          itens: box.itens.reduce((acc, i) => ({ ...acc, [i.sku]: Number(i.quantidade || 0) }), {}),
           fechada: true,
+          persisted: true,
           element: null
         });
-        // monta o card
+
         const caixaDiv = document.createElement("div");
         caixaDiv.className = "card caixa-card caixa-fechada";
         caixaDiv.innerHTML = `
-          <div class="card-header">Caixa ${num} - (${totalItens} ${totalItens > 1 ? 'itens' : 'item'})</div>
-          <div class="card-body">
-            <ul class="list-unstyled mb-0"></ul>
-          </div>`;
+        <div class="card-header">Caixa ${esc(num)} - (${totalItens} ${totalItens > 1 ? 'itens' : 'item'})</div>
+        <div class="card-body">
+          <ul class="list-unstyled mb-0"></ul>
+        </div>`;
         caixas[idx].element = caixaDiv;
         caixasContainer.prepend(caixaDiv);
-        // popula itens na lista
+
         const ul = caixaDiv.querySelector("ul");
         box.itens.forEach(i => {
           const li = document.createElement("li");
           li.className = "d-flex justify-content-between p-1";
-          li.innerHTML = `<span>${i.sku}</span><span class="fw-bold">Unidades: ${i.quantidade}</span>`;
+          li.innerHTML = `<span>${esc(i.sku)}</span><span class="fw-bold">Unidades: ${esc(i.quantidade)}</span>`;
           ul.appendChild(li);
         });
       });
@@ -378,29 +535,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     const produtosConcluidos = listaPrincipalEl.querySelectorAll(".produto-concluido").length;
     const existeCaixaAberta = caixaAtivaIndex !== -1 && !caixas[caixaAtivaIndex].fechada;
 
-    // Limpa a área de botões (mas não as caixas)
     const btnNovaCaixa = document.getElementById('btn-nova-caixa');
     const btnFinalizar = document.getElementById('btn-finalizar-embalagem');
     if (btnNovaCaixa) btnNovaCaixa.remove();
     if (btnFinalizar) btnFinalizar.remove();
+
     if (totalProdutos === produtosConcluidos && totalProdutos > 0) {
-      // Se todos os produtos foram concluídos...
-      // A lógica para fechar uma caixa aberta (se houver) está correta e deve permanecer
+      // Agora abre o modal (se houver caixa aberta) e não reabre se já estiver aberto
       if (existeCaixaAberta) {
-        fecharCaixaAtiva();
-        return; // Interrompe para evitar adicionar o botão de finalizar antes da hora
+        if (!isFecharModalOpen) abrirModalFecharCaixa();
+        return;
       }
-      // Se não há caixa aberta, adicionamos o botão "Finalizar Embalagem"
+      // Se não há caixa aberta, mostra o botão "Finalizar Embalagem"
       const clone = templateFinalizar.content.cloneNode(true);
-      // Pegamos a referência do botão dentro do template
       const botaoFinalizar = clone.querySelector('#btn-finalizar-embalagem');
-      // AQUI ESTÁ A MUDANÇA: Adicionamos o "escutador de eventos" de clique
-      // que chama a função que você já adicionou no final do seu arquivo.
       botaoFinalizar.addEventListener('click', handleFinalizarEmbalagem);
-      // Finalmente, adicionamos o botão já funcional à página
       caixaActionsContainer.prepend(clone);
     } else {
-      // AINDA HÁ PRODUTOS PENDENTES
       const algumProdutoProntoParaEmbalar = produtos.some(p => p.bipados !== undefined);
       if (algumProdutoProntoParaEmbalar && !existeCaixaAberta) {
         const clone = templateNovaCaixa.content.cloneNode(true);
@@ -424,7 +575,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (prod.composicoes && prod.composicoes.length > 0) {
       lisHtml = prod.composicoes.map((c) => {
-        const requerido = c.unidades_por_kit || 1;
+        const requerido = c.unidades_por_kit || c.unidades_totais || 1;
         return `<li class="componente-item status-pendente" data-sku-esperado="${c.sku}" data-gtin-esperado="${c.gtin}" data-requerido="${requerido}" data-bipado="0">
                         <span class="componente-nome">${c.nome}</span>
                         <span class="componente-status"><span class="contador-bipagem">(0/${requerido})</span></span>
@@ -472,14 +623,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   async function abrirNovaCaixa() {
-    // 1) ajusta o índice da caixa ativa
+    // índice da nova caixa
     caixaAtivaIndex = caixas.length;
 
-    // 2) cria o objeto da caixa e empurra no state
-    //    usei 'caixaObj' + var para evitar TDZ
-    var caixaObj = {
-      id: null,      // vai receber o num do servidor
-      itens: {},        // sku → quantidade
+    // objeto base
+    const caixaObj = {
+      id: null,
+      codigo: null,        // <- vamos guardar o codigo_unico_caixa
+      itens: {},
       fechada: false,
       persisted: false,
       element: null,
@@ -487,23 +638,36 @@ document.addEventListener("DOMContentLoaded", async () => {
     caixaObj.startTime = new Date();
     caixas.push(caixaObj);
 
-    // 3) monta o card no DOM
-    const numero = caixas.length;
+    // cria visual no DOM
+    const numeroTemporario = caixas.length;
     const caixaDiv = document.createElement('div');
     caixaDiv.className = 'card caixa-card caixa-aberta';
     caixaDiv.innerHTML = `
-    <div class="card-header">Caixa ${numero}</div>
-    <div class="card-body">
-      <ul class="list-unstyled mb-0"></ul>
-    </div>
-  `;
-    // salva a referência ao elemento
+    <div class="card-header">Caixa ${numeroTemporario}</div>
+    <div class="card-body"><ul class="list-unstyled mb-0"></ul></div>`;
     caixaObj.element = caixaDiv;
-
-    // 4) adiciona na lista de caixas à esquerda
     caixasContainer.prepend(caixaDiv);
 
-    // 5) atualiza os botões (Nova caixa / Finalizar)
+    // cria imediatamente no servidor (evita “abrir sem id”)
+    try {
+      const { caixa_num, codigo_unico_caixa } = await fetchJSON('/api/embalar/caixa', {
+        method: 'POST',
+        body: { id_agend_ml: idAgendMl }
+      });
+      caixaObj.id = caixa_num;
+      caixaObj.codigo = codigo_unico_caixa;
+      caixaObj.persisted = true;
+      caixaDiv.querySelector('.card-header').textContent = `Caixa ${caixaObj.id}`;
+    } catch (err) {
+      console.error(err);
+      Swal.fire("Erro", "Não foi possível criar a caixa no servidor.", "error");
+      // volta estado
+      caixas.pop();
+      caixaAtivaIndex = -1;
+      caixaDiv.remove();
+      return;
+    }
+
     atualizarPainelEsquerdo();
   }
 
@@ -589,33 +753,57 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'F1' || e.key === 'F2') {
-      e.preventDefault();
+    if (!['F1', 'F2', 'F3', 'F4', 'Enter'].includes(e.key)) return;
 
-      const idx = caixaAtivaIndex;
-      const caixa = caixas[idx];
-      if (!caixa || caixa.fechada) {
-        Swal.fire("Atenção", "Nenhuma caixa aberta para fechar.", "warning");
+    const elModal = document.getElementById('modalFecharCaixa');
+    const modalAberto = !!(elModal && elModal.classList.contains('show'));
+
+    // Se o modal de fechar caixa está ABERTO:
+    if (modalAberto) {
+      if (FKEY_TO_OPT[e.key]) {
+        e.preventDefault();
+        window.__aplicarSelecaoFecharCaixa?.(FKEY_TO_OPT[e.key]); // seleciona opção
         return;
       }
-
-      // 1) fecha a caixa (sem imprimir)
-      fecharCaixaAtiva();
-
-      // 2) imprime as etiquetas conforme a tecla
-      if (e.key === 'F1') {
-        gerarEtiquetaCaixa(caixa);
-        gerarEtiquetaCustom(caixa);
-      } else {
-        // F2: só a custom
-        gerarEtiquetaCustom(caixa);
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        elModal.querySelector('#btnConfirmarFechamento')?.click(); // Enter confirma
+        return;
       }
-
-      // 3) atualiza botões, contador etc.
-      atualizarPainelEsquerdo();
     }
-  });
 
+    // Se QUALQUER outro modal Bootstrap estiver aberto, ignora atalhos
+    if (document.body.classList.contains('modal-open')) return;
+
+    // ===== Fluxo rápido fora do modal: F1–F4 fecham a caixa ativa e imprimem =====
+    if (!['F1', 'F2', 'F3', 'F4'].includes(e.key)) return;
+    e.preventDefault();
+
+    const idx = caixaAtivaIndex;
+    const caixa = caixas[idx];
+    if (!caixa || caixa.fechada) {
+      Swal.fire("Atenção", "Nenhuma caixa aberta para fechar.", "warning");
+      return;
+    }
+
+    // 1) fecha a caixa (sem imprimir)
+    fecharCaixaAtiva();
+
+    // 2) imprime conforme a tecla
+    if (e.key === 'F1') {           // ML + JP
+      gerarEtiquetaCaixa(caixa);
+      gerarEtiquetaCustom(caixa);
+    } else if (e.key === 'F2') {    // só ML
+      gerarEtiquetaCustom(caixa);
+    } else if (e.key === 'F3') {    // só JP
+      gerarEtiquetaCaixa(caixa);
+    } else if (e.key === 'F4') {
+      // nenhuma
+    }
+
+    // 3) atualiza UI
+    atualizarPainelEsquerdo();
+  });
 
   function gerarEtiquetaCaixa(caixa) {
     const headerBar = document.querySelector('.header-bar');
@@ -698,86 +886,74 @@ document.addEventListener("DOMContentLoaded", async () => {
     atualizarPainelEsquerdo();
   }
 
-
+  let scanBusy = false; // trava simples contra double-enter
   async function adicionarItemNaCaixa(etiqueta) {
     if (caixaAtivaIndex === -1 || caixas[caixaAtivaIndex].fechada) {
       Swal.fire("Atenção", "Nenhuma caixa aberta. Crie uma nova caixa antes.", "warning");
       throw new Error("Nenhuma caixa aberta.");
     }
+    if (scanBusy) return; // evita duplicidade
+    scanBusy = true;
 
     const caixa = caixas[caixaAtivaIndex];
 
-    // ==== 1) se ainda não persistiu a caixa, cria agora no servidor ====
+    // garante que a caixa exista no BD (se alguém mudou sua função abrirNovaCaixa)
     if (!caixa.persisted) {
       try {
-        const resp = await fetch("/api/embalar/caixa", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id_agend_ml: idAgendMl })
+        const { caixa_num, codigo_unico_caixa } = await fetchJSON('/api/embalar/caixa', {
+          method: 'POST',
+          body: { id_agend_ml: idAgendMl }
         });
-        if (!resp.ok) throw new Error("Falha ao criar caixa");
-        const { caixa_num } = await resp.json();
         caixa.id = caixa_num;
+        caixa.codigo = codigo_unico_caixa;
         caixa.persisted = true;
-        // atualiza o header do card
         caixa.element.querySelector('.card-header').textContent = `Caixa ${caixa.id}`;
       } catch (err) {
+        scanBusy = false;
         console.error(err);
         Swal.fire("Erro", "Não foi possível criar a caixa no servidor.", "error");
         return;
       }
     }
 
-    // ==== 2) agora sim adiciona o item no front e no back ====
-    caixa.itens[etiqueta] = (caixa.itens[etiqueta] || 0) + 1;
-
-    const ul = caixa.element.querySelector('ul');
-    let li = ul.querySelector(`li[data-etiqueta="${etiqueta}"]`);
-    if (!li) {
-      li = document.createElement('li');
-      li.dataset.etiqueta = etiqueta;
-      li.className = 'd-flex justify-content-between p-1';
-      ul.appendChild(li);
-    }
-    li.innerHTML = `
-    <span>${etiqueta}</span>
-    <span class="fw-bold">Unidades: ${caixa.itens[etiqueta]}</span>
-  `;
-    li.classList.add('item-caixa-novo');
-    setTimeout(() => li.classList.remove('item-caixa-novo'), 700);
-
-    // ==== 3) persiste o item no servidor ====
     try {
-      await fetch("/api/embalar/caixa/item", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // CHAMADA ATÔMICA: bipados + item da caixa de uma vez
+      const resp = await fetchJSON('/api/embalar/scan', {
+        method: 'POST',
+        body: {
           id_agend_ml: idAgendMl,
-          caixa_num: caixa.id,
-          sku: etiqueta
-        })
+          id_prod_ml: etiqueta,                   // etiqueta do anúncio
+          sku: etiqueta,                          // o que grava na caixa (pode ser a própria etiqueta)
+          codigo_unico_caixa: caixa.codigo,       // preferível ao número
+          caixa_num: caixa.id                     // redundante, mas útil
+        }
       });
-    } catch (err) {
-      console.error("Erro ao salvar item na caixa:", err);
-    }
-  }
 
-  async function biparEmbalagem(idProdMl) { // ALTERADO: Recebe o id_ml único
-    try {
-      const response = await fetch("/api/embalar/bipar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },        // ALTERADO: Envia o id_prod_ml para o backend
-        body: JSON.stringify({ id_agend_ml: idAgendMl, id_prod_ml: idProdMl }),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Erro na API: ${response.statusText}`);
+      // Atualiza estado e DOM com o que o servidor confirmou
+      caixa.itens[etiqueta] = resp.quantidade_caixa;
+
+      const ul = caixa.element.querySelector('ul');
+      let li = ul.querySelector(`li[data-etiqueta="${etiqueta}"]`);
+      if (!li) {
+        li = document.createElement('li');
+        li.dataset.etiqueta = etiqueta;
+        li.className = 'd-flex justify-content-between p-1';
+        ul.appendChild(li);
       }
-      return await response.json();
-    } catch (error) {
-      console.error("Falha ao registrar bipagem:", error);
-      Swal.fire("Erro", `Não foi possível registrar a bipagem: ${error.message}`, "error");
-      throw error;
+      li.innerHTML = `<span>${esc(etiqueta)}</span><span class="fw-bold">Unidades: ${esc(caixa.itens[etiqueta])}</span>`;
+      li.classList.add('item-caixa-novo');
+      setTimeout(() => li.classList.remove('item-caixa-novo'), 700);
+
+      // atualiza contador do produto (bipados) a partir do valor garantido do banco
+      atualizarStatusProduto(resp.id_prod_ml, resp.bipados);
+
+      return resp; // caso o chamador queira usar
+
+    } catch (err) {
+      console.error("Erro ao bipar:", err);
+      Swal.fire("Erro", err.message || "Falha ao bipar", "error");
+    } finally {
+      scanBusy = false;
     }
   }
 
@@ -865,76 +1041,56 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.clear();
     console.log(`--- BIP REGISTRADO: "${valor}" ---`);
 
-    // ETAPA 1: Checa se o valor é uma ETIQUETA de um produto já iniciado.
+    // 1) é uma etiqueta de produto já iniciado?
     const produtoPorEtiqueta = produtos.find(p => p.id_ml === valor);
-    if (produtoPorEtiqueta) {
-      console.log("LOG: O valor é uma ETIQUETA de um produto conhecido.", produtoPorEtiqueta);
-      inputSku.value = ""; // Limpa o campo
-
-      if (produtoPorEtiqueta.bipados >= produtoPorEtiqueta.unidades) {
-        console.log("LOG: Produto já finalizado.");
-        Swal.fire({ icon: "info", title: "Anúncio já finalizado!", timer: 2000, showConfirmButton: false });
-        return;
-      }
-
-      if (produtoPorEtiqueta.bipados >= 0) {
-        console.log("LOG: Bipando +1 unidade para a etiqueta.");
-        try {
-          await adicionarItemNaCaixa(valor);
-          const resp = await biparEmbalagem(produtoPorEtiqueta.id_ml);
-          atualizarStatusProduto(resp.id_prod_ml, resp.bipados);
-        } catch (err) { console.warn(err.message); }
-      } else {
-        Swal.fire({ icon: "warning", title: "Ação Inválida", text: "Bipe o SKU do produto para iniciar a embalagem dele primeiro." });
-      }
-      return;
-    }
-
-    // ETAPA 2: Se não for etiqueta, busca por SKU/GTIN em produtos PENDENTES.
-    console.log("LOG: O valor não é uma etiqueta em andamento. Procurando por SKUs pendentes...");
-    const candidatos = produtos.filter(prod => {
-      if (prod.bipados !== undefined) {
-        return false; // Ignora produtos já iniciados
-      }
-      if (prod.sku === valor || prod.gtin === valor) return true;
-      return prod.composicoes.some(item => item.sku === valor || item.gtin === valor);
-    });
-
-    console.log(`LOG: Encontrados ${candidatos.length} candidatos pendentes.`, candidatos);
     inputSku.value = "";
 
-    // ETAPA 3: Decide o que fazer com os candidatos.
-    if (candidatos.length === 0) {
-      console.log("LOG: Nenhum candidato encontrado. Fim do fluxo.");
-      Swal.fire("Não Encontrado", `Nenhum anúncio PENDENTE foi encontrado para o código: "${valor}"`, "warning");
+    if (produtoPorEtiqueta) {
+      if (produtoPorEtiqueta.bipados >= produtoPorEtiqueta.unidades) {
+        Swal.fire({ icon: "info", title: "Anúncio já finalizado!", timer: 1800, showConfirmButton: false });
+        return;
+      }
+      // chama a função atômica (já atualiza UI)
+      try {
+        await adicionarItemNaCaixa(valor);
+      } catch { /* erros já tratados internamente */ }
       return;
     }
 
+    // 2) Não é etiqueta em andamento: procura SKU/GTIN em produtos PENDENTES
+    const candidatos = produtos.filter(prod => {
+      if (prod.bipados !== undefined) return false;
+      if (prod.sku === valor || prod.gtin === valor) return true;
+      return prod.composicoes?.some(item => item.sku === valor || item.gtin === valor);
+    });
+
+    if (candidatos.length === 0) {
+      Swal.fire("Não Encontrado", `Nenhum anúncio PENDENTE para: "${valor}"`, "warning");
+      return;
+    }
     if (candidatos.length === 1) {
-      console.log("LOG: Encontrado 1 candidato. Abrindo modal de confirmação diretamente.");
       abrirModalConfirmacao(candidatos[0]);
       return;
     }
 
-    // Se encontrou mais de um, mostra o modal de seleção.
-    console.log("LOG: Encontrados múltiplos candidatos. Abrindo modal de seleção.");
+    // múltiplos — abrir modal de seleção
     bodySelecione.innerHTML = candidatos.map(prod => {
       const imgUrl = prod.imagemUrl || placeholderImage;
       return `<div class="card mb-3" data-sku="${prod.sku}" data-id-ml="${prod.id_ml}" style="cursor: pointer;">
-                    <div class="row g-0">
-                        <div class="col-3 d-flex align-items-center justify-content-center p-2">
-                            <img src="${imgUrl}" class="img-fluid rounded-start" alt="${prod.nome}">
-                        </div>
-                        <div class="col-9">
-                            <div class="card-body">
-                                <h6 class="card-title">Anúncio: ${prod.nome}</h6>
-                                <p class="card-text mb-1"><strong>Etiqueta:</strong> ${prod.id_ml}</p>
-                                <p class="card-text mb-1"><strong>Qtd Etiquetas:</strong> ${prod.unidades}</p>
-                                <p class="card-text mb-0"><strong>Tipo:</strong> ${prod.is_kit ? "Kit" : "Simples"}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>`;
+              <div class="row g-0">
+                <div class="col-3 d-flex align-items-center justify-content-center p-2">
+                  <img src="${imgUrl}" class="img-fluid rounded-start" alt="${prod.nome}">
+                </div>
+                <div class="col-9">
+                  <div class="card-body">
+                    <h6 class="card-title">Anúncio: ${prod.nome}</h6>
+                    <p class="card-text mb-1"><strong>Etiqueta:</strong> ${prod.id_ml}</p>
+                    <p class="card-text mb-1"><strong>Qtd Etiquetas:</strong> ${prod.unidades}</p>
+                    <p class="card-text mb-0"><strong>Tipo:</strong> ${prod.is_kit ? "Kit" : "Simples"}</p>
+                  </div>
+                </div>
+              </div>
+            </div>`;
     }).join("");
     modalSelecione.show();
   });
@@ -944,16 +1100,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ===================================================================
 
   function inicializarPopoversDeImagem() {
-    const todosOsIconesInfo = document.querySelectorAll("#lista-anuncios .bi-info-circle");
-    todosOsIconesInfo.forEach((icon) => {
+    const todos = document.querySelectorAll("#lista-anuncios .bi-info-circle");
+    todos.forEach((icon) => {
       const itemLi = icon.closest(".produto-item");
       if (!itemLi) return;
-      const sku = itemLi.dataset.sku;
-      const produto = produtos.find((p) => p.sku === sku);
+      const idMl = itemLi.dataset.idMl;
+      const produto = produtos.find((p) => p.id_ml === idMl);
       if (!produto) return;
       const imagemUrl = produto.imagemUrl || placeholderImage;
-      const popoverContent = `<img src="${imagemUrl}" class="img-fluid rounded" style="max-width: 150px;">`;
-      new bootstrap.Popover(icon, { html: true, trigger: "hover", placement: "left", content: popoverContent, container: "body", customClass: "produto-popover" });
+      const popoverContent = `<img src="${esc(imagemUrl)}" class="img-fluid rounded" style="max-width: 150px;">`;
+      new bootstrap.Popover(icon, {
+        html: true,
+        trigger: "hover",
+        placement: "left",
+        content: popoverContent,
+        container: "body",
+        customClass: "produto-popover"
+      });
     });
   }
 
@@ -1038,19 +1201,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function buscarDadosEmbalagem() {
     if (!idAgendMl) return;
     try {
-      const response = await fetch(`/api/embalar/bipados/${idAgendMl}`);
-      if (!response.ok) {
-        console.warn(`Sincronização falhou: ${response.statusText}`);
-        return;
-      }
-      const data = await response.json();
-
-      // ALTERADO: A API agora retorna {id_prod_ml, bipados}, usamos isso.
-      data.forEach(item => {
-        atualizarStatusProduto(item.id_prod_ml, item.bipados);
-      });
+      const data = await fetchJSON(`/api/embalar/bipados/${idAgendMl}`);
+      data.forEach(item => atualizarStatusProduto(item.id_prod_ml, Number(item.bipados || 0)));
     } catch (error) {
-      console.error("Erro ao sincronizar dados de embalagem:", error);
+      console.warn("Sincronização falhou:", error.message || error);
     }
   }
 
@@ -1100,8 +1254,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const zplAndamento = [];
 
     for (let linha = 0; linha < linhasNecessarias; linha++) {
-      zplAndamento.push("^XA"); 
-      zplAndamento.push("^CI28"); 
+      zplAndamento.push("^XA");
+      zplAndamento.push("^CI28");
       zplAndamento.push("^LH0,0");
 
       // Coluna esquerda
@@ -1191,14 +1345,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     imprimirEtiqueta(zpl, "id");
   }
 
-
-
-
   // Inicialização
   inicializarPopoversDeImagem();
   await carregarCaixasSalvas();
   await buscarDadosEmbalagem(); // Busca inicial
-  setInterval(buscarDadosEmbalagem, 1000);
+  const SYNC_MS = 2000; // em vez de 1000
+  setInterval(buscarDadosEmbalagem, SYNC_MS);
 
 
 
@@ -1240,7 +1392,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // 3) Envia para o backend finalizar o agendamento
     try {
-      const response = await fetch(`/expedicao/finalizar/${idAgendamento}`, {
+      const response = await fetch(`/embalar/finalizar/${idAgendamento}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1267,15 +1419,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   // Sincroniza a cada 1 segundos
 
-
   function funcoesDisponiveis() {
+    console.log('======= IDENTIFICAÇÃO =======');
     console.log('gerarEtiquetaShopee(\"sku\");');
-    console.log('gerarEtiquetaMeLi(\"sku\")');
+    console.log('gerarEtiquetaMeLi(\"sku\");\n\n');
+
+
+    console.log('=========== VOLUME ===========');
+    console.log('Etiqueta Mercado Livre');
+    console.log('gerarEtiquetaCustom(\"nCaixa\");');
+    console.log('LEMBRETE: Utilize o índice da caixa como número (número da caixa - 1)\n\n');
+
+    console.log('Etiqueta Jaú Pesca');
+    console.log('gerarEtiquetaCaixa(\"nCaixa\");');
+    console.log('LEMBRETE: Utilize o índice da caixa como número (número da caixa - 1)\n');
   }
+
   // 👉 Expor no console:
   window.gerarEtiquetaShopee = gerarEtiquetaShopee;
   window.funcoesDisponiveis = funcoesDisponiveis;
   window.gerarEtiquetaMeLi = gerarEtiquetaMeLi;
-}
-);
+  window.gerarEtiquetaCustom = gerarEtiquetaCustom; // ML
+  window.gerarEtiquetaCaixa = gerarEtiquetaCaixa; // JP
+  inicializarModalFecharCaixa();
+});
 

@@ -1,7 +1,18 @@
-from flask import jsonify, redirect, url_for, json
+from flask import jsonify, redirect, url_for, json, request
 from main import app, render_template, agendamento_controller, db_controller, ParametroInvalido, access
 from datetime import datetime
+import mysql.connector
+from classes.controllers.AgendamentoController import AgendamentoController
+from classes.controllers.DatabaseController import DatabaseController
 
+_db_config = {
+    'host': '192.168.15.200',
+    'port': 3306,
+    'user': 'Bruno_Lallo',
+    'password': 'ji}dx(v{M,z2j+f>[/}%_Vr-0?nI}W*@Dw68NnHJ+tMu&ZkF',
+    'database': 'jp_bd',
+    'autocommit': True
+}
 
 @app.route('/expedicao/<int:id_agend_bd>')
 def expedicao(id_agend_bd: int):
@@ -34,77 +45,82 @@ def expedicao(id_agend_bd: int):
         todos_os_produtos_json=json.dumps(produtos_para_json)
     )
     
-@app.route('/expedicao/finalizar/<int:id_agend_bd>', methods=['POST'])
-def finalizar_embalagem(id_agend_bd):
-    """
-    Finaliza a fase de embalagem, gera um relatório e move o agendamento para a expedição.
-    """
+@app.route('/api/expedicao/bipar', methods=['POST'])
+def api_expedicao_bipar():
+    """ Salva o registro de uma caixa bipada no banco de dados. """
+    data = request.get_json()
+    id_agend_ml = data.get('id_agend_ml')
+    codigo_unico_caixa = data.get('codigo_unico_caixa')
+    print(f"[API /bipar] Recebido: agendamento={id_agend_ml}, caixa={codigo_unico_caixa}")
+
+    if not id_agend_ml or not codigo_unico_caixa:
+        return jsonify({"success": False, "message": "Dados incompletos."}), 400
+    
+    conn = None
     try:
-        # 1. Carrega o agendamento completo a partir do banco de dados
-        agendamento_controller.clear_agendamentos()
-        agendamento_controller.insert_agendamento(id_bd=id_agend_bd)
-        agend = agendamento_controller.get_last_made_agendamento()
-        agendamento_controller.create_agendamento_from_bd_data(agend)
-
-        if not agend:
-            return jsonify({"success": False, "message": "Agendamento não encontrado."}), 404
-
-        # 2. Busca dados das caixas e itens embalados para o relatório
-        caixas_result = access.custom_select_query(
-            "SELECT caixa_num FROM embalagem_caixas WHERE id_agend_ml = %s ORDER BY caixa_num",
-            (agend.id_agend_ml,)
-        )
-        
-        caixas_relatorio = []
-        if caixas_result:
-            for caixa_row in caixas_result:
-                caixa_num = caixa_row[0]
-                # Busca os itens na caixa, incluindo o nome do produto
-                itens_result = access.custom_select_query(
-                    """SELECT i.sku, i.quantidade, p.nome_prod
-                    FROM embalagem_caixa_itens i
-                    LEFT JOIN produtos_agend p ON i.sku = p.sku_prod AND p.id_agend_prod = %s
-                    WHERE i.id_agend_ml = %s AND i.caixa_num = %s
-                    """,
-                    (agend.id_bd, agend.id_agend_ml, caixa_num)
-                )
-                itens_caixa = [{"sku": item[0], "quantidade": item[1], "nome": item[2]} for item in itens_result] if itens_result else []
-                caixas_relatorio.append({"caixa_numero": caixa_num, "itens": itens_caixa})
-
-        # 3. Monta o payload do relatório de embalagem
-        relatorio_payload = {
-            "tipo_relatorio": "embalagem",
-            "termino_embalagem": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "detalhes_embalagem": {
-                "total_caixas": len(caixas_relatorio),
-                "caixas": caixas_relatorio
-            }
-        }
-
-        # 4. Busca o relatório de conferência existente para adicionar as novas informações
-        relatorio_final = {}
-        relatorio_existente_raw = access.custom_select_query(
-            "SELECT relatorio FROM relatorio_agend WHERE id_agend_ml = %s", (agend.id_agend_ml,)
-        )
-        if relatorio_existente_raw and relatorio_existente_raw[0][0]:
-            relatorio_final = json.loads(relatorio_existente_raw[0][0])
-
-        # Adiciona os dados de embalagem ao relatório geral
-        relatorio_final['RelatorioEmbalagem'] = relatorio_payload
-
-        # 5. Salva o relatório atualizado no banco
-        access.custom_i_u_query(
-            """INSERT INTO relatorio_agend (id_agend_ml, relatorio) VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE relatorio = VALUES(relatorio)""",
-            [(agend.id_agend_ml, json.dumps(relatorio_final, ensure_ascii=False))]
-        )
-
-        # 6. Altera o tipo do agendamento para Expedição (ID 5)
-        agend.set_tipo(5)
-        agendamento_controller.update_agendamento(agend)
-
-        return jsonify({"success": True, "message": "Embalagem finalizada. Agendamento movido para expedição."})
-
+        conn = mysql.connector.connect(**_db_config)
+        cur = conn.cursor()
+        sql = "INSERT IGNORE INTO expedicao_caixas_bipadas (id_agend_ml, codigo_unico_caixa) VALUES (%s, %s)"
+        cur.execute(sql, (id_agend_ml, codigo_unico_caixa))
+        conn.commit()
+        cur.close()
+        return jsonify({"success": True}), 201
     except Exception as e:
-        print(f"Erro ao finalizar embalagem: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        print(f"!!! Erro ao salvar bipagem da expedição: {e}")
+        return jsonify({"success": False, "message": "Erro interno do servidor."}), 500
+    finally:
+        if conn and conn.is_connected():
+            conn.close()
+
+@app.route('/api/expedicao/bipados/<id_agend_ml>')
+def api_expedicao_bipados(id_agend_ml):
+    """ Retorna a lista de caixas já bipadas para um agendamento. """
+    print(f"[API /bipados] Consultando para agendamento: {id_agend_ml}")
+    
+    conn = None
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur = conn.cursor()
+        sql = "SELECT codigo_unico_caixa FROM expedicao_caixas_bipadas WHERE id_agend_ml = %s"
+        cur.execute(sql, (id_agend_ml,))
+        results = cur.fetchall()
+        bipados = [row[0] for row in results] if results else []
+        cur.close()
+        print(f"[API /bipados] Encontrados: {bipados}")
+        return jsonify({"success": True, "bipados": bipados})
+    except Exception as e:
+        print(f"!!! Erro ao buscar bipados da expedição: {e}")
+        return jsonify({"success": False, "message": "Erro interno do servidor."}), 500
+    finally:
+        if conn and conn.is_connected():
+            conn.close()
+
+@app.route("/api/expedicao/iniciar", methods=["POST"])
+def api_expedicao_iniciar():
+    data = request.get_json() or {}
+    id_agend_bd = int(data.get("id_agend_bd") or 0)
+    if not id_agend_bd:
+        return jsonify(success=False, error="id_agend_bd ausente"), 400
+    try:
+        # INJEÇÃO DO ACCESS AQUI ⤵
+        ctrl = AgendamentoController(db_controller=DatabaseController(access_obj=access))
+        ts = ctrl.iniciar_expedicao(id_agend_bd)
+        return jsonify(success=True, startTime=ts.isoformat())
+    except Exception as e:
+        # Deixa o front ver uma mensagem clara
+        return jsonify(success=False, error=str(e)), 500
+
+
+@app.route("/api/expedicao/finalizar", methods=["POST"])
+def api_expedicao_finalizar():
+    data = request.get_json() or {}
+    id_agend_bd = int(data.get("id_agend_bd") or 0)
+    if not id_agend_bd:
+        return jsonify(success=False, error="id_agend_bd ausente"), 400
+    try:
+        # INJEÇÃO DO ACCESS AQUI ⤵
+        ctrl = AgendamentoController(db_controller=DatabaseController(access_obj=access))
+        ts = ctrl.finalizar_expedicao(id_agend_bd)
+        return jsonify(success=True, endTime=ts.isoformat())
+    except Exception as e:
+        return jsonify(success=False, error=str(e)), 500

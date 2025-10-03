@@ -1,5 +1,5 @@
 from base_jp_lab import Access
-
+from datetime import datetime
 class DatabaseController:
     def __init__(self, access_obj:Access = None):
         self.access = access_obj
@@ -215,6 +215,38 @@ class DatabaseController:
         
         return True
     
+    def update_expedicao_inicio(self, id_agend_bd: int):
+        if not self.access:
+            raise RuntimeError("Access não configurado no DatabaseController.")
+        self.access.custom_i_u_query(
+            "UPDATE agendamento SET expedicao_inicio = NOW() WHERE id_agend = %s AND expedicao_inicio IS NULL;",
+            [(id_agend_bd,)]
+        )
+        
+    def update_expedicao_fim(self, id_agend_bd: int):
+        if not self.access:
+            raise RuntimeError("Access não configurado no DatabaseController.")
+        self.access.custom_i_u_query(
+            "UPDATE agendamento SET expedicao_fim = NOW() WHERE id_agend = %s;",
+            [(id_agend_bd,)]
+        )
+        
+    def get_relatorio_by_agendamento_ml(self, id_agend_ml: str):
+        """ Busca um relatório existente na tabela pelo id_agend_ml. """
+        query = "SELECT relatorio FROM relatorio_agend WHERE id_agend_ml = %s;"
+        result = self.access.custom_select_query(query, (id_agend_ml,))
+        # Retorna o conteúdo do JSON (primeira coluna da primeira linha) ou None se não encontrar
+        return result[0][0] if result else None
+
+    def salvar_relatorio(self, id_agend_ml: str, relatorio_json: str):
+        """ Insere ou atualiza o relatório de um agendamento. """
+        query = """
+            INSERT INTO relatorio_agend (id_agend_ml, relatorio) 
+            VALUES (%s, %s) 
+            ON DUPLICATE KEY UPDATE relatorio = VALUES(relatorio);
+        """
+        self.access.custom_i_u_query(query, [(id_agend_ml, relatorio_json)])
+    
     def get_caixas_by_agendamento_ml(self, id_agend_ml: str) -> list:
         """
         Busca todas as caixas e seus respectivos itens para um determinado agendamento.
@@ -250,3 +282,24 @@ class DatabaseController:
             })
             
         return resultado_final
+    
+    def set_expedicao_inicio(self, id_agend_bd: int, ts: datetime) -> None:
+        """
+        Define explicitamente o timestamp de início de expedição para um agendamento.
+        Compatível com MySQL (placeholders %s) e com seu wrapper custom_i_u_query.
+        """
+        self.access.custom_i_u_query(
+            "UPDATE agendamento SET expedicao_inicio = %s WHERE id_agend = %s;",
+            [(ts, id_agend_bd)]
+        )
+
+
+    def set_expedicao_fim(self, id_agend_bd: int, ts: datetime) -> None:
+        """
+        Define explicitamente o timestamp de término de expedição para um agendamento.
+        Compatível com MySQL (placeholders %s) e com seu wrapper custom_i_u_query.
+        """
+        self.access.custom_i_u_query(
+            "UPDATE agendamento SET expedicao_fim = %s WHERE id_agend = %s;",
+            [(ts, id_agend_bd)]
+        )

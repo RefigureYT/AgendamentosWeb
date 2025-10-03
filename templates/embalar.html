@@ -2,9 +2,10 @@
 
 {% block stylepath %}
 {{ url_for("static", filename="embalar/embalar.css") }}
-{% endblock %}
 
+{% endblock %}
 {% block content %}
+<meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
 <br>
 <div class="container">
     <div class="header-bar mb-3 p-3 rounded" data-id-ml="{{ dados_agend.id_agend_ml }}"
@@ -34,10 +35,23 @@
             <div class="mb-3" style="padding-right: 10px;">
                 <div style="display: flex; justify-content: space-between;">
                     <label for="input-embalar" class="form-label fw-bold">Código ou SKU</label>
-                    <label class="form-label"><span style="font-weight: 600;">F1</span> = Etiqueta ML + JP</label>
-                    <label class="form-label"><span style="font-weight: 600;">F2</span> = Etiqueta ML</label>
                 </div>
                 <input type="text" id="input-embalar" class="form-control" placeholder="Digite aqui o GTIN ou SKU">
+
+                <div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <label class="form-label"><span style="font-weight: 600;">F1</span> = Etiqueta ML + JP</label>
+
+                        
+                        <label class="form-label"><span style="font-weight: 600;">F2</span> = Etiqueta ML</label>
+
+                        
+                        <label class="form-label"><span style="font-weight: 600;">F3</span> = Etiqueta JP</label>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <label class="form-label"><span style="font-weight: 600;">F4</span> = Fechar caixa s/ Etiqueta</label>
+                    </div>
+                </div>
             </div>
 
             <div class="d-flex justify-content-between flex-wrap gap-3 p-3 mb-3 border rounded bg-white"
@@ -171,8 +185,75 @@
     </div>
 </div>
 
+<!-- Modal: Fechar caixa e imprimir -->
+<div class="modal fade" id="modalFecharCaixa" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="modalFecharCaixaLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content fechar-caixa">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalFecharCaixaLabel">
+          <i class="bi bi-box-seam me-2"></i>Fechar a última caixa?
+        </h5>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-3">
+          Não há mais itens para este agendamento. Deseja fechar a caixa e imprimir etiquetas?
+        </p>
+
+        <div class="fechar-caixa-options">
+          <label class="fechar-caixa-option" data-value="ambas">
+            <input type="radio" name="optImpressao" class="visually-hidden" value="ambas">
+            <div class="title"><i class="bi bi-printer me-1"></i>Jaú Pesca + Mercado Livre</div>
+            <div class="desc">Imprime as duas etiquetas (interna + inbound ML)</div>
+          </label>
+
+          <label class="fechar-caixa-option" data-value="ml">
+            <input type="radio" name="optImpressao" class="visually-hidden" value="ml">
+            <div class="title"><i class="bi bi-qr-code me-1"></i>Só Mercado Livre</div>
+            <div class="desc">Imprime apenas a etiqueta inbound ML</div>
+          </label>
+
+          <label class="fechar-caixa-option" data-value="jp">
+            <input type="radio" name="optImpressao" class="visually-hidden" value="jp">
+            <div class="title"><i class="bi bi-box me-1"></i>Só Jaú Pesca</div>
+            <div class="desc">Imprime apenas a etiqueta interna (JP)</div>
+          </label>
+
+          <label class="fechar-caixa-option" data-value="nenhuma">
+            <input type="radio" name="optImpressao" class="visually-hidden" value="nenhuma">
+            <div class="title"><i class="bi bi-slash-circle me-1"></i>Nenhuma</div>
+            <div class="desc">Apenas fecha a caixa, sem imprimir</div>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="form-check me-auto">
+          <input class="form-check-input" type="checkbox" id="guardarOpcaoImpressao">
+          <label class="form-check-label" for="guardarOpcaoImpressao">Lembrar minha escolha</label>
+        </div>
+        <button type="button" class="btn btn-outline-secondary" id="btnCancelarFechamento">Cancelar</button>
+        <button type="button" class="btn btn-success" id="btnConfirmarFechamento">
+          Fechar caixa
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="js-data" data-comps='{{ comps | tojson | safe }}' style="display:none;"></div>
 <div id="placeholder-image" data-url="{{ url_for('static', filename='resources/sem_img.webp') }}"></div>
+
+<script>
+    document.addEventListener("keydown", function(event) {
+    // Verifica se a tecla pressionada foi F3
+    if (event.key === "F3") {
+        event.preventDefault(); // Bloqueia o comportamento padrão (abrir localizar)
+        console.log("F3 foi bloqueado!");
+        // Aqui você pode chamar sua função específica
+    }
+    });
+</script>
+
 {% endblock %}
 {% block scriptpath %}
 {{ url_for("static", filename="embalar/embalar.js") }}

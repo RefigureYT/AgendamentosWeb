@@ -1177,7 +1177,169 @@ def transf_estoque_status(task_id):
     _set_cors_headers(resp)
     return resp
 
+@bp_retirado.route('/estoque/mover', methods=['POST', 'OPTIONS'])
+def estoque_mover():
+    """
+    POST /estoque/mover
+    Requer sessão válida. NÃO precisa mandar token.
+
+    Body JSON:
+    {
+      "empresa": "jaupesca",                # opcional (reserve para seleção de token no futuro)
+      "observacoes": "texto...",            # opcional
+      "preco_unitario": 0,                  # opcional (default 0)
+      "movimentos": [
+        {
+          "sku": "JP123",                   # opcional (só para log)
+          "id_produto": 123456,             # obrigatório
+          "de": 785301556,                  # depósito origem (Saída)
+          "para": 822208355,                # depósito destino (Entrada)
+          "unidades": 5,                    # > 0
+          "preco_unitario": 0               # opcional (sobrepõe o geral)
+        },
+        ...
+      ]
+    }
+
+    Resposta: 202 Accepted
+    {
+      "ok": true,
+      "tasks": [
+        {
+          "sku": "JP123",
+          "id_produto": 123456,
+          "de": 785301556,
+          "para": 822208355,
+          "unidades": 5,
+          "task_saida": "<id>",
+          "task_entrada": "<id>"
+        },
+        ...
+      ]
+    }
+    """
+    if request.method == 'OPTIONS':
+        resp = make_response('', 204)
+        _set_cors_headers(resp)
+        return resp
+
+    ok, resp = _require_session_user()
+    if not ok:
+        return resp  # 401
+
+    try:
+        _start_estoque_worker_once()
+
+        data = request.get_json() or {}
+        empresa = _to_opt_str_first(data.get('empresa'))
+        observacoes_base = _to_opt_str_first(data.get('observacoes')) or ''
+        preco_unitario_default = float(data.get('preco_unitario') or 0)
+
+        movs = data.get('movimentos')
+        if isinstance(movs, dict):
+            movs = [movs]
+        if not isinstance(movs, list) or not movs:
+            return _cors_error("Campo 'movimentos' deve ser lista não vazia", 400)
+
+        token = _get_tiny_token_for_user(empresa)
+        if not token:
+            return _cors_error("Não foi possível obter token do Tiny para o usuário atual", 503)
+
+        out = []
+        for mv in movs:
+            try:
+                sku = _to_opt_str_first(mv.get('sku'))
+                id_produto = int(mv.get('id_produto'))
+                dep_de = int(mv.get('de'))
+                dep_para = int(mv.get('para'))
+                unidades = float(mv.get('unidades'))
+
+                # 🔒 Guard: bloqueia origem == destino (ex.: 141 -> 141)
+                if dep_de == dep_para:
+                    return _cors_error(
+                        f"Depósitos de origem e destino são iguais (#{dep_de}). Operação inválida.",
+                        400
+                    )
+
+                if unidades <= 0:
+                    return _cors_error("Cada movimento deve ter 'unidades' > 0", 400)
+                preco_unit = float(mv.get('preco_unitario') if mv.get('preco_unitario') is not None else preco_unitario_default)
+            except (TypeError, ValueError):
+                return _cors_error("Campos do movimento inválidos (id_produto/de/para inteiros; unidades numérico)", 400)
+
+            # 1) SAÍDA (de)
+            task_id_s = uuid.uuid4().hex
+            _mov_status[task_id_s] = {
+                "status": "enfileirado",
+                "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "params": {"id_produto": id_produto, "id_deposito": dep_de, "unidades": unidades, "tipo": "S"}
+            }
+            _mov_queue.put({
+                "task_id": task_id_s,
+                "id_produto": id_produto,
+                "id_deposito": dep_de,
+                "quantidade": unidades,
+                "tipo_api": 'S',
+                "token": token,
+                "observacoes": observacoes_base,
+                "preco_unitario": preco_unit,
+            })
+
+            # 2) ENTRADA (para)
+            task_id_e = uuid.uuid4().hex
+            _mov_status[task_id_e] = {
+                "status": "enfileirado",
+                "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "params": {"id_produto": id_produto, "id_deposito": dep_para, "unidades": unidades, "tipo": "E"}
+            }
+            _mov_queue.put({
+                "task_id": task_id_e,
+                "id_produto": id_produto,
+                "id_deposito": dep_para,
+                "quantidade": unidades,
+                "tipo_api": 'E',
+                "token": token,
+                "observacoes": observacoes_base,
+                "preco_unitario": preco_unit,
+            })
+
+            out.append({
+                "sku": sku, "id_produto": id_produto, "de": dep_de, "para": dep_para,
+                "unidades": unidades, "task_saida": task_id_s, "task_entrada": task_id_e
+            })
+
+        resp = make_response(jsonify(ok=True, tasks=out), 202)
+        _set_cors_headers(resp)
+        return resp
+
+    except Exception as e:
+        try:
+            app.logger.exception("Falha em /estoque/mover")
+        except Exception:
+            pass
+        resp = make_response(jsonify(ok=False, error=str(e)), 500)
+        _set_cors_headers(resp)
+        return resp
+    
 # ===================== HELPERS NOVOS =====================
+
+def _require_session_user():
+    """Garante usuário logado via session. Retorna (ok:bool, resp:Response|None)."""
+    if 'id_usuario' not in session:
+        resp = make_response(jsonify(ok=False, error='Não autenticado'), 401)
+        _set_cors_headers(resp)
+        return False, resp
+    return True, None
+
+def _get_tiny_token_for_user(empresa: Optional[str] = None) -> Optional[str]:
+    """
+    Obtém o access_token do Tiny **no servidor**:
+    - Usa sua fonte padrão (_get_fallback_token_from_db) para não quebrar nada.
+    - Se amanhã você passar a guardar por empresa/usuário, adapte aqui sem tocar no front.
+    """
+    # TODO: se você tiver tokens por empresa/usuário, selecione com base na sessão/empresa
+    tok = _get_fallback_token_from_db()
+    return tok
 
 def _wait_backoff_429(attempt_idx: int) -> int:
     """Backoff para 429 em segundos: 5, 10, 20, 40, 60, 120, 240, 480, 600. Ao estourar, retorna -1."""
@@ -1377,4 +1539,86 @@ def tiny_composicao_por_sku_interno():
 
     except Exception as e:
         app.logger.exception("Falha em /api/tiny/composicao-por-sku")
+        return jsonify(ok=False, error=str(e)), 500
+
+@bp_retirado.route('/api/tiny/composicao-auto', methods=['GET'])
+def tiny_composicao_auto():
+    """
+    GET /api/tiny/composicao-auto?valor=<barcode-ou-sku>
+    - Requer sessão válida (usuário logado).
+    - Tenta primeiro por GTIN/EAN (apenas dígitos com 8/12/13/14+ chars).
+    - Se não encontrar por GTIN/EAN, tenta por SKU (codigo).
+    - Retorna: { ok: true, origem: "gtin"|"sku", id_tiny, kit: [...] }
+      Onde kit = [] se for produto simples (não é kit).
+    """
+    if 'id_usuario' not in session:
+        return jsonify(ok=False, error='Não autenticado'), 401
+
+    valor = (request.args.get('valor') or '').strip()
+    if not valor:
+        return jsonify(ok=False, error='Parâmetro "valor" é obrigatório'), 400
+
+    try:
+        # Normaliza EAN/GTIN (mantendo só dígitos)
+        ean_digits = re.sub(r'\D+', '', valor)
+        candidato = None
+        origem = None
+
+        # Helper local para chamar Tiny e extrair itens
+        def _buscar_produtos(params: dict):
+            resp = agendamento_controller.caller.make_call('produtos', params_add=params)
+            if isinstance(resp, dict):
+                return resp.get('itens') or []
+            return []
+
+        # 1) TENTA POR GTIN/EAN (se o input "parece" um EAN/GTIN)
+        if len(ean_digits) >= 8:
+            # a) tenta por gtin (quando suportado pela API)
+            itens = _buscar_produtos({'gtin': ean_digits, 'situacao': 'A'})
+            candidato = next((i for i in itens if re.sub(r'\D+', '', str(i.get('gtin', ''))) == ean_digits), None)
+
+            # b) fallback: pesquisa genérica (quando gtin não filtra)
+            if not candidato:
+                itens = _buscar_produtos({'pesquisa': ean_digits})
+                candidato = next((i for i in itens if re.sub(r'\D+', '', str(i.get('gtin', ''))) == ean_digits), None)
+
+            # c) ainda não achou? última tentativa: procurar exato no campo de código
+            if not candidato:
+                itens = _buscar_produtos({'codigo': valor, 'situacao': 'A'})
+                # aqui não dá pra cravar o match por EAN; se vier 1 item ativo, usamos
+                candidato = itens[0] if itens else None
+
+            if candidato:
+                origem = 'gtin'
+
+        # 2) SE NÃO ENCONTROU POR GTIN/EAN, TENTA POR SKU (codigo)
+        if not candidato:
+            itens = _buscar_produtos({'codigo': valor, 'situacao': 'A'})
+            candidato = itens[0] if itens else None
+            if candidato:
+                origem = 'sku'
+
+        if not candidato:
+            return jsonify(ok=False, error='Produto não encontrado por GTIN/EAN nem por SKU'), 404
+
+        id_tiny = candidato.get('id')
+        if not id_tiny:
+            return jsonify(ok=False, error='Produto encontrado, mas sem id Tiny'), 502
+
+        # 3) Busca composição (kit) pelo ID
+        # Mantemos o mesmo padrão já usado no projeto:
+        resp_kit = agendamento_controller.caller.make_call(f'produtos/{id_tiny}/kit')
+
+        # Normaliza: kit pode vir como lista ou dentro de "itens"
+        if isinstance(resp_kit, list):
+            kit = resp_kit
+        elif isinstance(resp_kit, dict) and 'itens' in resp_kit:
+            kit = resp_kit.get('itens') or []
+        else:
+            kit = []
+
+        return jsonify(ok=True, origem=origem, id_tiny=id_tiny, kit=kit), 200
+
+    except Exception as e:
+        app.logger.exception("Falha em /api/tiny/composicao-auto")
         return jsonify(ok=False, error=str(e)), 500

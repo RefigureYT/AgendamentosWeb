@@ -1034,90 +1034,125 @@ function perguntarConfirmacao() {
 }
 
 async function agendamentoFinalizadoChamarTransferencia() {
+  // 1) defina origem/destino (pode vir de inputs/config da empresa/marketplace)
+  const DEPOSITO_ORIGEM = 785301556;  // ex.: 151 Inferior
+  const DEPOSITO_DESTINO = 822208355; // ex.: 141 Produção
+
+  // 2) monta a lista de composições únicas do agendamento
   const raw = document.getElementById("js-data").dataset.comps;
   const produtos = JSON.parse(raw);
-  const token = await getTinyToken("jaupesca", "tiny");
-  const accessToken = "a"; // token[0].access_token;
-  const comp = [];
   const vistos = new Set();
-  console.log('ASODHJAPSDOIHJASNDPIANPIANC >', produtos);
+  const comps = [];
+  produtos.forEach(p => p.composicoes?.forEach(c => {
+    if (!vistos.has(c.sku)) { vistos.add(c.sku); comps.push(c); }
+  }));
 
-  produtos.forEach(p => {
-    p.composicoes.forEach(c => {
-      if (!vistos.has(c.sku)) {
-        comp.push(c);
-        vistos.add(c.sku);
+  // 3) busca quantidade bipada (diretos + equivalentes) para cada SKU original
+  const bipagemTotal = [];
+  for (const c of comps) {
+    const r = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${encodeURIComponent(c.sku)}`);
+    const j = await r.json();
+
+    const unOriginal = j?.bipagem?.bipados ?? 0;
+    if (unOriginal > 0) {
+      bipagemTotal.push({ sku: c.sku, id_tiny: c.id_tiny, un: unOriginal });
+    }
+
+    (j?.equivalentes || []).forEach(eq => {
+      // cada equivalente já vem com id_tiny_equivalente e bipados
+      if (eq?.bipados > 0) {
+        bipagemTotal.push({
+          sku: eq.sku_bipado, id_tiny: eq.id_tiny_equivalente, un: eq.bipados
+        });
       }
     });
+  }
+
+  if (bipagemTotal.length === 0) {
+    notify('Nada para transferir: total bipado = 0.');
+    return;
+  }
+
+  // 4) normaliza id_produto e monta movimentos (de -> para)
+  const movimentos = [];
+  for (const prod of bipagemTotal) {
+    const id_produto = Number(prod.id_tiny);
+    if (!Number.isFinite(id_produto)) {
+      console.warn('ID Tiny inválido para', prod);
+      continue;
+    }
+    const unidades = Number(prod.un);
+    if (!Number.isFinite(unidades) || unidades <= 0) continue;
+
+    movimentos.push({
+      sku: prod.sku,
+      id_produto,
+      de: DEPOSITO_ORIGEM,
+      para: DEPOSITO_DESTINO,
+      unidades
+    });
+  }
+
+  if (movimentos.length === 0) {
+    notify('Nenhum movimento válido foi gerado.');
+    return;
+  }
+
+  // 5) observações (igual você já usa)
+  const empresaId = parseInt(document.getElementById("infoAgend").dataset.empresa, 10);
+  const empresaNome =
+    empresaId === 1 ? "Jaú Pesca" :
+      empresaId === 2 ? "Jaú Fishing" :
+        empresaId === 3 ? "L.T. Sports" : "Nenhuma";
+  const marketplaceAgendamento = document.getElementById("infoAgend").dataset.marketplace;
+  const nomeColaborador = document.getElementById("infoAgend").dataset.colaborador;
+  const numeroAgendamento = document.getElementById("infoAgend").dataset.agendamento;
+
+  const observacoes =
+    `Conferência - AgendamentosWeb\n` +
+    `Ag.: ${numeroAgendamento}\n` +
+    `Mktp.: ${marketplaceAgendamento}\n` +
+    `Emp.: ${empresaNome}\n` +
+    `Co.: ${nomeColaborador}`;
+
+  // 6) dispara em lote para o backend (sem token!)
+  try {
+    notify('Processando transferências...', { type: 'info', duration: 3000 });
+    const res = await moverEstoque(movimentos, { observacoes });
+    console.log('Tasks criadas:', res.tasks);
+    notify.success(`Transferências enfileiradas (${res.tasks.length} movimentações).`, { duration: 4000 });
+    // opcional: você pode reaproveitar seu acompanharStatus(res.tasks[0].task_saida) etc.
+  } catch (err) {
+    console.error(err);
+    notify.error(String(err?.message || err));
+  }
+}
+
+async function moverEstoque(movimentos, meta = {}) {
+  // movimentos: [{ sku?, id_produto, de, para, unidades, preco_unitario? }, ...]
+  // meta: { empresa?, observacoes?, preco_unitario? }
+
+  const payload = {
+    empresa: meta.empresa || null,
+    observacoes: meta.observacoes || null,
+    preco_unitario: meta.preco_unitario ?? 0,
+    movimentos
+  };
+
+  const resp = await fetch('/estoque/mover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    credentials: 'include' // garante cookie de sessão
   });
 
-  console.log('Completinho o comps >', comp);
-  let bipagemTotal = [];
-
-  for (const produto of comp) {
-    console.log('idAgend >', idAgend);
-    const response = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${produto.sku}`);
-
-    const data = await response.json();
-    console.log('Resposta da busca antes da transferência', data);
-
-    const prodRef = {
-      nome: produto.nome,
-      sku: produto.sku,
-      id_tiny: produto.id_tiny,
-      un: data.bipagem.bipados
-    }
-    bipagemTotal.push(prodRef);
-
-    data.equivalentes.forEach(prod => {
-      bipagemTotal.push(prod);
-    });
-
-    console.log('Será feito a trasferência nesses produtos >', bipagemTotal);
+  let data = {};
+  try { data = await resp.json(); } catch { }
+  if (!resp.ok || data.ok === false) {
+    const msg = data?.error || `Falha ao mover estoque (HTTP ${resp.status})`;
+    throw new Error(msg);
   }
-
-  console.log('Este é o bipagemTotal >', bipagemTotal);
-  for (const prod of bipagemTotal) {
-    console.log('prod | Esse produto precisa sair do 151 e entrar no 141 >', prod);
-    const id_depositoS = 785301556;
-    const id_depositoE = 822208355;
-
-    const toIntOrNull = (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) ? Math.trunc(n) : null;
-    };
-
-    // pega o primeiro ID numérico válido: id_tiny ou id_tiny_equivalente
-    const id_prod = toIntOrNull(prod.id_tiny) ?? toIntOrNull(prod.id_tiny_equivalente);
-
-    if (id_prod == null) {
-      throw new Error(`ID do Tiny inválido para SKU ${prod.sku || ''}`);
-    }
-
-    console.log('id_prod >', id_prod);
-    console.log('prod <', prod);
-    const un_prod = prod.un ?? prod.bipados;
-    const marketplaceAgendamento = document.getElementById("infoAgend").dataset.marketplace;
-    const nomeColaborador = document.getElementById("infoAgend").dataset.colaborador;
-    const empresaId = parseInt(document.getElementById("infoAgend").dataset.empresa, 10);
-    const numeroAgendamento = document.getElementById("infoAgend").dataset.agendamento;
-
-    const empresaNome =
-      empresaId === 1 ? "Jaú Pesca" :
-        empresaId === 2 ? "Jaú Fishing" :
-          empresaId === 3 ? "L.T. Sports" :
-            "Nenhuma";
-    const observacoes = `Conferência - AgendamentosWeb\nAg.: ${numeroAgendamento}\nMktp.: ${marketplaceAgendamento}\nEmp.: ${empresaNome}\nCo.: ${nomeColaborador}`
-
-    // if(defineEntrada === 1) {
-    transferirEstoque(id_depositoS, id_prod, un_prod, "S", accessToken, observacoes); // "S" = Saída do estoque
-    //   defineEntrada = 2;
-    // } else {
-    transferirEstoque(id_depositoE, id_prod, un_prod, "E", accessToken, observacoes); // "E" = Entrada no estoque
-    //   defineEntrada = 1;
-    // }    
-  }
-  notify('Operação concluída!\n Todos os itens do agendamento estão sendo transferidos');
+  return data; // { ok:true, tasks:[...] }
 }
 
 // Função que faz a transferência de estoque
@@ -1773,26 +1808,19 @@ async function salvarAlteracoes() {
   }
 }
 
-async function verificarSeECaixaFechada(skuOriginalParaValidar) {
+async function verificarSeECaixaFechada(valorLido) {
   try {
-    const getComp = await fetch(`/api/tiny/composicao-por-sku?sku=${encodeURIComponent(skuOriginalParaValidar)}`, {
+    const resp = await fetch(`/api/tiny/composicao-auto?valor=${encodeURIComponent(valorLido)}`, {
       method: 'GET',
-      headers: { "Accept": "application/json" },
-      credentials: "include"
+      headers: { 'Accept': 'application/json' },
+      credentials: 'include' // sessão
     });
 
-    if (!getComp.ok) {
-      // HTTP 4xx/5xx
-      return null;
-    }
+    if (!resp.ok) return null;
 
-    const composicao = await getComp.json();
-    console.log('Resposta composição:', composicao);
-
-    // Guardas
+    const composicao = await resp.json();
     if (!composicao || composicao.ok === false) return null;
-    if (!Array.isArray(composicao.kit)) return null;
-    if (composicao.kit.length !== 1) return null;
+    if (!Array.isArray(composicao.kit) || composicao.kit.length !== 1) return null;
 
     const k = composicao.kit[0];
     if (!k || !k.produto) return null;
@@ -1803,8 +1831,8 @@ async function verificarSeECaixaFechada(skuOriginalParaValidar) {
       nome: k.produto.descricao,
       un: k.quantidade
     };
-  } catch (err) {
-    console.error("Falha ao buscar composição:", err);
+  } catch (e) {
+    console.error('verificarSeECaixaFechada (auto) erro:', e);
     return null;
   }
 }

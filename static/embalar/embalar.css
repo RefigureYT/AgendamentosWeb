@@ -249,3 +249,31 @@ body {
   background-color: #f0fff0;
   /* Fundo verde bem claro */
 }
+
+/* Modal Fechar Caixa - look & feel */
+.fechar-caixa .modal-header{
+  background: linear-gradient(135deg,#198754,#20c997);
+  color:#fff; border-bottom:none;
+}
+.fechar-caixa .modal-content{ border:0; border-radius:18px; overflow:hidden; }
+.fechar-caixa .modal-body{ padding-top:1.25rem; }
+
+.fechar-caixa-options{
+  display:grid; gap:12px; grid-template-columns:repeat(2,1fr);
+}
+@media (max-width: 576px){
+  .fechar-caixa-options{ grid-template-columns:1fr; }
+}
+.fechar-caixa-option{
+  border:2px solid var(--bs-border-color);
+  border-radius:14px; padding:12px;
+  cursor:pointer; transition:all .15s ease-in-out;
+  user-select:none; background:#fff;
+}
+.fechar-caixa-option:hover{ transform:translateY(-1px); }
+.fechar-caixa-option.active{
+  border-color:var(--bs-success);
+  box-shadow:0 0 0 4px rgba(25,135,84,.12);
+}
+.fechar-caixa-option .title{ font-weight:600; }
+.fechar-caixa-option .desc{ font-size:.925rem; color:#6c757d; margin-top:2px; }

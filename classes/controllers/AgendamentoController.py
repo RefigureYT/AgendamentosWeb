@@ -437,7 +437,7 @@ class AgendamentoController:
         
         return composicoes_dict
     
-    def return_all_produtos_from_agendamento(self, agendamento:Agendamento = None):\
+    def return_all_produtos_from_agendamento(self, agendamento:Agendamento = None):
         return self.db_controller.get_all_produtos_from_agendamento(agendamento.id_bd)
 
     def return_all_composicoes_from_produto(self, produto:Produto = None):
@@ -660,3 +660,29 @@ class AgendamentoController:
         except Exception as e:
             print(f"Erro ao excluir agendamento completo (ID: {id_agend_bd}): {e}")
             return False
+    
+    # --- EXPEDIÇÃO: iniciar/finalizar ---
+    def iniciar_expedicao(self, id_agend_bd: int) -> datetime:
+        """
+        Marca o início da expedição no BD (se ainda não marcado) e
+        retorna o timestamp usado.
+        """
+        if not self.db_controller:
+            raise RuntimeError("DatabaseController não configurado no AgendamentoController.")
+
+        # Usa timezone do servidor; ajuste se preferir tz explícita
+        ts = datetime.now()
+        # Atualiza se estiver nulo (sua query já tem '... IS NULL')
+        self.db_controller.update_expedicao_inicio(id_agend_bd)
+        return ts
+
+    def finalizar_expedicao(self, id_agend_bd: int) -> datetime:
+        """
+        Marca o fim da expedição no BD e retorna o timestamp usado.
+        """
+        if not self.db_controller:
+            raise RuntimeError("DatabaseController não configurado no AgendamentoController.")
+
+        ts = datetime.now()
+        self.db_controller.update_expedicao_fim(id_agend_bd)
+        return ts

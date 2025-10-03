@@ -4,41 +4,104 @@ body {
     background-color: #e9f1fb;
 }
 
-.header-bar {
-    background-color: #007bff;
-    color: white;
-    padding: 10px;
-    font-weight: bold;
-    border-radius: 4px 4px 0 0;
-    margin-bottom: 10px;
-}
-
-/* Estilos para os novos cards de caixa */
-.caixa-card .card-header {
-    background-color: #f8f9fa;
-    border-bottom: 1px solid #dee2e6;
-}
-
-.caixa-card .card-body {
+/* ===== ESTILOS PARA O PAINEL DE CONTROLE ===== */
+.panel-control {
+    background-color: #0d6efd;
+    color: #fff;
     padding: 1rem;
+    border-radius: 0.375rem;
+    box-shadow: 0 .125rem .25rem rgba(0, 0, 0, .075);
 }
 
-.caixa-card .info-item .badge {
+.panel-title {
+    padding-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.panel-control .form-label {
+    color: #fff;
+}
+
+.panel-control,
+.panel-control div {
+    color: #fff;
+}
+
+@media (min-width: 992px) {
+    .border-end-lg {
+        border-right: 1px solid rgba(255, 255, 255, 0.2) !important;
+    }
+}
+
+/* ===== ESTILOS PARA OS CARDS DAS CAIXAS ===== */
+.caixa-card {
+    transition: transform 0.2s ease-in-out;
+}
+
+.caixa-card:hover {
+    transform: translateY(-5px);
+}
+
+/* --- ESTILO DO OVERLAY DE CONCLUSÃO --- */
+.check-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
-    padding: 0.5rem;
-    text-align: center;
+    height: 100%;
+    background-color: rgba(25, 135, 84, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    border-radius: var(--bs-card-border-radius);
+    transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
+    z-index: 10;
 }
 
-.caixa-card .card-footer {
-    padding: 0.5rem 1rem;
-    background-color: #fff;
+.check-overlay .bi-check-circle-fill {
+    font-size: 4rem;
+    color: white;
+    transform: scale(0.8);
+    transition: transform 0.3s ease-in-out;
 }
 
-.card-icon {
-    opacity: 0.7;
+/* --- CONTROLE DE VISIBILIDADE --- */
+.caixa-card.status-concluido .check-overlay {
+    opacity: 1;
+    visibility: visible;
 }
 
-.modal-body .list-group-item {
-    padding-top: 1rem;
-    padding-bottom: 1rem;
+.caixa-card.status-concluido .check-overlay .bi-check-circle-fill {
+    transform: scale(1);
+}
+
+.caixa-card.status-concluido .card-icon {
+    display: none;
+    /* Opcional: esconde o ícone laranja original */
+}
+
+/* ===== FEEDBACK DE ERRO NO INPUT ===== */
+.input-erro {
+    animation: shake 0.5s;
+    border-color: #dc3545 !important;
+}
+
+@keyframes shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(-5px);
+    }
+
+    75% {
+        transform: translateX(5px);
+    }
 }
