@@ -32,13 +32,15 @@ def upload_excel():
             raise ArquivoInvalido()
 
         # salva o arquivo no disco
-        filename = secure_filename(file.filename)
-        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        original = secure_filename(file.filename)
+        unique   = f"{uuid.uuid4().hex}_{original}"
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)   # <- garante a pasta
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], unique)
         file.save(save_path)
 
         # 1) registro do upload
         upload_uuid = str(uuid.uuid4())
-        db_controller.insert_excel_upload((upload_uuid, filename))
+        db_controller.insert_excel_upload((upload_uuid, original))  # <- corrige 'filename'
 
         # 2) cria o Agendamento em memória a partir do Excel
         ag = agendamento_controller.create_agendamento_from_excel(
@@ -50,10 +52,9 @@ def upload_excel():
             upload_uuid=upload_uuid
         )
 
-        agendamento = agendamento_controller.agendamentos[-1]
-        agendamento_controller.get_prod_data_tiny(agendamento)
-        agendamento_controller.get_comp_tiny(agendamento)
-        agendamento_controller.get_comp_data_tiny(agendamento)
+        agendamento_controller.get_prod_data_tiny(ag)
+        agendamento_controller.get_comp_tiny(ag)
+        agendamento_controller.get_comp_data_tiny(ag)
 
         # ─── NOVO ───
         # 2.5) gera um pedido fake de 8 dígitos e sobrescreve o id_agend_ml
@@ -100,6 +101,10 @@ def upload_excel():
         
         # 8) redireciona para a view do Excel (ou cleaning) passando o uuid
         return redirect(url_for('agendamentos', acao='ver') + "?upload=ok_excel")
+
+    except ArquivoInvalido:
+        # trata especificamente o caso de arquivo inválido, sem repetir o flash
+        return redirect(url_for('agendamentos', acao='ver') + "?upload=fail&erro=arquivo_invalido")
 
     except Exception as e:
         app.logger.error(f"Erro ao processar EXCEL: {e}", exc_info=True)

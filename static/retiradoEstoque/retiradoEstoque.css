@@ -1,3 +1,4 @@
+/* ===== Core ===== */
 body {
   background-color: #e9f1fb;
 }
@@ -37,6 +38,7 @@ body {
   display: none;
 }
 
+/* ===== Toasts ===== */
 .toast-container {
   position: fixed;
   inset: auto 16px 16px auto;
@@ -151,8 +153,8 @@ body {
   }
 }
 
-
-/* Base do overlay do modal */
+/* ===== Modal custom (não-Bootstrap) ===== */
+/* Overlay */
 .modal {
   display: none;
   /* começa escondido */
@@ -161,17 +163,17 @@ body {
   /* top/right/bottom/left: 0 */
   background: rgba(0, 0, 0, .5);
   z-index: 10000;
-  /* alto para ficar acima de tudo */
+  /* acima de tudo */
   overflow: hidden;
 }
 
-/* Caixa do modal */
+/* Caixa */
 .modal-content {
   background: #fff;
   color: #000;
-  /* garante texto visível */
+  /* garante contraste */
   margin: 8% auto;
-  /* centraliza vertical/horizontal */
+  /* centraliza */
   padding: 20px;
   border-radius: 8px;
   width: 90%;
@@ -191,7 +193,7 @@ body {
   opacity: .7;
 }
 
-/* Grid interno do modal: coluna info (esq) + lista (dir) */
+/* Grid interno: coluna info (esq) + lista (dir) */
 .modal-grid {
   display: grid;
   grid-template-columns: 420px 1fr;
@@ -204,7 +206,7 @@ body {
   /* mesmo alto do painel esquerdo */
   overflow-y: auto;
   padding-right: 6px;
-  /* respiro para não colar na barra */
+  /* respiro para a barra */
 }
 
 /* Badge simples (se não estiver usando Bootstrap) */
@@ -221,8 +223,7 @@ body {
 /* Rodapé do modal com botão fixo/visível */
 .modal-actions {
   position: sticky;
-  bottom: 0px;
-  /* compensa o padding do .modal-content */
+  bottom: 0;
   margin: 16px -20px -20px;
   /* encosta nas bordas do modal-content */
   padding: 12px 50px;
@@ -236,7 +237,7 @@ body {
   z-index: 1;
 }
 
-/* Botões básicos (se não estiver usando Bootstrap) */
+/* ===== Botões básicos (se não estiver usando Bootstrap) ===== */
 .btn {
   appearance: none;
   border: 1px solid transparent;
@@ -290,19 +291,10 @@ body {
   background: #fff1f1;
 }
 
-/* Garantir posicionamento do botão de lixeira no card */
+/* ===== Layout dos cards do modal ===== */
 .produto-item-modal {
   position: relative;
 }
-
-/* Container de ações do card (canto superior direito) */
-/* .card-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  gap: 6px;
-} */
 
 /* Linha de controles do card */
 .produto-item-modal .controls {
@@ -331,11 +323,11 @@ body {
   white-space: nowrap;
   /* não quebra em várias linhas */
   text-overflow: ellipsis;
-  /* se quiser reticências em casos extremos */
+  /* reticências em casos extremos */
   overflow: hidden;
 }
 
-/* Botão de lixeira já está ok; mantendo tua versão */
+/* Botão de lixeira (override no contexto das controls) */
 .controls .btn-icon {
   display: flex;
   align-items: center;

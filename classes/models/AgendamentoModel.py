@@ -6,14 +6,14 @@ from datetime import datetime
 class Agendamento:
     """ Classe feita para gerenciar os dados de um agendamento """
     def __init__(self, 
-                 id_bd:int = 0, 
-                 id_agend_ml:str = '', 
-                 id_tipo:int = 0,
-                 empresa:int = 0,
-                 id_mktp:int = 0,
-                 colaborador = '',
-                 entrada:datetime = datetime.now(),
-                 centro_distribuicao: str = ''):
+                id_bd:int = 0, 
+                id_agend_ml:str = '', 
+                id_tipo:int = 0,
+                empresa:int = 0,
+                id_mktp:int = 0,
+                colaborador = '',
+                entrada:datetime = datetime.now(),
+                centro_distribuicao: str = ''):
         """
         Instancia um objeto da classe Agendamento
 
@@ -52,7 +52,9 @@ class Agendamento:
 
 
         self.produtos:list[Produto] = []
-
+        self.expedicao_inicio = None
+        self.expedicao_fim = None
+        
     def __repr__(self):
         """ Formata como o objeto deve ser transformado em uma string """
         return f"Agendamento\

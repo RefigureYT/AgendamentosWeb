@@ -1,6 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap');
 
-
 html {
     color-scheme: light;
 }
@@ -26,21 +25,21 @@ img {
     user-select: none;
 }
 
-/* Modal - lista clicável com foco acessível */
+/* Modal de seleção de impressoras (BrowserPrint) */
 #printerList .list-group-item {
     cursor: pointer;
     border-radius: .5rem !important;
+    outline: none;
+}
+
+#printerList .list-group-item:focus-visible {
+    box-shadow: 0 0 0 .25rem rgba(13, 110, 253, .25);
 }
 
 #printerList .list-group-item.active {
     border-color: rgba(13, 110, 253, .25);
 }
 
-/* Espaços e estados */
 #printerLoading {
     min-height: 40px;
 }
-
-#printerList .list-group-item { cursor: pointer; border-radius: .5rem !important; }
-#printerList .list-group-item.active { border-color: rgba(13,110,253,.25); }
-#printerLoading { min-height: 40px; }

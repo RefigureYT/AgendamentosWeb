@@ -19,3 +19,4 @@ from .reservados import *
 from .embalar import *
 from .expedicao import *
 from .excluir_agendamento import * 
+from .relatorio import *

@@ -3,7 +3,6 @@ import mysql.connector
 from flask import session, render_template, Blueprint, request, jsonify, current_app as app, redirect, url_for, make_response
 from datetime import datetime
 from classes.models import Agendamento
-from main import agendamento_controller
 import requests
 from datetime import datetime, date
 import re
@@ -553,7 +552,7 @@ def api_equiv_add_unidades():
         app.logger.exception("Erro em /api/equiv/add-unidades")
         return jsonify(error=str(e)), 500
 
-@bp_retirado.route('/api/bipados/<int:id_agend>')
+@bp_retirado.route('/api/bipados/<id_agend>')
 def api_bipados_agend(id_agend):
     select_sql = """
         SELECT sku, bipados
@@ -754,22 +753,23 @@ def api_equiv_delete():
 
 @bp_retirado.route('/retirado', methods=['GET', 'POST'])
 def retirado_estoque():
-    if request.method == "GET":
-        agendamento_controller.clear_agendamentos()
+    ag_ctrl = app.config['AG_CTRL']
+    if request.method == "GET":        
+        ag_ctrl.clear_agendamentos()
         # Corrigido para lidar com IDs que podem não ser inteiros inicialmente
         id_agendamento = request.args['id']
-        agendamento_controller.insert_agendamento(id_bd=int(id_agendamento))
-        agend: Agendamento = agendamento_controller.get_last_made_agendamento()
-        agendamento_controller.create_agendamento_from_bd_data(agend)
-        agendamento_controller.set_error_flags_composicoes(agend)
+        ag_ctrl.insert_agendamento(id_bd=int(id_agendamento))
+        agend: Agendamento = ag_ctrl.get_last_made_agendamento()
+        ag_ctrl.create_agendamento_from_bd_data(agend)
+        ag_ctrl.set_error_flags_composicoes(agend)
 
         tipo = int(request.args.get('tipo', 0))
 
         if tipo == 1:
             return render_template(
             'limpeza.html',
-            dados=agendamento_controller.search_agendamento('id_bd', str(agend.id_bd)),
-            comps=agendamento_controller.return_all_in_dict(agend)
+            dados=ag_ctrl.search_agendamento('id_bd', str(agend.id_bd)),
+            comps=ag_ctrl.return_all_in_dict(agend)
             )
 
         elif tipo == 4: # Fase "Embalar"
@@ -791,7 +791,7 @@ def retirado_estoque():
             )
 
         elif tipo == 5:
-            return redirect(url_for('expedicao', id_agend_bd=agend.id_bd))
+            return redirect(url_for('expedicao.expedicao', id_agend_bd=agend.id_bd))
 
         else:
             comps = []
@@ -817,43 +817,43 @@ def retirado_estoque():
 
             return render_template(
                 'retiradoEstoque.html',
-                dados=agendamento_controller.return_comp_grouped(agend),
+                dados=ag_ctrl.return_comp_grouped(agend),
                 comps=comps,
                 pode_mudar=pode_mudar,
-                dados_agend=agendamento_controller.get_last_made_agendamento(),
+                dados_agend=ag_ctrl.get_last_made_agendamento(),
                 marketplace_nome=marketplace_nome
             )
 
     # ─── se for POST (finaliza e redireciona para embalar) ───────────────────
-    agendamento_controller.clear_agendamentos()
-    agendamento_controller.insert_agendamento(request.form['inp_id_pedido'])
-    agend: Agendamento = agendamento_controller.get_last_made_agendamento()
-    agendamento_controller.create_agendamento_from_bd_data(agend)
-    agendamento_controller.set_error_flags_composicoes(agend)
-    agendamento_controller.set_empresa_colaborador_agend(
+    ag_ctrl.clear_agendamentos()
+    ag_ctrl.insert_agendamento(request.form['inp_id_pedido'])
+    agend: Agendamento = ag_ctrl.get_last_made_agendamento()
+    ag_ctrl.create_agendamento_from_bd_data(agend)
+    ag_ctrl.set_error_flags_composicoes(agend)
+    ag_ctrl.set_empresa_colaborador_agend(
         agend,
         request.form.get('inp_nome_emp', ''),
         request.form.get('inp_nome_col', '')
     )
-    agendamento_controller.update_empresa_colaborador_bd(agend)
+    ag_ctrl.update_empresa_colaborador_bd(agend)
 
     # Marca como embalar
     agend.set_tipo(4)
-    agendamento_controller.update_agendamento(agend)
+    ag_ctrl.update_agendamento(agend)
 
     # ─── Recria o comps serializável para o POST também ────────────────
     comps = []
     for p in agend.produtos:
         pd = p.to_dict()
         # Busca e adiciona a URL da imagem
-        pd['imagemUrl'] = agendamento_controller.get_product_image_url(p.sku)
+        pd['imagemUrl'] = ag_ctrl.get_product_image_url(p.sku)
         pd['composicoes'] = [c.to_dict() for c in p.composicoes]
         comps.append(pd)
     # ────────────────────────────────────────────────────────────────────
 
     return render_template(
         'embalar.html',
-        dados=agendamento_controller.search_agendamento('id_bd', agend.id_bd),
+        dados=ag_ctrl.search_agendamento('id_bd', agend.id_bd),
         comps=comps,
         dados_agend=agend
     )
@@ -864,11 +864,12 @@ def finalizar_conferencia(id_agend):
     Finaliza a fase de conferência, gera um relatório e move o agendamento para Embalar.
     """
     try:
+        ag_ctrl = app.config['AG_CTRL']
         # Carrega o agendamento em memória
-        agendamento_controller.clear_agendamentos()
-        agendamento_controller.insert_agendamento(id_bd=id_agend)
-        ag = agendamento_controller.get_last_made_agendamento()
-        agendamento_controller.create_agendamento_from_bd_data(ag)
+        ag_ctrl.clear_agendamentos()
+        ag_ctrl.insert_agendamento(id_bd=id_agend)
+        ag = ag_ctrl.get_last_made_agendamento()
+        ag_ctrl.create_agendamento_from_bd_data(ag)
 
         # ----- O bloco de geração de relatório permanece o mesmo -----
         inicio = ag.entrada
@@ -909,7 +910,7 @@ def finalizar_conferencia(id_agend):
 
         # Marca como Embalar (ID 4)
         ag.set_tipo(4)
-        agendamento_controller.update_agendamento(ag)
+        ag_ctrl.update_agendamento(ag)
 
         # Retorna uma resposta de sucesso padronizada
         return jsonify({"success": True, "message": "Conferência finalizada! O agendamento foi movido para a Embalagem."})
@@ -1401,7 +1402,7 @@ def _normalize_bearer(token: str) -> str:
     return token if token.lower().startswith("bearer ") else f"Bearer {token}"
 
 @bp_retirado.route('/api/tiny/produto-por-sku-interno', methods=['GET'])
-def tiny_produto_por_sku_interno():
+def tiny_produto_por_sku_interno():    
     """
     Busca produto no Tiny por SKU, usando o Caller do servidor.
     Requer usuário logado (session['id_usuario']).
@@ -1416,9 +1417,10 @@ def tiny_produto_por_sku_interno():
         return jsonify(ok=False, error='Parâmetro "sku" é obrigatório'), 400
 
     try:
+        ag_ctrl = app.config['AG_CTRL']
         # Reaproveita o Caller (Tiny v3) já configurado no main.py
         # Dica: situacao='A' filtra produto ativo quando houver múltiplos
-        resp = agendamento_controller.caller.make_call(
+        resp = ag_ctrl.caller.make_call(
             'produtos',
             params_add={'codigo': sku, 'situacao': 'A'}
         )
@@ -1448,7 +1450,8 @@ def tiny_produto_por_id_interno(id_tiny: int):
         return jsonify(ok=False, error='Não autenticado'), 401
 
     try:
-        resp = agendamento_controller.caller.make_call(f'produtos/{id_tiny}')
+        ag_ctrl = app.config['AG_CTRL']
+        resp = ag_ctrl.caller.make_call(f'produtos/{id_tiny}')
         if not isinstance(resp, dict):
             return jsonify(ok=False, error='Resposta inesperada do Tiny', raw=resp), 502
         return jsonify(ok=True, produto=resp), 200
@@ -1467,7 +1470,8 @@ def tiny_produto_kit_interno(id_tiny: int):
         return jsonify(ok=False, error='Não autenticado'), 401
 
     try:
-        resp = agendamento_controller.caller.make_call(f'produtos/{id_tiny}/kit')
+        ag_ctrl = app.config['AG_CTRL']
+        resp = ag_ctrl.caller.make_call(f'produtos/{id_tiny}/kit')
         # O Tiny costuma devolver uma lista/nó simples; padronize para JSON
         return jsonify(ok=True, kit=resp), 200
     except Exception as e:
@@ -1493,8 +1497,9 @@ def tiny_composicao_por_sku_interno():
         return jsonify(ok=False, error='Parâmetro "sku" é obrigatório'), 400
 
     try:
+        ag_ctrl = app.config['AG_CTRL']
         # 1) Produto por SKU (preferindo ativo)
-        resp_prod = agendamento_controller.caller.make_call(
+        resp_prod = ag_ctrl.caller.make_call(
             'produtos',
             params_add={'codigo': sku, 'situacao': 'A'}
         )
@@ -1504,7 +1509,7 @@ def tiny_composicao_por_sku_interno():
         itens = resp_prod.get('itens') or []
         if not itens:
             # tenta sem filtro 'situacao' como fallback
-            resp_prod2 = agendamento_controller.caller.make_call(
+            resp_prod2 = ag_ctrl.caller.make_call(
                 'produtos',
                 params_add={'codigo': sku}
             )
@@ -1522,7 +1527,7 @@ def tiny_composicao_por_sku_interno():
 
         # 2) Composição (kit) por ID
         # No seu projeto você usa '/produtos/{id}/kit' (mantemos a consistência)
-        resp_kit = agendamento_controller.caller.make_call(f'produtos/{id_tiny}/kit')
+        resp_kit = ag_ctrl.caller.make_call(f'produtos/{id_tiny}/kit')
 
         # Normaliza saída: se o Tiny não retornar lista, tenta extrair
         if isinstance(resp_kit, list):
@@ -1559,6 +1564,7 @@ def tiny_composicao_auto():
         return jsonify(ok=False, error='Parâmetro "valor" é obrigatório'), 400
 
     try:
+        ag_ctrl = app.config['AG_CTRL']
         # Normaliza EAN/GTIN (mantendo só dígitos)
         ean_digits = re.sub(r'\D+', '', valor)
         candidato = None
@@ -1566,7 +1572,7 @@ def tiny_composicao_auto():
 
         # Helper local para chamar Tiny e extrair itens
         def _buscar_produtos(params: dict):
-            resp = agendamento_controller.caller.make_call('produtos', params_add=params)
+            resp = ag_ctrl.caller.make_call('produtos', params_add=params)
             if isinstance(resp, dict):
                 return resp.get('itens') or []
             return []
@@ -1607,7 +1613,7 @@ def tiny_composicao_auto():
 
         # 3) Busca composição (kit) pelo ID
         # Mantemos o mesmo padrão já usado no projeto:
-        resp_kit = agendamento_controller.caller.make_call(f'produtos/{id_tiny}/kit')
+        resp_kit = ag_ctrl.caller.make_call(f'produtos/{id_tiny}/kit')
 
         # Normaliza: kit pode vir como lista ou dentro de "itens"
         if isinstance(resp_kit, list):

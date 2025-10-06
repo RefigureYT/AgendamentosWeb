@@ -1,0 +1,116 @@
+{% if relatorio %}
+
+<div class="card mb-3">
+    <div class="card-header bg-light">
+        <strong><i class="bi bi-info-circle-fill me-2"></i>Informações Gerais</strong>
+    </div>
+    <ul class="list-group list-group-flush">
+        <li class="list-group-item"><strong>Agendamento:</strong> {{ relatorio.Informacoes.Agendamento }}</li>
+        <li class="list-group-item"><strong>Empresa:</strong> {{ relatorio.Informacoes.Empresa }}</li>
+        <li class="list-group-item"><strong>Colaborador(es):</strong>
+            {% for item in relatorio.Colaboradores %}
+            <span class="badge bg-secondary">{{ item.Colaborador }}</span>
+            {% endfor %}
+        </li>
+    </ul>
+</div>
+
+<ul class="nav nav-tabs nav-fill" id="relatorioTab" role="tablist">
+    {% if relatorio.RelatorioConferencia %}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="conferencia-tab" data-bs-toggle="tab" data-bs-target="#conferencia-content"
+            type="button" role="tab">
+            <i class="bi bi-card-checklist me-1"></i> Conferência
+        </button>
+    </li>
+    {% endif %}
+    {% if relatorio.RelatorioEmbalagem %}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if not relatorio.RelatorioConferencia %}active{% endif %}" id="embalagem-tab"
+            data-bs-toggle="tab" data-bs-target="#embalagem-content" type="button" role="tab">
+            <i class="bi bi-box-seam me-1"></i> Embalagem
+        </button>
+    </li>
+    {% endif %}
+</ul>
+
+<div class="tab-content border border-top-0 rounded-bottom p-3" id="relatorioTabContent">
+
+    {% if relatorio.RelatorioConferencia %}
+    <div class="tab-pane fade show active" id="conferencia-content" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">Itens Conferidos</h6>
+            <span class="badge bg-light text-dark">Duração: {{ relatorio.Informacoes.Permanencia }}</span>
+        </div>
+        <div class="table-responsive" style="max-height: 40vh;">
+            <table class="table table-sm table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Nome</th>
+                        <th class="text-end">Unidades</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in relatorio.RelatorioConferencia %}
+                    <tr>
+                        <td><code>{{ item.sku }}</code></td>
+                        <td>{{ item.nome }}</td>
+                        <td class="text-end fw-bold">{{ item.unidades_totais }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if relatorio.RelatorioEmbalagem %}
+    <div class="tab-pane fade {% if not relatorio.RelatorioConferencia %}show active{% endif %}" id="embalagem-content"
+        role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0">Itens Embalados ({{ relatorio.RelatorioEmbalagem.detalhes_embalagem.total_caixas }} Caixas)
+            </h6>
+            <span class="badge bg-light text-dark">Finalizado em: {{
+                relatorio.RelatorioEmbalagem.termino_embalagem.split(' ')[0] }}</span>
+        </div>
+        <div class="accordion accordion-flush" id="accordionCaixasEmbalagem"
+            style="max-height: 40vh; overflow-y: auto;">
+            {% for caixa in relatorio.RelatorioEmbalagem.detalhes_embalagem.caixas %}
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#collapse-caixa-embalagem-{{ loop.index }}">
+                        <strong>Caixa #{{ caixa.caixa_numero }}</strong>
+                    </button>
+                </h2>
+                <div id="collapse-caixa-embalagem-{{ loop.index }}" class="accordion-collapse collapse"
+                    data-bs-parent="#accordionCaixasEmbalagem">
+                    <div class="accordion-body p-0">
+                        <ul class="list-group list-group-flush">
+                            {% for item in caixa.itens %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center py-1">
+                                <code>{{ item.sku }}</code>
+                                <span class="badge bg-primary rounded-pill">{{ item.quantidade }} un</span>
+                            </li>
+                            {% else %}
+                            <li class="list-group-item">Nenhum item nesta caixa.</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+{% if not relatorio.RelatorioConferencia and not relatorio.RelatorioEmbalagem %}
+<div class="alert alert-info mt-3">Nenhum detalhe de conferência ou embalagem encontrado neste relatório.</div>
+{% endif %}
+
+{% else %}
+<p>Não foi possível carregar os dados do relatório.</p>
+{% endif %}

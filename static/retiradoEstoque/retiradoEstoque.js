@@ -413,60 +413,47 @@ function verificarSeFinalizouTudo() {
 }
 
 async function finalizarAgendamento() {
-  const idAgend = parseInt(new URLSearchParams(window.location.search).get('id'), 10);
+  const urlParams = new URLSearchParams(window.location.search);
+  const idAgend = parseInt(urlParams.get('id'), 10);
 
-  // Pede confirmação ao usuário, assim como na tela de embalagem
-  const result = await Swal.fire({
-    title: 'Finalizar Conferência?',
-    text: "O relatório será gerado, a transferência entre depósitos será realizada e o pedido movido para a Embalagem. Deseja continuar?",
-    icon: 'question',
+  const { isConfirmed } = await Swal.fire({
+    title: "Confirmar",
+    text: "Deseja realmente finalizar a conferência deste agendamento?",
+    icon: "question",
     showCancelButton: true,
-    confirmButtonColor: '#28a745',
-    cancelButtonColor: '#6c757d',
-    confirmButtonText: 'Sim, finalizar!',
-    cancelButtonText: 'Cancelar'
+    confirmButtonColor: "#28a745",
+    cancelButtonColor: "#6c757d",
+    confirmButtonText: "Sim, finalizar!",
+    cancelButtonText: "Cancelar"
+  });
+  if (!isConfirmed) return;
+
+  Swal.fire({
+    title: 'Finalizando…',
+    html: 'Gerando relatório e encerrando conferência.',
+    allowOutsideClick: false,
+    didOpen: () => Swal.showLoading()
   });
 
-  if (result.isConfirmed) {
-    Swal.fire({
-      title: 'Processando...',
-      text: 'Gerando relatório e atualizando o status.',
-      allowOutsideClick: false,
-      didOpen: () => {
-        Swal.showLoading();
-      }
+  try {
+    const resp = await fetch(`/relatorio/finalizar/${idAgend}`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data?.message || `HTTP ${resp.status}`);
+
+    // ✅ primeiro finaliza, depois dispara a transferência
+    await agendamentoFinalizadoChamarTransferencia();
+
+    await Swal.fire({
+      icon: 'success',
+      title: 'Sucesso!',
+      text: 'Conferência finalizada e movimentação enfileirada.',
+      timer: 1500,
+      showConfirmButton: false
     });
-
-    try {
-      // Chama a nova rota com o método POST
-      const response = await fetch(`/relatorio/finalizar/${idAgend}`, {
-        method: 'POST'
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        agendamentoFinalizadoChamarTransferencia();
-        await Swal.fire({
-          icon: 'success',
-          title: 'Sucesso!',
-          text: data.message,
-          timer: 2000,
-          timerProgressBar: true,
-        });
-
-        // Redireciona para a página de agendamentos com um parâmetro específico
-        window.location.href = '/agendamentos/ver?finalizado=conferencia_ok';
-      } else {
-        throw new Error(data.message || 'Ocorreu um erro no servidor.');
-      }
-    } catch (error) {
-      Swal.fire({
-        icon: 'error',
-        title: 'Erro',
-        text: `Falha ao finalizar a conferência: ${error.message}`,
-      });
-    }
+    window.location.href = '/agendamentos/ver?finalizado=conferencia_ok';
+  } catch (err) {
+    console.error(err);
+    Swal.fire('Erro!', String(err?.message || err), 'error');
   }
 }
 
@@ -584,56 +571,75 @@ function adicionarEquivalente(sku) {
 async function verificaAdicaoProdutoEquivalentePermitido(valorBipado) {
   const raw = document.getElementById("js-data").dataset.comps;
   const anunciosOriginais = JSON.parse(raw);
+
+  // normalizadores
+  const normSku = (v) => String(v ?? '').trim().toLowerCase();
+  const normGtin = (v) => String(v ?? '').replace(/\D+/g, '');
+
+  const valorSku = normSku(valorBipado);
+  const valorGtin = normGtin(valorBipado);
+
   let produtosComposicoes = [];
-  let vistos = new Set();
+  let vistos = new Set(); // dedup por SKU normalizado
+
   console.log('TODOS OS ANÚNCIOS EXEMPLO AGENDAMENTO ATUAL >', anunciosOriginais);
 
   anunciosOriginais.forEach(p => {
-    const i = p.composicoes;
+    const i = Array.isArray(p.composicoes) ? p.composicoes : [];
     i.forEach(c => {
-      const key = c.sku;
-      if (vistos.has(key)) return; // Verifica se já existe (para não haver duplicatas)
-      vistos.add(key);
-      produtosComposicoes.push({ nome: c.nome, sku: c.sku, gtin: c.gtin, id_tiny: c.id_tiny });
+      const keySku = normSku(c.sku);
+      if (vistos.has(keySku)) return; // evita duplicatas por caixa alta/baixa
+      vistos.add(keySku);
+      produtosComposicoes.push({
+        nome: c.nome,
+        sku: keySku,               // já normalizado
+        gtin: normGtin(c.gtin),    // dígitos
+        id_tiny: c.id_tiny
+      });
     });
   });
 
-  console.log('Todas as composições dos anúncios COMPLETO DUBLADO SEM VIRUS TOTAL 100% 2077 ATUALIZADO >', produtosComposicoes);
-  // Para cima disso tem a lógica que ele pega todos os produtos que devem ser bipado (quantidade é ignorada)
-  // Abaixo vai ter a lógica que verifica se o usuário está tentando vincular um produto do agendamento com outro produto do agendamento (para não dar B.O.)
+  console.log('Todas as composições normalizadas >', produtosComposicoes);
 
+  // 1) bloquear se tentar usar algo que já é do agendamento (SKU ou GTIN)
   for (const p of produtosComposicoes) {
-    if (p.sku === valorBipado) {
-      console.log(`Para ${p.nome} cujo possui o SKU ${p.sku} bate com o sku ${valorBipado} OU SEJA NÃO PODE!!!!`);
-      const obj = {
+    const clashSku = p.sku === valorSku;
+    const clashGtin = !!valorGtin && p.gtin === valorGtin;
+
+    if (clashSku || clashGtin) {
+      console.log(`Para ${p.nome}: conflito — SKU(${p.sku}) ou GTIN(${p.gtin}) bate com ${valorBipado}`);
+      return {
         result: 1,
         message: 'Você não pode definir um produto do agendamento como Equivalente'
-      }
-      return obj;
+      };
     }
-    console.log(`Para ${p.nome} cujo possui o SKU ${p.sku} *NÃO* bate com o sku ${valorBipado}`);
+    console.log(`Para ${p.nome}: OK — SKU(${p.sku}) / GTIN(${p.gtin}) não batem com ${valorBipado}`);
   }
 
-  // A parte de cima cumpri bem o que promete em poucas linhas de código.
-  // Agora abaixo após a verificação para saber se o produto já existe no agendamento
-  // Ele usar os valores que já existem na tabela de equivalente e verifica se já existe esse valor lá dentro.
-  // Caso já exista o produto dentro da tabela de equivalentes, a função será interrompida para que não haja duplicatas!
+  // 2) checar duplicata no BD (case-insensitive para SKU e dígitos para GTIN)
+  let data = [];
+  try {
+    const resp = await fetch(`/api/equiv/${idAgend}`);
+    data = await resp.json();
+  } catch (e) {
+    console.warn('Falha ao consultar equivalentes do BD:', e);
+    // Em caso de erro, não bloqueia aqui — deixa seguir e o backend validará também.
+  }
 
-  const resp = await fetch(`/api/equiv/${idAgend}`);
-  const data = await resp.json();
-  console.log('Resultado da busca de produtos equivalentes do BANCO DE DADOS XAMPPPPPPPP >', data);
+  console.log('Resultado da busca de produtos equivalentes do BD >', data);
 
   for (const p of data) {
-    if (p.sku_bipado === valorBipado || p.gtin_bipado === valorBipado) {
-      console.log(`Já existe um produto equivalente com a mesma referência no banco de dados \n ${valorBipado} já equivale ao produto ${p.sku_original}, portanto, não pode ser referenciado novamente.`);
-      const obj = {
+    const skuEq = normSku(p.sku_bipado);
+    const gtinEq = normGtin(p.gtin_bipado);
+
+    if (skuEq === valorSku || (!!valorGtin && gtinEq === valorGtin)) {
+      console.log(`Duplicado no BD: ${valorBipado} já equivale a ${p.sku_original}.`);
+      return {
         result: 2,
         message: `Referência duplicada: ${valorBipado} já está cadastrada como equivalente de ${p.sku_original} e não pode ser registrada novamente.`
-      }
-
-      return obj;
+      };
     }
-    console.log(`Este produto ${p.sku_original} possui ${p.sku_bipado} como referência. Valor bipado não confere: ${valorBipado} (Já esperado, então está correto!)`)
+    console.log(`Este produto ${p.sku_original} possui ${p.sku_bipado} como referência. Valor bipado não confere: ${valorBipado} (esperado)`);
   }
 
   return null;
@@ -851,9 +857,9 @@ async function listarEquivalentes(idAgend) {
 
 async function addUnidadesEquivalentes(produtoBipado, qtd) {
   const payload = {
-    id_agend: idAgend,          // ex.: 227
-    sku_original: produtoBipado.sku_original,  // ex.: 'API1'
-    sku_bipado: produtoBipado.sku_bipado,      // ex.: '123'
+    id_agend: idAgend,
+    sku_original: produtoBipado.sku_original,
+    sku_bipado: produtoBipado.sku_bipado,
     quant: qtd
   };
 
@@ -863,93 +869,82 @@ async function addUnidadesEquivalentes(produtoBipado, qtd) {
     body: JSON.stringify(payload)
   });
 
-
-  const data = await requestAdd.json().catch(() => ({}));
-
-  if (!requestAdd.ok || data.ok === false) {
-    // 404 quando não encontra o par (id_agend, sku_original, sku_bipado)
-    // Outros códigos: erro do servidor/validação
-    const msg = data?.error || `Falha (HTTP ${res.status})`;
-    throw new Error(msg);
+  // ⚠️ aqui era `res.status` — CORRIGIDO:
+  if (!requestAdd.ok) {
+    const txt = await requestAdd.text().catch(() => '');
+    throw new Error(`HTTP ${requestAdd.status} – ${txt}`);
   }
-
-  return data;
+  return requestAdd.json();
 }
+
 // exemplo
 async function addDbEquivalente(sku, valorBipado) {
   const raw = document.getElementById("js-data").dataset.comps;
   const produtos = JSON.parse(raw);
-
   const nomeColaborador = document.getElementById("infoAgend").dataset.colaborador;
-  // console.log('>', produtos);
 
+  // 1) Localiza o produto de referência (case-insensitive)
   let prodRef = null;
-
   for (const p of produtos) {
-    // console.log(p);
-    const composicoes = p.composicoes;
-    for (const c of composicoes) {
-      // console.log('>', c);
-      if (c.sku === sku) {
+    for (const c of (p.composicoes || [])) {
+      if (String(c.sku).toLowerCase() === String(sku).toLowerCase()) {
         prodRef = c;
         break;
       }
     }
+    if (prodRef) break;
+  }
+  if (!prodRef) {
+    notify.error(`SKU de referência não encontrado: ${sku}`, { type: 'info', duration: 4000 });
+    return;
   }
 
-  const result = await getTinyToken("jaupesca", "tiny");
-  const token = result[0].access_token;
-
-  const produtoEquivalente = await buscaProdutoEquivalente(valorBipado, token);
-
-  if (produtoEquivalente === 1) {
+  // 2) Token Tiny
+  let token;
+  try {
+    const result = await getTinyToken("jaupesca", "tiny");
+    token = result[0].access_token;
+  } catch (err) {
+    notify.error('Falha ao obter token do Tiny.', { type: 'info', duration: 5000 });
     return;
-  } else if (produtoEquivalente === 2) {
-    return
-  } else if (produtoEquivalente === 3) {
-    console.log('Nenhum produto encontrado (GTIN ou SKU inválidos)');
+  }
+
+  // 3) Busca no Tiny (respeita teus códigos de retorno 1/2/3)
+  const produtoEquivalente = await buscaProdutoEquivalente(valorBipado, token);
+  if (produtoEquivalente === 1 || produtoEquivalente === 2) return;
+  if (produtoEquivalente === 3) {
     notify.error('Nenhum produto encontrado (GTIN ou SKU inválidos)', { type: 'info', duration: 5000 });
     return;
-  } else {
-    console.log('Produto Equivalente:', produtoEquivalente);
   }
 
+  // 4) Confirmação do usuário
   const confirmed = await confirmaProdutoEquivalente(produtoEquivalente.itens[0], sku, token);
-
-  if (confirmed.respostaUser === false) { // Cai aqui se confirmed retornar false
-    console.log('Usuário cancelou a adição do produto equivalente');
-    notify('Adição de produto equivalente foi cancelado com sucesso!');
+  if (confirmed.respostaUser === false) {
+    notify('Adição de produto equivalente foi cancelada com sucesso!');
     return;
   }
-  console.log('Usuário permitiu a adição do produto equivalente');
-  console.log('Produto Equivalente #123 >', produtoEquivalente);
-  console.log('Produto Equivalente #123456 >', produtoEquivalente.itens[0]);
-  console.log('Produto Referência >', prodRef);
 
+  // 5) Payload e gravação
   const equivalente = produtoEquivalente.itens[0];
-  console.log('Produto REQUI DO TINY >', prodRef);
-  console.log('Produto REQUI DO TINY Equivalente >', produtoEquivalente);
   const payload = {
     id_agend: idAgend,
     sku_original: prodRef.sku,
     gtin_original: prodRef.gtin,
     id_tiny_original: prodRef.id_tiny,
-    nome_equivalente: produtoEquivalente.itens[0].descricao,
-    sku_bipado: produtoEquivalente.itens[0].sku,
+    nome_equivalente: equivalente.descricao,
+    sku_bipado: equivalente.sku,
     gtin_bipado: equivalente.gtin,
     id_tiny_equivalente: equivalente.id,
     usuario: nomeColaborador || 'Desconhecido',
-    observacao: confirmed.obs !== null ? confirmed.obs : "Não informado"
+    observacao: confirmed.obs ?? "Não informado"
   };
 
-  console.log('Se liga no Payload do pai 8-) >', payload);
-
-  console.log('Perfeito, agora vou enviar para o banco de dados');
-
-  const json = await fetchJSON('/api/equiv/bipar', { method: 'POST', body: payload });
-  console.log('resultado:', json);
-  // messageBuscaEquivalenteTiny("Deu certinho! Agora é só bipar o produto normalmente.");
-  notify.success('Produto equivalente adicionado com sucesso!', { type: 'info', duration: 2000 });
+  try {
+    await fetchJSON('/api/equiv/bipar', { method: 'POST', body: payload });
+    notify.success('Produto equivalente adicionado com sucesso!', { type: 'info', duration: 2000 });
+  } catch (e) {
+    notify.error(`Erro ao gravar equivalente: ${e}`, { type: 'info', duration: 5000 });
+  }
 }
 
 async function confirmaProdutoEquivalente(prod, sku, accessToken) {
@@ -964,35 +959,39 @@ async function confirmaProdutoEquivalente(prod, sku, accessToken) {
   console.log('Obj >', produtos);
 
   console.log('Fazendo Laço de repetição para buscar o produto referência');
+  const skuNorm = String(sku).toLowerCase();
+  outer:
   for (const p of produtos) {
-    const i = p.composicoes;
+    const i = Array.isArray(p.composicoes) ? p.composicoes : [];
     for (const c of i) {
-      if (c.sku === sku) {
+      if (String(c.sku).toLowerCase() === skuNorm) {
         comp = c;
-        break;
+        break outer;
       }
-    };
-  };
+    }
+  }
   console.log('Terminou o laço de repetição');
-
   console.log('Produto Referência >', comp);
 
-  const response = await fetch('/api/tiny-proxy', {
-    method: 'GET',
-    headers: {
-      'Path': `/public-api/v3/produtos/${prod.id}`,
-      'Authorization': 'Bearer ' + accessToken
-    }
-  });
-
-  const data = await response.json();
+  let data = {};
+  try {
+    const response = await fetch('/api/tiny-proxy', {
+      method: 'GET',
+      headers: {
+        'Path': `/public-api/v3/produtos/${prod.id}`,
+        'Authorization': 'Bearer ' + accessToken
+      }
+    });
+    data = await response.json();
+  } catch (e) {
+    console.warn('Falha ao buscar anexos do Tiny:', e);
+  }
   console.log('Result de chamada para GET da imagem >', data);
-  let urlImagem = '../static/resources/sem_img.webp';
 
-  if (data.anexos.length > 0) {
+  let urlImagem = '../static/resources/sem_img.webp';
+  if (Array.isArray(data?.anexos) && data.anexos.length > 0) {
     urlImagem = data.anexos[0].url;
   }
-
   console.log('Aqui está a url da imagem >', urlImagem);
 
   painel.innerHTML = `
@@ -1002,24 +1001,21 @@ async function confirmaProdutoEquivalente(prod, sku, accessToken) {
       <img id="confirmaEquivalente-img" style="max-width: 480px; max-height: 280px" src="${urlImagem}" alt="Imagem do produto">
 
       <p>Deseja adicionar este produto como equivalente para</p>
-      <p>${sku} - ${comp.nome}</p>
-      <input id="inputObs" type="text" placeholder="Observação (Opicional)"> <br><br>
+      <p>${sku} - ${comp?.nome ?? '(produto original não encontrado)'}</p>
+      <input id="inputObs" type="text" placeholder="Observação (Opcional)"> <br><br>
       <div id="btnSim" style="border: 5px solid green; color: white; background-color: green;">SIM</div><br>
       <div id="btnNao" style="border: 5px solid red; color: white; background-color: red;">NÃO</div>
     `;
 
   const resposta = await perguntarConfirmacao();
   const inputObs = document.getElementById('inputObs');
-  const observacao = inputObs.value !== "" ? inputObs.value : null;
+  const observacao = (inputObs && inputObs.value !== "") ? inputObs.value : null;
 
   console.log('Este é o valor do campo de observações >', observacao);
   painel.classList.add('input-equivalente-off');
   console.log('Resposta do usuário para Equivalente >', resposta);
-  const resp = {
-    respostaUser: resposta,
-    obs: observacao
-  }
-  return resp;
+
+  return { respostaUser: resposta, obs: observacao };
 }
 
 function perguntarConfirmacao() {
@@ -1034,97 +1030,95 @@ function perguntarConfirmacao() {
 }
 
 async function agendamentoFinalizadoChamarTransferencia() {
-  // 1) defina origem/destino (pode vir de inputs/config da empresa/marketplace)
-  const DEPOSITO_ORIGEM = 785301556;  // ex.: 151 Inferior
-  const DEPOSITO_DESTINO = 822208355; // ex.: 141 Produção
+  const urlParams = new URLSearchParams(window.location.search);
+  const idAgend = parseInt(urlParams.get('id'), 10);
 
-  // 2) monta a lista de composições únicas do agendamento
-  const raw = document.getElementById("js-data").dataset.comps;
-  const produtos = JSON.parse(raw);
-  const vistos = new Set();
-  const comps = [];
-  produtos.forEach(p => p.composicoes?.forEach(c => {
-    if (!vistos.has(c.sku)) { vistos.add(c.sku); comps.push(c); }
+  // Ajuste esses IDs conforme seu mapeamento atual (ou traga do expedicao.js para 1 fonte só)
+  const DEPOSITO_ORIGEM = 822208355; // Produção
+  const DEPOSITO_DESTINO = 785301556; // Exemplo: Mercado Livre
+
+  const toInt = v => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  };
+
+  // lê composições do <div id="js-data" data-comps="...">
+  let comps = [];
+  try {
+    const raw = document.getElementById('js-data')?.dataset?.comps || '[]';
+    comps = JSON.parse(raw);
+  } catch { }
+
+  // Para cada SKU do agendamento, traz totais (originais + equivalentes)
+  const mapaTotais = new Map(); // sku_original -> total bipado (direto + equiv)
+  for (const p of comps) {
+    const skuOriginal = String(p.sku || '').trim();
+    if (!skuOriginal) continue;
+
+    const qs = new URLSearchParams({ id_agend_ml: String(idAgend), sku: skuOriginal });
+    try {
+      const resp = await fetch(`/api/bipagem/detalhe?${qs}`);
+      if (!resp.ok) continue;
+      const j = await resp.json();
+      const total = toInt(j?.totais?.bipados_total) || 0;
+      mapaTotais.set(skuOriginal, total);
+    } catch { }
+  }
+
+  // Resolve id_tiny de cada sku_original (ou do equivalente quando aplicável)
+  const todosProdutos = (() => {
+    try {
+      const raw = document.getElementById('js-data-produtos')?.dataset?.produtos;
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  })();
+
+  const resolverIdTiny = (sku) => {
+    const d = String(sku || '');
+    const bySku = todosProdutos.find(p => String(p.sku) === d);
+    if (bySku && (bySku.id_tiny || bySku.id)) return bySku.id_tiny || bySku.id;
+    const digits = d.replace(/\D+/g, '');
+    if (digits) {
+      const byGtin = todosProdutos.find(p => String(p.gtin || '').replace(/\D+/g, '') === digits);
+      if (byGtin && (byGtin.id_tiny || byGtin.id)) return byGtin.id_tiny || byGtin.id;
+    }
+    return null;
+  };
+
+  // Monta movimentos somando por id_produto
+  const somaPorId = new Map();
+  for (const [skuOriginal, unidades] of mapaTotais.entries()) {
+    const idTiny = toInt(resolverIdTiny(skuOriginal));
+    const un = toInt(unidades);
+    if (!idTiny || !un || un <= 0) continue;
+    somaPorId.set(idTiny, (somaPorId.get(idTiny) || 0) + un);
+  }
+
+  const movimentos = Array.from(somaPorId.entries()).map(([id_produto, unidades]) => ({
+    id_produto,
+    de: DEPOSITO_ORIGEM,
+    para: DEPOSITO_DESTINO,
+    unidades,
+    preco_unitario: 0
   }));
 
-  // 3) busca quantidade bipada (diretos + equivalentes) para cada SKU original
-  const bipagemTotal = [];
-  for (const c of comps) {
-    const r = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${encodeURIComponent(c.sku)}`);
-    const j = await r.json();
-
-    const unOriginal = j?.bipagem?.bipados ?? 0;
-    if (unOriginal > 0) {
-      bipagemTotal.push({ sku: c.sku, id_tiny: c.id_tiny, un: unOriginal });
-    }
-
-    (j?.equivalentes || []).forEach(eq => {
-      // cada equivalente já vem com id_tiny_equivalente e bipados
-      if (eq?.bipados > 0) {
-        bipagemTotal.push({
-          sku: eq.sku_bipado, id_tiny: eq.id_tiny_equivalente, un: eq.bipados
-        });
-      }
-    });
-  }
-
-  if (bipagemTotal.length === 0) {
-    notify('Nada para transferir: total bipado = 0.');
+  if (!movimentos.length) {
+    await Swal.fire('Atenção', 'Nenhuma movimentação válida foi encontrada.', 'warning');
     return;
   }
 
-  // 4) normaliza id_produto e monta movimentos (de -> para)
-  const movimentos = [];
-  for (const prod of bipagemTotal) {
-    const id_produto = Number(prod.id_tiny);
-    if (!Number.isFinite(id_produto)) {
-      console.warn('ID Tiny inválido para', prod);
-      continue;
-    }
-    const unidades = Number(prod.un);
-    if (!Number.isFinite(unidades) || unidades <= 0) continue;
+  // Enfileira no backend
+  const observacoes = `Conferência ${idAgend} – saída Prod. e entrada no destino`;
+  const r = await fetch('/estoque/mover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ observacoes, preco_unitario: 0, movimentos })
+  });
+  const payload = await r.json().catch(() => ({}));
 
-    movimentos.push({
-      sku: prod.sku,
-      id_produto,
-      de: DEPOSITO_ORIGEM,
-      para: DEPOSITO_DESTINO,
-      unidades
-    });
-  }
-
-  if (movimentos.length === 0) {
-    notify('Nenhum movimento válido foi gerado.');
-    return;
-  }
-
-  // 5) observações (igual você já usa)
-  const empresaId = parseInt(document.getElementById("infoAgend").dataset.empresa, 10);
-  const empresaNome =
-    empresaId === 1 ? "Jaú Pesca" :
-      empresaId === 2 ? "Jaú Fishing" :
-        empresaId === 3 ? "L.T. Sports" : "Nenhuma";
-  const marketplaceAgendamento = document.getElementById("infoAgend").dataset.marketplace;
-  const nomeColaborador = document.getElementById("infoAgend").dataset.colaborador;
-  const numeroAgendamento = document.getElementById("infoAgend").dataset.agendamento;
-
-  const observacoes =
-    `Conferência - AgendamentosWeb\n` +
-    `Ag.: ${numeroAgendamento}\n` +
-    `Mktp.: ${marketplaceAgendamento}\n` +
-    `Emp.: ${empresaNome}\n` +
-    `Co.: ${nomeColaborador}`;
-
-  // 6) dispara em lote para o backend (sem token!)
-  try {
-    notify('Processando transferências...', { type: 'info', duration: 3000 });
-    const res = await moverEstoque(movimentos, { observacoes });
-    console.log('Tasks criadas:', res.tasks);
-    notify.success(`Transferências enfileiradas (${res.tasks.length} movimentações).`, { duration: 4000 });
-    // opcional: você pode reaproveitar seu acompanharStatus(res.tasks[0].task_saida) etc.
-  } catch (err) {
-    console.error(err);
-    notify.error(String(err?.message || err));
+  if (!r.ok || !payload.ok) {
+    const msg = payload?.error || payload?.detalhe || r.statusText;
+    throw new Error(msg);
   }
 }
 

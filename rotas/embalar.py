@@ -1,5 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, json
-from main import app, agendamento_controller, access
+from flask import Blueprint, render_template, request, jsonify, json, current_app
 from base_jp_lab import Caller
 from classes.models.DatabaseModel import Database
 from classes.controllers.DatabaseController import DatabaseController
@@ -12,28 +11,25 @@ bp_embalar = Blueprint("embalar", __name__, template_folder="templates")
 
 # Configuração de acesso ao MySQL
 _db_config = {
-'host': '192.168.15.200',
-'port': 3306,
-'user': 'Bruno_Lallo',
-'password': 'ji}dx(v{M,z2j+f>[/}%_Vr-0?nI}W*@Dw68NnHJ+tMu&ZkF',
-'database': 'jp_bd',
-'autocommit': True
+    'host': '192.168.15.200',
+    'port': 3306,
+    'user': 'Bruno_Lallo',
+    'password': 'ji}dx(v{M,z2j+f>[/}%_Vr-0?nI}W*@Dw68NnHJ+tMu&ZkF',
+    'database': 'jp_bd',
+    'autocommit': True
 }
 
 @bp_embalar.route("/api/embalar/buscar_anuncios", methods=["GET"])
 def buscar_anuncios():
+    ag_ctrl = current_app.config['AG_CTRL']
+    caller  = current_app.config['CALLER']
+
     id_agendamento = request.args.get("id_agendamento")
     if not id_agendamento:
         return jsonify({"error": "ID do agendamento não fornecido."}), 400
 
     try:
-        # 1) instanciar DB, Caller e controller de agendamento
-        db = Database()
-        db_ctrl = DatabaseController(db)
-        caller = Caller()
-        ag_ctrl = AgendamentoController(db_ctrl, caller)
-
-        # 2) monta objeto Agendamento
+        # monta objeto Agendamento usando o controller compartilhado
         ag = ag_ctrl.create_agendamento_from_bd_data(id_agendamento)
         if not ag:
             return jsonify({"error": "Agendamento não encontrado."}), 404
@@ -42,7 +38,7 @@ def buscar_anuncios():
         for produto in ag.produtos:
             pd = produto.to_dict()
 
-            # === busca URL da imagem no Tiny ===
+            # imagem do Tiny
             try:
                 detalhes = caller.make_call(f"produtos/{produto.id_tiny}")
                 anexos = detalhes.get("anexos", [])
@@ -50,22 +46,17 @@ def buscar_anuncios():
             except Exception:
                 pd["imagemUrl"] = ""
 
-            # === busca composição real do kit no Tiny ===
+            # composição do kit
             try:
                 kits_resp = caller.make_call(f"produtos/{produto.id_tiny}/kits")
                 kits = kits_resp.get("kits", [])
                 pd["composicoes"] = [{
-                    "nome":             kit.get("nome"),
-                    "sku":              kit.get("sku"),
-                    "unidades_totais":  kit.get("quantidade", 0),
-                    # compara quantidade pedida x estoque disponível no Tiny (se houver)
-                    "estoque_error_flag": (
-                        "red" if kit.get("quantidade", 0) > kit.get("estoque_tiny", 0)
-                        else "green"
-                    )
+                    "nome":            kit.get("nome"),
+                    "sku":             kit.get("sku"),
+                    "unidades_totais": kit.get("quantidade", 0),
+                    "estoque_error_flag": "red" if kit.get("quantidade", 0) > kit.get("estoque_tiny", 0) else "green"
                 } for kit in kits]
             except Exception:
-                # fallback para a composição que você já tinha
                 pd["composicoes"] = [c.to_dict() for c in produto.composicoes]
 
             anuncios.append(pd)
@@ -338,12 +329,16 @@ def iniciar_embalagem():
         print(f"Erro em iniciar_embalagem: {e}")
         return jsonify(error=str(e)), 500
 
-@app.route('/embalar/finalizar/<int:id_agend_bd>', methods=['POST'])
+@bp_embalar.route('/embalar/finalizar/<int:id_agend_bd>', methods=['POST'])
 def finalizar_embalagem(id_agend_bd):
     """
     Finaliza a fase de embalagem, gera um relatório e move o agendamento para a expedição.
     """
     try:
+        cfg = current_app.config
+        agendamento_controller = cfg['AG_CTRL']
+        access = cfg['ACCESS']
+        
         # 1. Carrega o agendamento completo a partir do banco de dados
         agendamento_controller.clear_agendamentos()
         agendamento_controller.insert_agendamento(id_bd=id_agend_bd)

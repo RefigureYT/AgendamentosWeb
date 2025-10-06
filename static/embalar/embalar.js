@@ -340,7 +340,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Pega os dados que estão como texto no cabeçalho
-  const divsInfo = headerBar.querySelectorAll(".d-flex.flex-wrap > div");
+  const divsInfo = headerBar ? headerBar.querySelectorAll(".d-flex.flex-wrap > div") : [];
   divsInfo.forEach(div => {
     const textContent = div.textContent.trim();
     if (textContent.startsWith("Colaborador:")) {
@@ -358,7 +358,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Finalmente, exibe o objeto completo no console
   console.log("Dados do Agendamento (reconstruídos pelo JS):", agendamentoCompleto);
 
-  const empresa = parseInt(headerBar.dataset.empresa, 10);
+  const empresa = parseInt(headerBar?.dataset?.empresa ?? "0", 10) || 0;
   const sellerIdMap = {
     1: '539172427',   // Jaú Pesca
     2: '1111253828',  // Jaú Fishing
@@ -427,19 +427,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Função universal para a impressão de etiquetas
   function imprimirEtiqueta(zpl, tipo) {
     const keyMap = { relatorio: 'printer_relatorio', caixa: 'printer_caixa', id: 'printer_id' };
-    const key = keyMap[tipo];
-    if (!key) return console.error("Tipo inválido:", tipo);
+    const key = keyMap[tipo]; if (!key) return console.error("Tipo inválido:", tipo);
 
     const saved = localStorage.getItem(key);
     if (!saved) {
-      console.error("Nenhuma impressora salva para:", key);
       if (!pendingPrint) pendingPrint = { zpl, tipo };
-      if (typeof window.openPrinterModalByTipo === "function") window.openPrinterModalByTipo(tipo);
+      window.openPrinterModalByTipo?.(tipo);
       return;
     }
-
     if (!window.BrowserPrint || typeof BrowserPrint.getLocalDevices !== "function") {
-      console.error("BrowserPrint indisponível.");
+      Swal.fire("Impressão indisponível",
+        "Zebra BrowserPrint não está disponível. Abra/instale para continuar.",
+        "error");
       return;
     }
 
@@ -615,7 +614,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (algumProdutoProntoParaEmbalar && !existeCaixaAberta && !btnNovaCaixa) {
       const clone = templateNovaCaixa.content.cloneNode(true);
-      caixasContainer.prepend(clone);
+      caixaActionsContainer.prepend(clone);
       document.getElementById('btn-nova-caixa').addEventListener('click', abrirNovaCaixa);
     } else if ((!algumProdutoProntoParaEmbalar || existeCaixaAberta) && btnNovaCaixa) {
       btnNovaCaixa.remove();
@@ -676,7 +675,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     const numeroCaixa = caixa.id;
 
     // Busca o centro de distribuição
-    const centro = agendamentoCompleto.centro_distribuicao;
+    const centroRaw = agendamentoCompleto.centro_distribuicao;
+    const centro = String(centroRaw || '').toUpperCase();
+    const centroKey = (centro === 'BRSP06') ? 'SP06' : centro; // normaliza
+
     // Configuração por centro
     const centerConfig = {
       BRSP11: {
@@ -700,7 +702,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         y: 970
       }
     };
-    const cfg = centerConfig[centro] || {
+    const cfg = centerConfig[centroKey] || {
       text: `Centro log_C3_ADstico ${centro}`,
       y: 970
     };
@@ -1104,7 +1106,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     todos.forEach((icon) => {
       const itemLi = icon.closest(".produto-item");
       if (!itemLi) return;
-      const idMl = itemLi.dataset.idMl;
+      const idMl = itemLi.dataset.idMl || produtos.find(p => p.sku === itemLi.dataset.sku)?.id_ml;
       const produto = produtos.find((p) => p.id_ml === idMl);
       if (!produto) return;
       const imagemUrl = produto.imagemUrl || placeholderImage;
@@ -1350,8 +1352,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   await carregarCaixasSalvas();
   await buscarDadosEmbalagem(); // Busca inicial
   const SYNC_MS = 2000; // em vez de 1000
-  setInterval(buscarDadosEmbalagem, SYNC_MS);
-
+  const syncId = setInterval(buscarDadosEmbalagem, SYNC_MS);
+  window.addEventListener('beforeunload', () => clearInterval(syncId));
 
 
   async function handleFinalizarEmbalagem(event) {
@@ -1428,11 +1430,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.log('=========== VOLUME ===========');
     console.log('Etiqueta Mercado Livre');
     console.log('gerarEtiquetaCustom(\"nCaixa\");');
-    console.log('LEMBRETE: Utilize o índice da caixa como número (número da caixa - 1)\n\n');
+    console.log('gerarEtiquetaCustom(caixas[0]); // passe o OBJETO da caixa\n\n');
 
     console.log('Etiqueta Jaú Pesca');
     console.log('gerarEtiquetaCaixa(\"nCaixa\");');
-    console.log('LEMBRETE: Utilize o índice da caixa como número (número da caixa - 1)\n');
+    console.log('gerarEtiquetaCaixa(caixas[0]); // passe o OBJETO da caixa\n');
   }
 
   // 👉 Expor no console:

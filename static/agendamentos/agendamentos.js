@@ -1,192 +1,93 @@
-function abrirModalMarketplace() {
-    const modalEmpresa = bootstrap.Modal.getInstance(document.getElementById('modalSelecionarEmpresa'));
-    modalEmpresa.hide();
-
-    setTimeout(() => {
-        new bootstrap.Modal(document.getElementById('modalSelecionarMarketplace')).show();
-    }, 400);
+// -----------------------------
+// Helpers de Modal (globais)
+// -----------------------------
+function showModal(id) {
+    new bootstrap.Modal(document.getElementById(id)).show();
+}
+function hideModal(id) {
+    const instance = bootstrap.Modal.getInstance(document.getElementById(id));
+    if (instance) instance.hide();
 }
 
-function setMarketplace(idMktp) {
-    $('#inp_mktp_pedido').val(idMktp);
-
-    const modalMktp = bootstrap.Modal.getInstance(document.getElementById('modalSelecionarMarketplace'));
-    modalMktp.hide();
-
-    setTimeout(() => {
-        new bootstrap.Modal(document.getElementById('modalTipoAgendamento')).show();
-    }, 400);
-}
-
-function setTipoAgendamento(idTipo) {
-    $('#inp_tipo_pedido').val(idTipo);
-
-    const modalTipo = bootstrap.Modal.getInstance(document.getElementById('modalTipoAgendamento'));
-    modalTipo.hide();
-
-    setTimeout(() => {
-        new bootstrap.Modal(document.getElementById('modalNomeColaborador')).show();
-    }, 400);
-}
-
-function changeIdAgendamento(element) {
-    let id_agend = element.id.split('--')
-    $('#inp_id_pedido').val(id_agend[1])
-    $('#inp_tipo_pedido').val(id_agend[2])
-    $('#modal-emp-agend').text("Agendamento nº" + id_agend[1])
-    $('#modal-col-agend').text("Agendamento nº" + id_agend[1])
-}
-
-
-function setFiltros() {
-    let obj_array = Object.values($('.agendamento-container'))
-    obj_array.pop()
-    obj_array.pop()
-
-    // limpa qualquer filtro anterior
-    obj_array.forEach((x) => {
-        if (x.classList.contains('hidden-class')) {
-            x.classList.remove('hidden-class');
-        }
-    })
-
-    let filtros = {
-        "inp_emp": $('#inp_emp_pedido').find(':selected').val(),
-        "inp_status": $('#inp_status_pedido').find(':selected').val(),
-        "inp_mktp": $('#inp_mktp_pedido').find(':selected').val(),
-        "inp_num": $('#inp_num_pedido').val()
-    }
-
-    let valores = Object.values(filtros)
-
-    // === Atenção ao índice aqui: primeiro emp, status, depois mktp e, por fim, número ===
-    let valor_emp = filtrarEmp(valores[0]);
-    let valor_sta = filtrarStatus(valores[1]);
-    let valor_mktp = filtrarMktp(valores[2]);
-    let valor_num = filtrarNum(valores[3]);
-
-    obj_array.forEach(x => {
-        let classArr = x.classList;
-        if (valor_emp != null && !classArr.contains(valor_emp)) {
-            x.classList.add('hidden-class');
-        }
-        else if (valor_sta != null && !classArr.contains(valor_sta)) {
-            x.classList.add('hidden-class');
-        }
-        else if (valor_mktp != null && !classArr.contains(valor_mktp)) {
-            x.classList.add('hidden-class');
-        }
-        else if (valor_num != null && !classArr.contains(valor_num)) {
-            x.classList.add('hidden-class');
-        }
-    });
-}
-
-function filtrarEmp(id_empresa) {
-    if (id_empresa != 'Todas') {
-        return "emp-" + id_empresa;
-    } else {
-        return null;
-    }
-}
-
-function filtrarStatus(status_agend) {
-    if (status_agend != 'Todos') {
-        return "tipo-" + status_agend;
-    } else {
-        return null;
-    }
-}
-
-function filtrarMktp(id_mktp) {
-    if (id_mktp != 'Todas') {
-        return "id_mktp-" + id_mktp;
-    } else {
-        return null;
-    }
-}
-
-function filtrarNum(num_agend) {
-    if (num_agend != '') {
-        return "id-" + num_agend;
-    } else {
-        return null;
-    }
-}
+// #################################
 
 // Ao clicar em “+ Novo Agendamento”
-document.querySelector('.add-new-agendamento').addEventListener('click', function (e) {
-    e.preventDefault();
-
-    const idFake = Math.floor(Math.random() * 100000); // ID temporário ou real
-    $('#inp_id_pedido').val(idFake);
-
-    new bootstrap.Modal(document.getElementById('modalSelecionarEmpresa')).show();
-});
+(() => {
+    const btn = document.querySelector('.add-new-agendamento');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const idFake = Math.floor(Math.random() * 100000);
+        $('#inp_id_pedido').val(idFake);
+        showModal('modalSelecionarEmpresa');
+    });
+})();
 
 // Etapa 1: Empresa → chama Marketplace
 function abrirModalMarketplace() {
     const empresa = $('#nome_empresa').val();
     if (!empresa) return alert("Selecione a empresa!");
-
     $('#inp_nome_emp').val(empresa);
-
-    bootstrap.Modal.getInstance(document.getElementById('modalSelecionarEmpresa')).hide();
-
+    hideModal('modalSelecionarEmpresa');
     setTimeout(() => {
         new bootstrap.Modal(document.getElementById('modalSelecionarMarketplace')).show();
-    }, 400);
+    }, 300);
 }
 
-// Etapa 2: Marketplace → chama Tipo
+
+// Etapa 2: Marketplace → chama Tipo (ou Centro no Meli)
 function abrirModalAgendamento() {
     const marketplace = $('#nome_marketplace').val();
-    if (!marketplace) return alert("Selecione o marketplace!");
 
-    // armazena no hidden do formulário
+    if (!marketplace) return alert("Selecione o marketplace!");
     $('#inp_mktp_pedido').val(marketplace);
 
-    // se for Mercado Livre (valor “1”), mostra antes o modal de centro
-    if (marketplace === '1') {
-        bootstrap.Modal.getInstance(document.getElementById('modalSelecionarMarketplace')).hide();
-        setTimeout(() => new bootstrap.Modal(document.getElementById('modalCentroDistribuicao')).show(), 300);
-    } else {
-        // fluxo normal para os outros marketplaces
-        bootstrap.Modal.getInstance(document.getElementById('modalSelecionarMarketplace')).hide();
-        setTimeout(() => new bootstrap.Modal(document.getElementById('modalTipoAgendamento')).show(), 300);
+    if (marketplace !== '1') {
+        $('#inp_centro_distribuicao').val(''); // evita centro “fantasma”
     }
+
+    const modalMkt = bootstrap.Modal.getInstance(document.getElementById('modalSelecionarMarketplace'));
+    if (modalMkt) modalMkt.hide();
+
+    setTimeout(() => {
+        if (marketplace === '1') {
+            new bootstrap.Modal(document.getElementById('modalCentroDistribuicao')).show();
+        } else {
+            new bootstrap.Modal(document.getElementById('modalTipoAgendamento')).show();
+        }
+    }, 300);
 }
 
 function confirmarCentro() {
     const centro = $('#nome_centro_distribuicao').val();
     if (!centro) return alert("Selecione um centro!");
-
     $('#inp_centro_distribuicao').val(centro);
 
-    // fecha e segue para o modal de tipo
-    bootstrap.Modal.getInstance(document.getElementById('modalCentroDistribuicao')).hide();
-    setTimeout(() => new bootstrap.Modal(document.getElementById('modalTipoAgendamento')).show(), 300);
+    const modalCentro = bootstrap.Modal.getInstance(document.getElementById('modalCentroDistribuicao'));
+    if (modalCentro) modalCentro.hide();
+
+    setTimeout(() => {
+        new bootstrap.Modal(document.getElementById('modalTipoAgendamento')).show();
+    }, 300);
 }
 
 // Etapa 3: Tipo → chama Colaborador
 function abrirModalColaborador() {
     const tipo = $('#nome_tipo').val();
     if (!tipo) return alert("Selecione o tipo de agendamento!");
-
     $('#inp_tipo_pedido').val(tipo);
 
-    bootstrap.Modal.getInstance(document.getElementById('modalTipoAgendamento')).hide();
+    const modalTipo = bootstrap.Modal.getInstance(document.getElementById('modalTipoAgendamento'));
+    if (modalTipo) modalTipo.hide();
 
     setTimeout(() => {
         new bootstrap.Modal(document.getElementById('modalNomeColaborador')).show();
-    }, 400);
+    }, 300);
 }
 
 // Continua agendamento já iniciado
 function continuePhase(ele) {
     const [_, id, tipo] = ele.id.split('--');
-
-    // fluxo padrão para os outros tipos
     window.location.href = `/retirado?id=${id}&tipo=${tipo}&mudar=True`;
 }
 // function continuePhase(ele) {
@@ -213,24 +114,38 @@ function continuePhase(ele) {
 
 // Define ID do agendamento nos modais (caso use "Começar")
 function changeIdAgendamento(element) {
-    let [_, idAgend, tipo] = element.id.split('--');
+    const [_, idAgend, tipo] = element.id.split('--');
     $('#inp_id_pedido').val(idAgend);
     $('#inp_tipo_pedido').val(tipo);
+
+    // preserva textos dos modais (se existirem no DOM)
+    const txt = `Agendamento nº${idAgend}`;
+    const elEmp = document.getElementById('modal-emp-agend');
+    const elCol = document.getElementById('modal-col-agend');
+    if (elEmp) elEmp.textContent = txt;
+    if (elCol) elCol.textContent = txt;
 }
 
-// Filtro visual da tabela de agendamentos
+// Filtro visual da tabela de agendamentos (versão nova, sem helpers)
 function setFiltros() {
-    document.querySelectorAll('.agendamento-container').forEach(card => {
-        card.classList.remove('hidden-class');
-    });
+    const cards = document.querySelectorAll('.agendamento-container');
+
+    // limpa qualquer filtro anterior
+    cards.forEach(card => card.classList.remove('hidden-class'));
 
     const emp = $('#inp_emp_pedido').val();
     const status = $('#inp_status_pedido').val();
     const mktp = $('#inp_mktp_pedido').val();
-    const num = $('#inp_num_pedido').val().trim();
+    const num = ($('#inp_num_pedido').val() || '').trim();
 
-    document.querySelectorAll('.agendamento-container').forEach(card => {
+    cards.forEach(card => {
         const classes = card.classList;
+
+        // só filtra quem tem metadados de classe esperados
+        const isFilterable = [...classes].some(c =>
+            c.startsWith('emp-') || c.startsWith('tipo-') || c.startsWith('id_mktp-') || c.startsWith('id-')
+        );
+        if (!isFilterable) return; // ignora placeholders
 
         if (emp !== 'Todas' && !classes.contains(`emp-${emp}`)) {
             return card.classList.add('hidden-class');
@@ -241,8 +156,6 @@ function setFiltros() {
         if (mktp !== 'Todas' && !classes.contains(`id_mktp-${mktp}`)) {
             return card.classList.add('hidden-class');
         }
-
-        // novo: filtra pelo texto do span.pedido-numero
         if (num) {
             const textoPedido = card.querySelector('.pedido-numero')?.textContent.trim() || '';
             if (!textoPedido.includes(num)) {
@@ -252,21 +165,25 @@ function setFiltros() {
     });
 }
 
+// Upload (PDF/Excel)
 function abrirModalUpload() {
-    // 1) valores já gravados nos hidden inputs e no campo colaborador
     const colaborador = $('#nome_colaborador').val();
-    const empresa = $('#nome_empresa').val();
-    const marketplace = $('#nome_marketplace').val();
-    const tipo = $('#nome_tipo').val();
 
-    // 2) seleciona form, file input e botões de upload
+    // lê do <select> com fallback para os hiddens (fluxo por botões)
+    const empresa = $('#nome_empresa').val() || $('#inp_nome_emp').val();
+    const marketplace = $('#nome_marketplace').val() || $('#inp_mktp_pedido').val();
+    const tipo = $('#nome_tipo').val() || $('#inp_tipo_pedido').val();
+
+    // só grava centro se for Meli; caso contrário, zera
+    const centro = (String(marketplace) === '1') ? ($('#nome_centro_distribuicao').val() || '') : '';
+    $('#inp_centro_distribuicao').val(centro);
+
     const form = $('#form_upload_pdf');
     const fileInput = form.find('input[type="file"]');
     const btn = form.find('button[type="submit"]');
     const label = $('#modalUploadPdfLabel');
     const helpText = $('#upload_help_text');
 
-    // 3) escolhe rota/upload de Excel vs PDF
     if (marketplace === '2' || marketplace === '3') {
         form.attr('action', '/upload-excel');
         fileInput.attr({ name: 'file', accept: '.xlsx,.xls,.csv' });
@@ -281,132 +198,111 @@ function abrirModalUpload() {
         helpText.text('Selecione o arquivo PDF do pedido:');
     }
 
-    // 4) preenche os hidden inputs do form
     $('#upload_colaborador').val(colaborador);
     $('#upload_empresa').val(empresa);
     $('#upload_marketplace').val(marketplace);
     $('#upload_tipo').val(tipo);
 
-    // 5) fecha o modal de Tipo de Agendamento e abre o modal de Upload
-    bootstrap.Modal
-        .getInstance(document.getElementById('modalTipoAgendamento'))
-        .hide();
+    const modalTipo = bootstrap.Modal.getInstance(document.getElementById('modalTipoAgendamento'));
+    if (modalTipo) modalTipo.hide();
 
     setTimeout(() => {
-        new bootstrap.Modal(
-            document.getElementById('modalUploadPdf')
-        ).show();
+        new bootstrap.Modal(document.getElementById('modalUploadPdf')).show();
     }, 300);
 }
 
 
-document
-    .getElementById("form_upload_pdf")
-    .addEventListener("submit", function (e) {
-        // this é o <form>
-        const form = this;
-        // detecta se é upload de Excel pela action do form
-        const isExcel = form.action.includes("/upload-excel");
-        // ou, alternativamente, pelo accept do file input:
-        // const fileInput = form.querySelector('input[type="file"]');
-        // const isExcel = fileInput.accept.includes(".xlsx");
-
+// Loader no submit do upload (com guard)
+(() => {
+    const form = document.getElementById("form_upload_pdf");
+    if (!form) return;
+    form.addEventListener("submit", function (e) {
+        const fileInput = this.querySelector('input[type="file"]');
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+            // sem arquivo: deixe o browser validar/avisar; não abre o loader
+            return;
+        }
+        const isExcel = this.action.includes("/upload-excel");
         Swal.fire({
-            title: isExcel ? "Enviando CSV..." : "Enviando PDF...",
+            title: isExcel ? "Enviando Excel..." : "Enviando PDF...",
             text: "Aguarde o processamento.",
             allowOutsideClick: false,
             allowEscapeKey: false,
-            didOpen: () => {
-                Swal.showLoading();
-            },
+            didOpen: () => { Swal.showLoading(); },
         });
     });
+})();
 
+
+// Pós-redirect (mensagens)
 window.addEventListener("load", () => {
     const urlParams = new URLSearchParams(window.location.search);
     const upload = urlParams.get("upload");
     const erro = urlParams.get("erro");
     const pedido = urlParams.get("pedido");
 
-    // 0) Se ainda estiver mostrando o "Enviando PDF...", fecha
-    if (Swal.isVisible()) {
-        Swal.close();
-    }
+    if (Swal.isVisible()) Swal.close();
 
-    // 1) Excel OK
+    const clearQS = () => window.history.replaceState({}, document.title, window.location.pathname);
+
     if (upload === "ok_excel") {
-        Swal.fire({
-            icon: 'success',
-            title: 'Excel processado!',
-            text: 'O agendamento foi criado com sucesso.',
-            confirmButtonText: 'OK'
-        }).then(() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-        });
+        Swal.fire({ icon: 'success', title: 'Excel processado!', text: 'O agendamento foi criado com sucesso.', confirmButtonText: 'OK' })
+            .then(clearQS);
         return;
     }
-
-    // 2) PDF OK
     if (upload === "ok_pdf") {
-        Swal.fire({
-            icon: 'success',
-            title: 'PDF processado!',
-            text: 'O agendamento foi criado com sucesso.',
-            confirmButtonText: 'OK'
-        }).then(() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-        });
+        Swal.fire({ icon: 'success', title: 'PDF processado!', text: 'O agendamento foi criado com sucesso.', confirmButtonText: 'OK' })
+            .then(clearQS);
         return;
     }
-
-    // 3) Alteração OK
     if (urlParams.get("alterado") === "ok") {
-        Swal.fire({
-            icon: 'success',
-            title: 'Alterações salvas!',
-            text: 'O agendamento foi atualizado com sucesso.',
-            confirmButtonText: 'OK'
-        }).then(() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-        });
+        Swal.fire({ icon: 'success', title: 'Alterações salvas!', text: 'O agendamento foi atualizado com sucesso.', confirmButtonText: 'OK' })
+            .then(clearQS);
         return;
     }
-
-    // 4) Duplicado
     if (upload === "fail" && erro === "duplicado") {
-        Swal.fire({
-            icon: 'warning',
-            title: 'Pedido já existente',
-            text: `Já existe um agendamento com o número ${pedido}.`,
-            confirmButtonText: 'OK'
-        }).then(() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-        });
+        Swal.fire({ icon: 'warning', title: 'Pedido já existente', text: `Já existe um agendamento com o número ${pedido}.`, confirmButtonText: 'OK' })
+            .then(clearQS);
         return;
     }
-
-    // 5) Qualquer outro erro de upload
     if (upload === "fail") {
-        Swal.fire({
-            icon: 'error',
-            title: 'Erro',
-            text: 'Ocorreu um erro ao processar o pedido. Por favor, tente novamente.',
-            confirmButtonText: 'OK'
-        }).then(() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-        });
+        Swal.fire({ icon: 'error', title: 'Erro', text: 'Ocorreu um erro ao processar o pedido. Por favor, tente novamente.', confirmButtonText: 'OK' })
+            .then(clearQS);
         return;
     }
 });
 
+// -----------------------------
+// Seleção rápida (compatibilidade)
+// -----------------------------
+function setMarketplace(idMktp) {
+    $('#inp_mktp_pedido').val(idMktp);
+    if (String(idMktp) !== '1') {
+        $('#inp_centro_distribuicao').val('');
+    }
+    hideModal('modalSelecionarMarketplace');
+    setTimeout(() => {
+        if (String(idMktp) === '1') {
+            showModal('modalCentroDistribuicao');
+        } else {
+            showModal('modalTipoAgendamento');
+        }
+    }, 300);
+}
 
+function setTipoAgendamento(idTipo) {
+    $('#inp_tipo_pedido').val(idTipo);
+    hideModal('modalTipoAgendamento');
+    setTimeout(() => showModal('modalNomeColaborador'), 300);
+}
 
+// -----------------------------
+// Modais diversos
+// -----------------------------
 function abrirModalAlteracoes(id) {
     const modal = new bootstrap.Modal(document.getElementById('modalEditarAgendamento'));
     const content = $('#editarAgendamentoContent');
-
     content.html('<p>Carregando...</p>');
-
     $.get(`/alterar-agendamento?id=${id}&modal=true`, function (data) {
         content.html(data);
         modal.show();
@@ -416,11 +312,6 @@ function abrirModalAlteracoes(id) {
 }
 
 function abrirModalAtualizarPDF(id_bd, id_agend_ml) {
-    // --- Início da Depuração ---
-    console.clear(); // Limpa o console para facilitar a leitura
-    console.log(`--- Iniciando Modal de Atualização para ID BD: ${id_bd} ---`);
-    // --- Fim da Depuração ---
-
     const form = document.getElementById('form_upload_pdf');
     const modal = new bootstrap.Modal(document.getElementById('modalUploadPdf'));
     const modalLabel = document.getElementById('modalUploadPdfLabel');
@@ -439,28 +330,18 @@ function abrirModalAtualizarPDF(id_bd, id_agend_ml) {
     const botao = document.getElementById(`btn-modal--${id_bd}--`);
     const card = botao.closest('.agendamento-container');
 
-    // --- Início da Depuração ---
-    console.log("Elemento do Card encontrado:", card);
-    // --- Fim da Depuração ---
-
     const getClassValue = (prefix) => {
         const cls = [...card.classList].find(c => c.startsWith(prefix));
         return cls ? cls.replace(prefix, '') : '';
     };
 
-    // --- INÍCIO DA CORREÇÃO E DEPURAÇÃO ---
     const centroDistribuicao = card.dataset.centro || '';
-    console.log(`Valor lido do atributo 'data-centro': "${centroDistribuicao}"`); // <-- Ponto crucial da depuração
 
-    // Preenche todos os campos hidden do formulário
     document.getElementById('upload_colaborador').value = card.querySelector('.text-primary')?.innerText || '';
     document.getElementById('upload_empresa').value = getClassValue('emp-');
     document.getElementById('upload_marketplace').value = getClassValue('id_mktp-');
     document.getElementById('upload_tipo').value = getClassValue('tipo-');
-    document.getElementById('inp_centro_distribuicao').value = centroDistribuicao; // <-- A correção está aqui
-
-    console.log(`Valor final do campo hidden 'centro_distribuicao': "${document.getElementById('inp_centro_distribuicao').value}"`);
-    // --- FIM DA CORREÇÃO E DEPURAÇÃO ---
+    document.getElementById('inp_centro_distribuicao').value = centroDistribuicao;
 
     modalLabel.textContent = 'Atualizar PDF do Pedido';
     infoParaUsuario.innerHTML = `Atualizando o agendamento do pedido: <strong>${id_agend_ml}</strong>`;
@@ -480,58 +361,58 @@ function iniciarExclusao(idAgendamento) {
         confirmButtonText: 'Sim, excluir!',
         cancelButtonText: 'Cancelar'
     }).then((result) => {
-        if (result.isConfirmed) {
-            // Feedback de carregamento
-            Swal.fire({
-                title: 'Excluindo...',
-                text: 'Por favor, aguarde.',
-                allowOutsideClick: false,
-                didOpen: () => {
-                    Swal.showLoading();
-                }
-            });
+        if (!result.isConfirmed) return;
 
-            // Requisição DELETE
-            fetch(`/agendamento/excluir/${idAgendamento}`, {
-                method: 'DELETE',
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        Swal.fire(
-                            'Excluído!',
-                            'O agendamento foi excluído com sucesso.',
-                            'success'
-                        );
+        Swal.fire({
+            title: 'Excluindo...',
+            text: 'Por favor, aguarde.',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
 
-                        const cardParaRemover = document.querySelector(`.agendamento-container.id-${idAgendamento}`);
-                        if (cardParaRemover) {
-                            // Fade-out + reload
-                            cardParaRemover.style.transition = 'opacity 0.5s ease';
-                            cardParaRemover.style.opacity = '0';
-                            setTimeout(() => {
-                                cardParaRemover.remove();
-                                location.reload();
-                            }, 500);
-                        } else {
-                            // Se não achar o card, recarrega direto
-                            location.reload();
-                        }
+        fetch(`/agendamento/excluir/${idAgendamento}`, { method: 'DELETE' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    Swal.fire('Excluído!', 'O agendamento foi excluído com sucesso.', 'success');
+                    const card = document.querySelector(`.agendamento-container.id-${idAgendamento}`);
+                    if (card) {
+                        card.style.transition = 'opacity 0.5s ease';
+                        card.style.opacity = '0';
+                        setTimeout(() => { card.remove(); location.reload(); }, 300);
                     } else {
-                        Swal.fire(
-                            'Erro!',
-                            'Não foi possível excluir o agendamento. ' + (data.message || ''),
-                            'error'
-                        );
+                        location.reload();
                     }
-                })
-                .catch(() => {
-                    Swal.fire(
-                        'Erro de Rede!',
-                        'Não foi possível se comunicar com o servidor.',
-                        'error'
-                    );
-                });
-        }
+                } else {
+                    Swal.fire('Erro!', 'Não foi possível excluir o agendamento. ' + (data.message || ''), 'error');
+                }
+            })
+            .catch(() => Swal.fire('Erro de Rede!', 'Não foi possível se comunicar com o servidor.', 'error'));
     });
+}
+
+
+function abrirModalRelatorio(idAgendamentoML) {
+    const modalElement = document.getElementById('modalVerRelatorio');
+    const modal = new bootstrap.Modal(modalElement);
+    const conteudoDiv = document.getElementById('conteudo-relatorio');
+
+    conteudoDiv.innerHTML = `
+    <div class="d-flex justify-content-center align-items-center">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <span class="ms-3">Carregando relatório...</span>
+    </div>`;
+    modal.show();
+
+    fetch(`/relatorio/${idAgendamentoML}`)
+        .then(response => {
+            if (!response.ok) throw new Error('Erro de rede ao buscar o relatório.');
+            return response.text();
+        })
+        .then(html => { conteudoDiv.innerHTML = html; })
+        .catch(() => {
+            conteudoDiv.innerHTML = '<div class="alert alert-danger">Não foi possível carregar o relatório. Tente novamente mais tarde.</div>';
+        });
 }

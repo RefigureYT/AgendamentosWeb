@@ -52,7 +52,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const DEPOSITO_PRODUCAO = 822208355; // Depósito 141
 
     const NOMES_EMPRESA = { 1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports" };
-    const NOMES_MKTP = { 1: "Mercado Livre", 2: "Magalu", 3: "Shopee", 4: "Amazon" };
+    const NOMES_MKTP = { 1: "Mercado Livre", 2: "Magalu", 3: "Shopee", 4: "Amazon", 5: "Outros" };
 
     // ====== HELPERS ======
     function onlyDigits(v) { return String(v || '').replace(/\D+/g, ''); }
@@ -340,6 +340,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     btnFinalizarExpedicao?.addEventListener('click', async function () {
+        // evita duplo clique
+        if (this.disabled) return;
+
         const empresaId = Number(panelControl?.dataset.empresa || 0);
         const mktpId = Number(panelControl?.dataset.mktp || 0);
         const depProducao = Number(panelControl?.dataset.depProducao || DEPOSITO_PRODUCAO);
@@ -352,9 +355,9 @@ document.addEventListener("DOMContentLoaded", function () {
             return Swal.fire('Nada para mover', 'Não foi possível agregar itens das caixas para transferência.', 'info');
         }
 
-        // 2) Aviso de itens sem id_tiny
+        // 2) Fluxo principal encapsulado (continua mesmo com faltantes)
         const continuarDepoisDosFaltantes = async () => {
-            // 2.1) Pede depósito destino se não mapeado
+            // 2.1) Depósito destino (mapeado ou solicitado)
             if (!depDestino) {
                 const novo = await solicitarDepositoDestino({ empresaId, mktpId, depProducao, motivo: 'Não há depósito de destino configurado.' });
                 if (!novo) return; // cancelado
@@ -370,71 +373,40 @@ document.addEventListener("DOMContentLoaded", function () {
             // 3) Confirmação final
             const { isConfirmed } = await Swal.fire({
                 title: "Confirmar",
-                html: `
-        Finalizar expedição e transferir do <b>Produção (#${depProducao})</b><br>
-        para <b>${NOMES_MKTP[mktpId] || '(?)'} (dep #${depDestino})</b> — ${NOMES_EMPRESA[empresaId] || '(?)'}?`,
+                html: `Finalizar expedição e transferir do <b>Produção (#${depProducao})</b><br>
+             para <b>${NOMES_MKTP[mktpId] || '(?)'} (dep #${depDestino})</b> — ${NOMES_EMPRESA[empresaId] || '(?)'}?`,
                 icon: "question",
                 showCancelButton: true,
                 confirmButtonColor: "#28a745",
                 cancelButtonColor: "#6c757d",
-                confirmButtonText: "Sim, finalizar e mover",
+                confirmButtonText: "Sim, mover e finalizar",
                 cancelButtonText: "Cancelar"
             });
             if (!isConfirmed) return;
 
-            // 4) Finaliza expedição no backend
-            btnFinalizarExpedicao.disabled = true;
-            const respFin = await fetch('/api/expedicao/finalizar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id_agend_bd: panelControl?.dataset.idBd })
-            }).then(r => r.json()).catch(() => ({ success: false }));
-
-            if (!respFin?.success) {
-                btnFinalizarExpedicao.disabled = false;
-                await Swal.fire('Erro!', 'Ocorreu um problema ao finalizar a expedição.', 'error');
-                return;
-            }
-
-            // 5) Monta payload com filtro (AQUI ESTÁ O “FILTRAR MOVIMENTOS INVÁLIDOS”)
+            // 4) Monta payload (filtra inválidos) — antes de chamar o mover
             const observacoes = `Expedição ${panelControl?.dataset.idMl} – ${NOMES_EMPRESA[empresaId] || ''} → ${NOMES_MKTP[mktpId] || ''}`;
-            const { validos, invalidos } = montarMovimentosValidos(movimentos, {
-                depProducao,
-                depDestino,
-                precoUnitario: 0
-            });
-
-            if (!validos.length) {
-                btnFinalizarExpedicao.disabled = false;
-                const detalhes = invalidos.slice(0, 10).map(x => `• id_produto=${x.id_produto ?? '-'} | unidades=${x.unidades ?? '-'} (${x.motivo})`).join('<br>');
-                await Swal.fire({
-                    icon: 'error',
-                    title: 'Nenhum movimento válido',
-                    html: `Todos os movimentos foram descartados por erro de dados.<br><br>${esc(detalhes)}`,
-                });
-                return;
-            }
-
-            // 6) Enfileira no servidor
-            Swal.fire({
-                title: 'Transferindo para o marketplace…',
-                html: 'Gerando movimentações de estoque (Saída/Entrada).',
-                allowOutsideClick: false,
-                didOpen: () => Swal.showLoading()
-            });
 
             const tentarMover = async (dest) => {
-                const { validos: revalid, invalidos: inv2 } = montarMovimentosValidos(movimentos, {
+                const { validos, invalidos } = montarMovimentosValidos(movimentos, {
                     depProducao,
                     depDestino: dest,
                     precoUnitario: 0
                 });
 
-                if (!revalid.length) {
+                if (!validos.length) {
                     await Swal.fire('Atenção', 'Não há movimentos válidos para enviar com esse depósito destino.', 'warning');
-                    btnFinalizarExpedicao.disabled = false;
                     return;
                 }
+
+                // 5) Enfileira no servidor (MOVE PRIMEIRO)
+                this.disabled = true;
+                Swal.fire({
+                    title: 'Transferindo para o marketplace…',
+                    html: 'Gerando movimentações de estoque (Saída/Entrada).',
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading()
+                });
 
                 try {
                     const r = await fetch('/estoque/mover', {
@@ -443,23 +415,39 @@ document.addEventListener("DOMContentLoaded", function () {
                         body: JSON.stringify({
                             observacoes,
                             preco_unitario: 0,
-                            movimentos: revalid
+                            movimentos: validos
                         })
                     });
-
                     const payload = await r.json().catch(() => ({}));
+
                     if (r.ok && payload.ok) {
                         const qtd = Array.isArray(payload.tasks) ? payload.tasks.length : 0;
 
                         let html = `Foram enfileiradas <b>${qtd}</b> tarefas (Saídas e Entradas).`;
-                        if (invalidos.length || inv2.length) {
-                            const desc = invalidos.concat(inv2).slice(0, 5).map(x => `• id_produto=${x.id_produto ?? '-'} | unidades=${x.unidades ?? '-'} (${x.motivo})`).join('<br>');
+                        if (invalidos.length) {
+                            const desc = invalidos.slice(0, 5)
+                                .map(x => `• id_produto=${x.id_produto ?? '-'} | unidades=${x.unidades ?? '-'} (${x.motivo})`)
+                                .join('<br>');
                             html += `<br><br><span class="text-muted">Alguns itens foram ignorados:<br>${esc(desc)}</span>`;
                         }
 
-                        await Swal.fire({ icon: 'success', title: 'Movimentações enfileiradas!', html, timer: 2000, showConfirmButton: false });
+                        // 6) Só agora FINALIZA a expedição
+                        const respFin = await fetch('/api/expedicao/finalizar', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id_agend_bd: panelControl?.dataset.idBd })
+                        }).then(r => r.json()).catch(() => ({ success: false }));
+
+                        if (!respFin?.success) {
+                            this.disabled = false;
+                            await Swal.fire('Movido, mas não finalizado', 'As movimentações foram enfileiradas, porém houve erro ao finalizar a expedição. Tente finalizar novamente.', 'warning');
+                            return;
+                        }
+
+                        await Swal.fire({ icon: 'success', title: 'Movimentações enfileiradas!', html, timer: 1800, showConfirmButton: false });
                         window.location.href = '/agendamentos/ver?finalizado=ok';
                     } else {
+                        // Erro no mover → oferece retry / informar ID — NÃO finaliza
                         await tratarFalhaTransferencia({
                             msg: payload?.error || payload?.detalhe || r.statusText,
                             podeInformarId: true,
@@ -467,7 +455,7 @@ document.addEventListener("DOMContentLoaded", function () {
                             onRetry: () => tentarMover(dest),
                             onRetryComId: (novoId) => tentarMover(Number(novoId))
                         });
-                        btnFinalizarExpedicao.disabled = false;
+                        this.disabled = false;
                     }
                 } catch (err) {
                     console.error('Erro na transferência:', err);
@@ -478,13 +466,14 @@ document.addEventListener("DOMContentLoaded", function () {
                         onRetry: () => tentarMover(dest),
                         onRetryComId: (novoId) => tentarMover(Number(novoId))
                     });
-                    btnFinalizarExpedicao.disabled = false;
+                    this.disabled = false;
                 }
             };
 
             return tentarMover(depDestino);
         };
 
+        // 7) Se houver itens sem id_tiny, confirma se continua apenas com os resolvidos
         if (faltantes.length) {
             const lista = faltantes.map(f => `• ${f.sku} (qtd: ${f.quantidade})`).join('<br>');
             Swal.fire({

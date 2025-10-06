@@ -8,106 +8,117 @@
 
 {% block content %}
 <div class="container py-5">
-    <div class="row">
-        <!-- Coluna do Usuário -->
-        <div class="col-lg-4 mb-4 text-center">
-            <div class="card perfil-card mx-auto">
-                <img src="https://cdn-icons-png.flaticon.com/512/17468/17468680.png" class="perfil-avatar mt-4"
-                    alt="Avatar de {{ session.nome_display_usuario }}">
-                <div class="card-body">
-                    <h4 class="card-title">{{ session.nome_display_usuario }}</h4>
-                    <a href="{{ url_for('auth.logout') }}"
-                        class="btn btn-outline-danger btn-sm mt-2 d-inline-flex align-items-center">
-                        <i class="bi bi-box-arrow-right me-2"></i>
-                        Sair
-                    </a>
-                </div>
-            </div>
+  <div class="row">
+    <!-- Coluna do Usuário -->
+    <div class="col-lg-4 mb-4 text-center">
+      <div class="card perfil-card mx-auto">
+        <img
+          src="https://cdn-icons-png.flaticon.com/512/17468/17468680.png"
+          class="perfil-avatar mt-4"
+          alt="Avatar de {{ session.nome_display_usuario }}"
+        >
+        <div class="card-body">
+          <h4 class="card-title">{{ session.nome_display_usuario }}</h4>
+          <a href="{{ url_for('auth.logout') }}"
+             class="btn btn-outline-danger btn-sm mt-2 d-inline-flex align-items-center">
+            <i class="bi bi-box-arrow-right me-2"></i> Sair
+          </a>
         </div>
-        <!-- Coluna das Impressoras -->
-        <div class="col-lg-8">
-            <div class="printer-card mb-4">
-                <video width="128" height="128" preload="none"
-                    style="background: transparent url('https://cdn-icons-png.flaticon.com/512/6172/6172550.png') 50% 50% / contain no-repeat;"
-                    autoplay loop muted playsinline>
-                    <source src="https://cdn-icons-mp4.flaticon.com/512/6172/6172550.mp4" type="video/mp4">
-                </video>
-                <div>
-                    <strong>Impressora relatório</strong><br>
-                    <span id="lblImpressoraRelatorio">Nenhuma impressora selecionada</span><br>
-                    <button id="btnImpressoraRelatorio" class="btn btn-outline-secondary btn-sm mt-1 pt-2">Escolher
-                        impressora</button>
-                </div>
-            </div>
-            <div class="printer-card mb-4">
-                <video width="128" height="128" preload="none"
-                    style="background: transparent url('https://cdn-icons-png.flaticon.com/512/8717/8717997.png') 50% 50% / contain no-repeat;"
-                    autoplay loop muted playsinline>
-                    <source src="https://cdn-icons-mp4.flaticon.com/512/9820/9820037.mp4" type="video/mp4">
-                </video>
-                <div>
-                    <strong>Impressora etiqueta de volume (CAIXA)</strong><br>
-                    <span id="lblImpressoraCx">Nenhuma impressora selecionada</span><br>
-                    <button id="btnImpressoraCx" class="btn btn-outline-secondary btn-sm mt-1 pt-2">Escolher
-                        impressora</button>
-                </div>
-            </div>
-            <div class="printer-card mb-4">
-                <video width="128" height="128" preload="none"
-                    style="background: transparent url('https://cdn-icons-png.flaticon.com/512/8717/8717997.png') 50% 50% / contain no-repeat;"
-                    autoplay loop muted playsinline>
-                    <source src="https://cdn-icons-mp4.flaticon.com/512/8717/8717997.mp4" type="video/mp4">
-                </video>
-                <div>
-                    <strong>Impressora etiqueta de identificação (Produto)</strong><br>
-                    <span id="lblImpressoraId">Nenhuma impressora selecionada</span><br>
-                    <button id="btnImpressoraId" class="btn btn-outline-secondary btn-sm mt-1 pt-2">Escolher
-                        impressora</button>
-                </div>
-            </div>
-        </div>
+      </div>
     </div>
 
-    <!-- Modal: Escolher Impressora -->
-    <div class="modal fade" id="printerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
-        aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered" style="max-width: 520px">
-            <div class="modal-content shadow-lg">
-                <div class="modal-header">
-                    <h5 class="modal-title">Escolher impressora</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
-                </div>
-
-                <div class="modal-body">
-                    <!-- Loading -->
-                    <div id="printerLoading" class="d-flex align-items-center gap-2">
-                        <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
-                        <span>Procurando impressoras instaladas…</span>
-                    </div>
-
-                    <!-- Lista -->
-                    <div id="printerListWrap" class="d-none">
-                        <div class="list-group" id="printerList" role="radiogroup" aria-label="Lista de impressoras">
-                        </div>
-
-                        <!-- Estado vazio -->
-                        <div id="printerEmpty" class="alert alert-warning mt-3 d-none mb-0">
-                            Nenhuma impressora foi detectada pelo BrowserPrint neste computador.
-                        </div>
-                    </div>
-
-                    <!-- Erro -->
-                    <div id="printerError" class="alert alert-danger d-none mb-0"></div>
-                </div>
-
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" id="btnConfirmPrinter" class="btn btn-primary" disabled>Usar esta</button>
-                </div>
-            </div>
+    <!-- Coluna das Impressoras -->
+    <div class="col-lg-8">
+      <!-- Impressora de Relatório -->
+      <div class="printer-card mb-4 d-flex align-items-center gap-3">
+        <video width="128" height="128" preload="none"
+               style="background: transparent url('https://cdn-icons-png.flaticon.com/512/6172/6172550.png') 50% 50% / contain no-repeat;"
+               autoplay loop muted playsinline>
+          <source src="https://cdn-icons-mp4.flaticon.com/512/6172/6172550.mp4" type="video/mp4">
+        </video>
+        <div>
+          <strong>Impressora relatório</strong><br>
+          <span id="lblImpressoraRelatorio">Nenhuma impressora selecionada</span><br>
+          <button id="btnImpressoraRelatorio" class="btn btn-outline-secondary btn-sm mt-1 pt-2">
+            Escolher impressora
+          </button>
         </div>
-    </div>
+      </div>
 
+      <!-- Impressora etiqueta de volume (Caixa) -->
+      <div class="printer-card mb-4 d-flex align-items-center gap-3">
+        <video width="128" height="128" preload="none"
+               style="background: transparent url('https://cdn-icons-png.flaticon.com/512/8717/8717997.png') 50% 50% / contain no-repeat;"
+               autoplay loop muted playsinline>
+          <source src="https://cdn-icons-mp4.flaticon.com/512/9820/9820037.mp4" type="video/mp4">
+        </video>
+        <div>
+          <strong>Impressora etiqueta de volume (CAIXA)</strong><br>
+          <span id="lblImpressoraCx">Nenhuma impressora selecionada</span><br>
+          <button id="btnImpressoraCx" class="btn btn-outline-secondary btn-sm mt-1 pt-2">
+            Escolher impressora
+          </button>
+        </div>
+      </div>
+
+      <!-- Impressora etiqueta de identificação (Produto) -->
+      <div class="printer-card mb-4 d-flex align-items-center gap-3">
+        <video width="128" height="128" preload="none"
+               style="background: transparent url('https://cdn-icons-png.flaticon.com/512/8717/8717997.png') 50% 50% / contain no-repeat;"
+               autoplay loop muted playsinline>
+          <source src="https://cdn-icons-mp4.flaticon.com/512/8717/8717997.mp4" type="video/mp4">
+        </video>
+        <div>
+          <strong>Impressora etiqueta de identificação (Produto)</strong><br>
+          <span id="lblImpressoraId">Nenhuma impressora selecionada</span><br>
+          <button id="btnImpressoraId" class="btn btn-outline-secondary btn-sm mt-1 pt-2">
+            Escolher impressora
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Escolher Impressora -->
+  <div class="modal fade" id="printerModal" tabindex="-1"
+       data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width: 520px">
+      <div class="modal-content shadow-lg">
+        <div class="modal-header">
+          <h5 class="modal-title">Escolher impressora</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Loading -->
+          <div id="printerLoading" class="d-flex align-items-center gap-2">
+            <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+            <span>Procurando impressoras instaladas…</span>
+          </div>
+
+          <!-- Lista -->
+          <div id="printerListWrap" class="d-none">
+            <div class="list-group" id="printerList" role="radiogroup" aria-label="Lista de impressoras">
+              {# itens injetados via JS (config.js) #}
+            </div>
+
+            <!-- Estado vazio -->
+            <div id="printerEmpty" class="alert alert-warning mt-3 d-none mb-0">
+              Nenhuma impressora foi detectada pelo BrowserPrint neste computador.
+            </div>
+          </div>
+
+          <!-- Erro -->
+          <div id="printerError" class="alert alert-danger d-none mb-0"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="button" id="btnConfirmPrinter" class="btn btn-primary" disabled>Usar esta</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}
 

@@ -1,4 +1,4 @@
-AgendamentosWeb/
+meu_repo/
 ├─ .dirignore
 ├─ .gitignore
 ├─ Dockerfile
@@ -65,6 +65,7 @@ AgendamentosWeb/
 │  ├─ homepage.py
 │  ├─ imprimir_composicoes.py
 │  ├─ process_pdf.py
+│  ├─ relatorio.py
 │  ├─ reservados.py
 │  ├─ retiradoEstoque.py
 │  ├─ teste.py
@@ -146,7 +147,8 @@ AgendamentosWeb/
 │  ├─ mostra_planilha.html
 │  ├─ novoAgendamento.html
 │  ├─ partials
-│  │  └─ form_editar_agendamento.html
+│  │  ├─ form_editar_agendamento.html
+│  │  └─ modal_relatorio_conteudo.html
 │  ├─ reservados.html
 │  ├─ retiradoEstoque.html
 │  ├─ teste.html

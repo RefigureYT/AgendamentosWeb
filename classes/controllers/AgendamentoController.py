@@ -3,7 +3,7 @@ from classes.views import AgendamentoView
 from classes.services import PdfService, SpreadsheetService
 from .DatabaseController import DatabaseController
 from datetime import datetime
-import time
+import time, json
 from base_jp_lab import Caller
 from uuid import uuid4
 
@@ -676,13 +676,68 @@ class AgendamentoController:
         self.db_controller.update_expedicao_inicio(id_agend_bd)
         return ts
 
-    def finalizar_expedicao(self, id_agend_bd: int) -> datetime:
-        """
-        Marca o fim da expedição no BD e retorna o timestamp usado.
-        """
-        if not self.db_controller:
-            raise RuntimeError("DatabaseController não configurado no AgendamentoController.")
-
-        ts = datetime.now()
+    def finalizar_expedicao(self, id_agend_bd: int):
+        agendamento = self.search_agendamento("id_bd", str(id_agend_bd))
+        if not agendamento:
+            # Se não estiver em memória, carrega do banco
+            self.insert_agendamento(id_bd=id_agend_bd)
+            agendamento = self.get_last_made_agendamento()
+            self.create_agendamento_from_bd_data(agendamento)
+        
+        agendamento.set_tipo(2) # 2 = Finalizado
+        self.update_agendamento(agendamento)
         self.db_controller.update_expedicao_fim(id_agend_bd)
-        return ts
+    
+    def gerar_e_salvar_relatorio_expedicao(self, agendamento_obj):
+        """
+        Busca o relatório de conferência, adiciona os dados da expedição
+        e salva o relatório final e completo no banco de dados.
+        """
+        if not agendamento_obj:
+            return
+
+        # 1. Busca o relatório de conferência existente
+        relatorio_str = self.db_controller.get_relatorio_by_agendamento_ml(agendamento_obj.id_agend_ml)
+        
+        # Converte o JSON para um dicionário Python. Se não existir, começa com um vazio.
+        payload = json.loads(relatorio_str) if relatorio_str else {}
+
+        # 2. Adiciona/Atualiza as informações da expedição
+        inicio_exp = agendamento_obj.expedicao_inicio
+        fim_exp = datetime.now() # O fim é o momento atual
+
+        # Calcula a duração da expedição
+        duracao_exp_str = "Não iniciado"
+        if inicio_exp:
+            duracao = fim_exp - inicio_exp
+            duracao_exp_str = f"{duracao.seconds//3600:02d}h {(duracao.seconds%3600)//60:02d}m {duracao.seconds%60:02d}s"
+
+        # Adiciona uma nova seção ao relatório para a expedição
+        payload['InformacoesExpedicao'] = {
+            "DataInicioExpedicao": inicio_exp.strftime("%d/%m/%Y %Hh %Mm %Ss") if inicio_exp else "Não registrado",
+            "DataTerminoExpedicao": fim_exp.strftime("%d/%m/%Y %Hh %Mm %Ss"),
+            "DuracaoExpedicao": duracao_exp_str
+        }
+
+        # 3. Adiciona os detalhes das caixas ao relatório
+        caixas_data = self.db_controller.get_caixas_by_agendamento_ml(agendamento_obj.id_agend_ml)
+        payload['RelatorioExpedicao'] = {
+            "TotalCaixas": len(caixas_data),
+            "Caixas": caixas_data # Salva a lista completa de caixas e seus itens
+        }
+
+        # Garante que as informações gerais também estejam presentes, caso não exista relatório anterior
+        if 'Informacoes' not in payload:
+            payload['Informacoes'] = {
+                "Agendamento": agendamento_obj.id_agend_ml,
+                "Empresa": {1:"Jaú Pesca",2:"Jaú Fishing",3:"L.T. Sports"}.get(agendamento_obj.empresa, ""),
+            }
+        if 'Colaboradores' not in payload:
+            payload['Colaboradores'] = [{"Colaborador": agendamento_obj.colaborador}]
+
+
+        # 4. Converte o dicionário completo de volta para uma string JSON
+        relatorio_final_json = json.dumps(payload, ensure_ascii=False, indent=4) # indent=4 para facilitar a leitura no BD
+
+        # 5. Salva o relatório final no banco de dados
+        self.db_controller.salvar_relatorio(agendamento_obj.id_agend_ml, relatorio_final_json)
