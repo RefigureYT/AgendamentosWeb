@@ -1,5 +1,4 @@
-meu_repo/
-├─ .dirignore
+AgendamentosWeb/
 ├─ .gitignore
 ├─ Dockerfile
 ├─ README.md
@@ -44,8 +43,6 @@ meu_repo/
 ├─ exceptions.py
 ├─ git
 ├─ main.py
-├─ migrations
-├─ patch
 ├─ requirements.txt
 ├─ rotas
 │  ├─ __init__.py
@@ -153,4 +150,5 @@ meu_repo/
 │  ├─ retiradoEstoque.html
 │  ├─ teste.html
 │  └─ view_excel.html
-└─ teste.js
+├─ teste.js
+└─ uwsgi.ini

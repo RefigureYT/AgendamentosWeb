@@ -7,6 +7,124 @@ let tempoEstimadoSegundos = 0;
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
+// --- Helpers p/ imagem da composição (modal) ---
+const PLACEHOLDER_IMG = "/static/resources/sem_img.webp";
+const _compImageCache = new Map();
+
+// Pausa o auto-refresh da lista quando o usuário está interagindo (modal aberto / input aberto)
+window.pauseAutoRefresh = false;
+
+// estado do modal de equivalente
+let _eqModalSkuTarget = null;
+
+// trava e cache do modal de equivalentes
+let _equivBusy = false;
+const _equivCache = new Map(); // chave: valor digitado (normalizado) -> Promise/resultado
+
+async function _fetchImageForComp(comp) {
+  try {
+    if (!comp) return PLACEHOLDER_IMG;
+
+    // chave de cache robusta
+    const key = comp.id_comp ?? `${comp.fk_id_prod}|${comp.sku || ''}|${comp.id_tiny || ''}`;
+    if (_compImageCache.has(key)) return _compImageCache.get(key);
+
+    let url = PLACEHOLDER_IMG;
+
+    if (comp.id_comp) {
+      const r = await fetch(`/api/retirado/composicao/${comp.id_comp}/imagem`);
+      const j = await r.json().catch(() => ({}));
+      url = j.url || PLACEHOLDER_IMG;
+    } else if (comp.fk_id_prod) {
+      const qs = new URLSearchParams({
+        fk_id_prod: String(comp.fk_id_prod),
+        sku: comp.sku || "",
+        id_tiny: comp.id_tiny ? String(comp.id_tiny) : ""
+      });
+      const r = await fetch(`/api/retirado/composicao/imagem?${qs}`);
+      const j = await r.json().catch(() => ({}));
+      url = j.url || PLACEHOLDER_IMG;
+    }
+
+    _compImageCache.set(key, url);
+    return url;
+  } catch {
+    return PLACEHOLDER_IMG;
+  }
+}
+
+function _getCompsJson() {
+  try {
+    return JSON.parse(document.getElementById("js-data")?.dataset?.comps || "[]");
+  } catch { return []; }
+}
+
+/**
+ * Encontra a composição pelo SKU dentro do payload do template
+ * e retorna { id_comp, imagem_url_comp } (se existirem).
+ */
+function _findCompBySku(sku) {
+  const blocos = _getCompsJson(); // esperado: [{ composicoes: [...] }, ...]
+  for (const bloco of blocos) {
+    const arr = Array.isArray(bloco.composicoes) ? bloco.composicoes : [];
+    for (const c of arr) {
+      if (String(c.sku || "").trim() === String(sku).trim()) return c;
+    }
+  }
+  return null;
+}
+
+// Resolve a imagem da composição com 3 tentativas:
+// 1) imagem vinda no JSON
+// 2) endpoint backend (se existir)
+// 3) fallback direto no Tiny via /api/tiny-proxy
+async function resolveCompImage(comp) {
+  if (!comp) return PLACEHOLDER_IMG;
+
+  // 1) Veio no JSON
+  if (comp.imagem_url_comp && String(comp.imagem_url_comp).trim()) {
+    return comp.imagem_url_comp;
+  }
+
+  // 2) Backend (se você criou a rota)
+  const compId = comp.id_comp || comp.id || comp.id_composicao || null;
+  if (compId) {
+    try {
+      const r = await fetch(`/api/retirado/composicao/${compId}/imagem`);
+      if (r.ok) {
+        const j = await r.json().catch(() => ({}));
+        if (j && j.url) return j.url;
+      }
+    } catch { /* ignora e segue pro fallback */ }
+  }
+
+  // 3) Fallback Tiny (usa /api/tiny-proxy)
+  try {
+    const idTiny = comp.id_tiny || comp.id_produto || comp.idProduto || null;
+    if (idTiny) {
+      const tkResp = await getTinyToken("jaupesca", "tiny");
+      const accessToken = tkResp?.[0]?.access_token;
+      if (accessToken) {
+        const r = await fetch('/api/tiny-proxy', {
+          method: 'GET',
+          headers: {
+            'Path': `/public-api/v3/produtos/${idTiny}`,
+            'Authorization': 'Bearer ' + accessToken
+          }
+        });
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          if (Array.isArray(j?.anexos) && j.anexos.length > 0) {
+            return j.anexos[0].url;
+          }
+        }
+      }
+    }
+  } catch { /* mantém placeholder */ }
+
+  return PLACEHOLDER_IMG;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // ─── Collapse responsivo ───────────────────────
   const detalhes = document.getElementById('detalhesRetirada');
@@ -28,7 +146,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // ─── inicia polling e contador ─────────────────────
   carregarProgressoServer();
   iniciarContadorTempo();
-  setInterval(carregarProgressoServer, 20000);
+  setInterval(() => {
+    if (!window.pauseAutoRefresh) {
+      carregarProgressoServer();
+    }
+  }, 2 * 1000);
+
 
   // ─── atalho Enter nos inputs ─────────────────────
   ['skuInput', 'quantidadeInput'].forEach(id =>
@@ -285,8 +408,8 @@ async function biparProduto() {
   }
 
   // 5) Valores do DOM (fallback local)
-  let atualDom = toNum(itemOriginal.dataset?.bipados, 0); // total já bipado (diretos + equivalentes)
-  let totalDom = toNum(itemOriginal.dataset?.total, 0);
+  let atualDom = toNum(itemOriginal?.dataset?.bipados, 0); // total já bipado (diretos + equivalentes)
+  let totalDom = toNum(itemOriginal?.dataset?.total, 0);
 
   // 6) (Recomendado) Consultar o total atual FRESCO no servidor (diretos + equivalentes)
   let atualServidor = null;
@@ -511,7 +634,7 @@ async function getTinyToken(empresa, marketplace) {
     });
 
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.json}`);
+      throw new Error(`HTTP ${resp.status}`);
     }
 
     const data = await resp.json();
@@ -524,49 +647,135 @@ async function getTinyToken(empresa, marketplace) {
 }
 
 function adicionarEquivalente(sku) {
-  const box = document.getElementById(`equivalente-${sku}`);           // div container
-  const field = document.getElementById(`inputEquivalente-${sku}`);    // o <input> de fato
-  const btn = document.getElementById(`btnEquivalente-${sku}`);
+  resetModalEquivalenteUI(); // limpa UI anterior (soft)
+  _eqModalSkuTarget = sku;
 
-  const estavaOff = box.classList.contains("input-equivalente-off");
+  // preenche informações e abre o modal
+  document.getElementById('eq-sku-master').textContent = sku;
 
-  // toggle de visibilidade
-  box.classList.toggle("input-equivalente-off");
-  btn.textContent = estavaOff ? "-" : "+";
+  const m = document.getElementById('modal-equivalente');
+  m.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  window.pauseAutoRefresh = true;
 
-  if (estavaOff) {
-    // foca depois de exibir
-    requestAnimationFrame(() => {
-      field.focus({ preventScroll: true });
-      field.select();
+  const input = document.getElementById('eq-input');
+  input.value = '';
+  input.focus();
+
+  // Enter confirma
+  if (!input._enter) {
+    input._enter = true;
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') confirmarModalEquivalente();
     });
-
-    // evita listeners duplicados
-    if (!field._enterHandler) {
-      field._enterHandler = (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          const valorBipado = field.value.trim();
-          if (valorBipado) {
-            addDbEquivalente(sku, valorBipado);
-            field.value = "";
-            // opcional: esconder e devolver foco ao botão
-            box.classList.add("input-equivalente-off");
-            btn.textContent = "+";
-            btn.focus();
-          }
-        }
-      };
-      field.addEventListener("keydown", field._enterHandler);
-    }
-  } else {
-    // opcional: ao esconder, remova o handler
-    if (field._enterHandler) {
-      field.removeEventListener("keydown", field._enterHandler);
-      field._enterHandler = null;
-    }
   }
 }
+
+function fecharModalEquivalente(hard = true) {
+  resetModalEquivalenteUI({ hard });
+  const m = document.getElementById('modal-equivalente');
+  m.style.display = 'none';
+  document.body.style.overflow = '';
+  window.pauseAutoRefresh = false;
+}
+
+function resetModalEquivalenteUI({ hard = false } = {}) {
+  const modal = document.getElementById('modal-equivalente');
+  if (!modal) return;
+  const content = modal.querySelector('.modal-content') || modal;
+
+  // 1) overlay de confirmação + classe confirming
+  content.querySelector('#eq-confirm-overlay')?.remove();
+  content.classList.remove('confirming');
+
+  // 2) input e mensagens
+  const input = document.getElementById('eq-input');
+  if (input) {
+    input.value = '';
+    input.disabled = false;
+  }
+  const erroDiv = document.getElementById('erroBuscaEquivalenteDiv');
+  if (erroDiv) {
+    erroDiv.innerHTML = '';
+    erroDiv.classList.add('input-equivalente-off'); // volta a esconder
+  }
+
+  // 3) cabeçalho do modal e rolagem
+  const skuMaster = document.getElementById('eq-sku-master');
+  if (skuMaster) skuMaster.textContent = '—';
+  content.scrollTop = 0;
+
+  // 4) estado interno
+  _eqModalSkuTarget = null;
+  _equivBusy = false;
+  if (hard) _equivCache.clear(); // se quiser zerar o cache entre aberturas
+}
+
+async function confirmarModalEquivalente() {
+  // já existe overlay de confirmação aberto? não dispare outra busca
+  if (document.querySelector('#modal-equivalente .eq-confirm-overlay')) return;
+
+  const inputEl = document.getElementById('eq-input');
+  const val = (inputEl?.value || '').trim();
+  // se a confirmação estiver aberta, não inicie nova busca
+  if (document.querySelector('#modal-equivalente .eq-confirm-overlay')) return;
+
+  if (!val) {
+    notify.error('Digite ou bipe um SKU/GTIN.', { duration: 3000 });
+    return;
+  }
+
+  // evita flood
+  if (_equivBusy) return;
+  _equivBusy = true;
+  inputEl.disabled = true;
+
+  try {
+    // token tiny
+    const tk = await getTinyToken('jaupesca', 'tiny');
+    const accessToken = tk?.[0]?.access_token;
+    if (!accessToken) throw new Error('Falha ao obter token do Tiny.');
+
+    // cache (60s) para o mesmo valor digitado
+    const key = val.toLowerCase();
+    let resultadoPromise = _equivCache.get(key);
+    if (!resultadoPromise) {
+      resultadoPromise = buscaProdutoEquivalente(val, accessToken);
+      _equivCache.set(key, resultadoPromise);
+      setTimeout(() => _equivCache.delete(key), 60_000);
+    }
+    const produtoEquivalente = await resultadoPromise;
+
+    // seus códigos de retorno continuam valendo
+    if (produtoEquivalente === 1 || produtoEquivalente === 2) return;
+    if (produtoEquivalente === 3) {
+      notify.error('Nenhum produto encontrado (GTIN ou SKU inválidos).', { duration: 4000 });
+      return;
+    }
+
+    // abre a CONFIRMAÇÃO dentro do próprio modal (sem painel externo)
+    await confirmaProdutoEquivalente(produtoEquivalente.itens[0], _eqModalSkuTarget, accessToken);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (/429/.test(msg)) {
+      notify.error('Tiny respondeu 429 (limite de requisições). Tente novamente em alguns segundos.', { duration: 5000 });
+    } else {
+      notify.error(msg, { duration: 5000 });
+    }
+  } finally {
+    _equivBusy = false;
+    inputEl.disabled = false;
+  }
+}
+
+// fechar modal-equivalente clicando fora / com ESC
+window.addEventListener('click', (e) => {
+  const m = document.getElementById('modal-equivalente');
+  if (e.target === m) fecharModalEquivalente(true);
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') fecharModalEquivalente(true);
+});
 
 async function verificaAdicaoProdutoEquivalentePermitido(valorBipado) {
   const raw = document.getElementById("js-data").dataset.comps;
@@ -646,171 +855,74 @@ async function verificaAdicaoProdutoEquivalentePermitido(valorBipado) {
 }
 
 async function buscaProdutoEquivalente(valorBipado, token) {
-  const urlDefault = 'https://api.tiny.com.br/public-api/v3';
-  // const urlSku = urlDefault + `/produtos?codigo=${valorBipado}`; // Assumi que é um SKU
-  // const urlGtin = urlDefault + `/produtos?gtin=${valorBipado}`; // Assumi que é um GTIN/EAN
   const isLikelyGTIN = (v) => /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(v);
-  let result = null;
 
+  // regra que impede usar item do próprio agendamento como equivalente
   const permitidoAddEquivalente = await verificaAdicaoProdutoEquivalentePermitido(valorBipado);
-
   if (permitidoAddEquivalente !== null) {
-    // messageBuscaEquivalenteTiny(permitidoAddEquivalente);
-    if (permitidoAddEquivalente.result === 1) {
+    if (permitidoAddEquivalente.result === 1 || permitidoAddEquivalente.result === 2) {
       notify.error(permitidoAddEquivalente.message, { type: 'info', duration: 5000 });
-      result = 1;
-      console.log('Result para adição do bagulho equivalente >', result);
-      return result;
-    } else if (permitidoAddEquivalente.result === 2) {
-      notify.error(permitidoAddEquivalente.message, { type: 'info', duration: 5000 });
-      result = 2;
-      console.log('Result para adição do bagulho equivalente >', result);
-      return result;
-    } else {
-      console.log('Result para adição do bagulho equivalente > Não retornou nada aí vai voltar nulo');
-      return; // Não consigo imaginar que caso pode cair...
+      return permitidoAddEquivalente.result; // 1 ou 2
     }
+    return; // não deveria cair aqui, mas mantém o comportamento
   }
 
-  try {
-    // const tinySku = await fetch(urlSku, {
-    //   method: 'GET',
-    //   headers: {
-    //     'Authorization': `Bearer ${token}`
-    //   }
-    // });
-
-    // const data = await tinySku.json();
-
-    // Ex.: buscar produto pelo código (SKU)
-
-    if (isLikelyGTIN(valorBipado)) {
-      // Se determinado como GTIN, tenta por GTIN
-      console.log('DETERMINADO COMO GTIN >', valorBipado);
-
-      // BUSCA POR GTIN/EAN
-      const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}`, {
-        method: 'GET',
-        headers: {
-          'Path': '/public-api/v3/produtos',
-          'Authorization': 'Bearer ' + token
-        }
-      });
-
-      const dataGtin = await tentativaGtin.json();
-      console.log('Resultado por GTIN:', dataGtin);
-
-      if (dataGtin.itens.length === 0) {
-        console.log('NENHUM PRODUTO ENCONTRADO POR GTIN');
-        console.log('Tentando como SKU');
-
-        // BUSCA POR SKU
-        const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}`;
-        const tentativaSku = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Path': '/public-api/v3/produtos',
-            'Authorization': 'Bearer ' + token
-          }
-        });
-        const dataSku = await tentativaSku.json();
-        console.log('RESULT POR SKU: ', dataSku);
-
-        if (dataSku.itens.length === 0) {
-          console.log('INFELIZMENTE NÃO FOI POSSÍVEL ENCONTRAR NENHUM PRODUTO NEM COM SKU NEM COM GTIN');
-          result = 3;
-          return result;
-        } else {
-          result = dataSku;
-        }
-      } else {
-        result = dataGtin;
+  // helper para buscar no Tiny com tratamento único de erro e parse
+  const tinyFetch = async (qs) => {
+    const r = await fetch(`/api/tiny-proxy?${qs}`, {
+      method: 'GET',
+      headers: {
+        'Path': '/public-api/v3/produtos',
+        'Authorization': 'Bearer ' + token
       }
-      return result;
+    });
+
+    // tenta ler uma vez, sem consumir o body original
+    const clone = r.clone();
+    let data = await clone.json().catch(() => null);
+
+    if (!r.ok) {
+      const fallbackText =
+        (data && data.detalhes && data.detalhes[0] && data.detalhes[0].mensagem) ||
+        (data && data.error) ||
+        await r.text().catch(() => '');
+      throw new Error(`Erro ${r.status}: ${fallbackText || 'Tiny retornou erro'}`);
     }
-    else {
-      // Caso contrário faz como SKU primeiro
 
-      console.log('DETERMINADO COMO SKU >', valorBipado);
+    // se o clone falhou em JSON (content-type inesperado), lê do original agora
+    if (!data) data = await r.json().catch(() => ({}));
+    return data;
+  };
 
-      // BUSCA POR SKU
-      const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}`;
-      const tentativaSku = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Path': '/public-api/v3/produtos',
-          'Authorization': 'Bearer ' + token
-        }
-      });
-      const dataSku = await tentativaSku.json();
-      console.log('RESULT POR SKU: ', dataSku);
+  try {
+    if (isLikelyGTIN(valorBipado)) {
+      // 1) Tenta por GTIN
+      const byGtin = await tinyFetch(`gtin=${encodeURIComponent(valorBipado)}`);
+      if (Array.isArray(byGtin?.itens) && byGtin.itens.length > 0) return byGtin;
 
-      if (dataSku.itens.length === 0) {
-        console.log('NADA ENCONTRADO');
-        console.log('Tentando agora a pesquisa por GTIN/EAN');
+      // 2) Fallback por SKU
+      const bySku = await tinyFetch(`codigo=${encodeURIComponent(valorBipado)}`);
+      if (Array.isArray(bySku?.itens) && bySku.itens.length > 0) return bySku;
 
-        // BUSCA POR GTIN/EAN
-        const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}`, {
-          method: 'GET',
-          headers: {
-            'Path': '/public-api/v3/produtos',
-            'Authorization': 'Bearer ' + token
-          }
-        });
+      // nada encontrado
+      return 3;
+    } else {
+      // 1) Tenta por SKU
+      const bySku = await tinyFetch(`codigo=${encodeURIComponent(valorBipado)}`);
+      if (Array.isArray(bySku?.itens) && bySku.itens.length > 0) return bySku;
 
-        console.log(tentativaGtin.status);
+      // 2) Fallback por GTIN
+      const byGtin = await tinyFetch(`gtin=${encodeURIComponent(valorBipado)}`);
+      if (Array.isArray(byGtin?.itens) && byGtin.itens.length > 0) return byGtin;
 
-        let data = null;
-        let text = null;
-
-        // Tenta JSON; se falhar, lê como texto
-        try {
-          data = await tentativaGtin.clone().json();
-        } catch {
-          text = await tentativaGtin.text();
-        }
-
-        if (!tentativaGtin.ok) {
-          // 4xx/5xx
-          const msg =
-            (data && data.detalhes && data.detalhes[0] && data.detalhes[0].mensagem) ||
-            (data && data.error) || // caso o seu proxy retorne {error: "..."}
-            text ||
-            'Erro ao consultar Tiny \nCOD Err: #j3uY3c6FC8Sd';
-
-          console.log(`Erro ${tentativaGtin.status}:`, msg);
-          throw new Error(`Erro ${tentativaGtin.status}:`, msg);
-        } else {
-          // Sucesso 2xx
-          console.log('OK:', data);
-        }
-
-
-        const dataGtin = await tentativaGtin.json();
-        console.log('Resultado por GTIN:', dataGtin);
-
-        if (dataGtin.itens.length === 0) {
-          console.log('INFELIZMENTE NÃO FOI POSSÍVEL ENCONTRAR NENHUM PRODUTO NEM COM SKU NEM COM GTIN');
-          result = 3;
-          return result;
-        } else {
-          result = dataGtin;
-        }
-      } else {
-        result = dataSku;
-      }
-
-      return result;
+      // nada encontrado
+      return 3;
     }
   } catch (error) {
-    console.log(`Deu erro na requisição TINY com SKU: ${error}`);
-    const erro = error.toString();
-    if (erro.includes("400")) {
-      result = 3;
-      return result;
-    } else {
-      notify.error(error, { type: 'info', duration: 5000 })
-    }
+    const msg = String(error || '');
+    // mantém tua convenção: 3 = “não encontrado / inválido”
+    if (msg.includes('400')) return 3;
+    notify.error(error, { type: 'info', duration: 5000 });
   }
 }
 
@@ -947,75 +1059,96 @@ async function addDbEquivalente(sku, valorBipado) {
   }
 }
 
-async function confirmaProdutoEquivalente(prod, sku, accessToken) {
-  const painel = document.getElementById('confirmaEquivalente');
-  const raw = document.getElementById("js-data").dataset.comps;
-  const produtos = JSON.parse(raw);
-  let comp = {};
+async function confirmaProdutoEquivalente(prod, skuOriginal, accessToken) {
+  const modal = document.getElementById('modal-equivalente');
+  const content = modal.querySelector('.modal-content') || modal;
+  const comp = _findCompBySku(skuOriginal) || {};
 
-  painel.classList.remove('input-equivalente-off');
-  console.log('Esse é o objeto do produto que vai aparecer na confirmação para o Equivalente >', prod);
-  console.log('Sku ORIGINAL >', sku);
-  console.log('Obj >', produtos);
+  // trava o input enquanto o overlay existir
+  const inputEl = document.getElementById('eq-input');
+  inputEl && (inputEl.disabled = true);
 
-  console.log('Fazendo Laço de repetição para buscar o produto referência');
-  const skuNorm = String(sku).toLowerCase();
-  outer:
-  for (const p of produtos) {
-    const i = Array.isArray(p.composicoes) ? p.composicoes : [];
-    for (const c of i) {
-      if (String(c.sku).toLowerCase() === skuNorm) {
-        comp = c;
-        break outer;
-      }
-    }
-  }
-  console.log('Terminou o laço de repetição');
-  console.log('Produto Referência >', comp);
+  // marca conteúdo do modal como “confirmando” para esconder .modal-actions
+  content.classList.add('confirming');
 
-  let data = {};
+  // imagem (placeholder se falhar)
+  let imgUrl = PLACEHOLDER_IMG;
   try {
-    const response = await fetch('/api/tiny-proxy', {
+    const r = await fetch('/api/tiny-proxy', {
       method: 'GET',
-      headers: {
-        'Path': `/public-api/v3/produtos/${prod.id}`,
-        'Authorization': 'Bearer ' + accessToken
-      }
+      headers: { 'Path': `/public-api/v3/produtos/${prod.id}`, 'Authorization': 'Bearer ' + accessToken }
     });
-    data = await response.json();
-  } catch (e) {
-    console.warn('Falha ao buscar anexos do Tiny:', e);
+    const j = await r.json().catch(() => ({}));
+    if (Array.isArray(j?.anexos) && j.anexos.length > 0) imgUrl = j.anexos[0].url;
+  } catch { }
+
+  // cria / reutiliza overlay interno
+  let ov = content.querySelector('#eq-confirm-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'eq-confirm-overlay';
+    ov.className = 'eq-confirm-overlay';
+    content.appendChild(ov);
   }
-  console.log('Result de chamada para GET da imagem >', data);
 
-  let urlImagem = '../static/resources/sem_img.webp';
-  if (Array.isArray(data?.anexos) && data.anexos.length > 0) {
-    urlImagem = data.anexos[0].url;
-  }
-  console.log('Aqui está a url da imagem >', urlImagem);
+  ov.innerHTML = `
+    <h3 class="titulo-vermelho" style="margin:0 0 .5rem;">Confirmar equivalente</h3>
+    <p><strong>${prod.descricao}</strong></p>
+    <p style="margin:-2px 0 8px;">SKU: <b>${prod.sku}</b> · GTIN: <b>${prod.gtin || '—'}</b></p>
+    <img alt="Imagem do produto" src="${imgUrl}" style="max-width:100%;max-height:260px;display:block;margin:6px 0 14px;">
+    <p>Adicionar este item como equivalente de <b>${skuOriginal}</b>${comp?.nome ? ' — ' + comp.nome : ''}?</p>
+    <input id="eq-obs" class="form-control" placeholder="Observação (opcional)">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button id="eq-confirm-no" class="btn btn-outline-secondary" type="button">Voltar</button>
+      <button id="eq-confirm-yes" class="btn btn-primary" type="button">Confirmar</button>
+    </div>
+  `;
 
-  painel.innerHTML = `
-      <p id="confirmaEquivalente-nome">Nome: <strong>${prod.descricao}</strong></p>
-      <p id="confirmaEquivalente-sku">SKU: <strong>${prod.sku}</strong></p>
-      <p id="confirmaEquivalente-gtin">GTIN: <strong>${prod.gtin}</strong></p>
-      <img id="confirmaEquivalente-img" style="max-width: 480px; max-height: 280px" src="${urlImagem}" alt="Imagem do produto">
+  const cleanup = () => {
+    ov.remove();
+    content.classList.remove('confirming');
+    inputEl && (inputEl.disabled = false);
+  };
 
-      <p>Deseja adicionar este produto como equivalente para</p>
-      <p>${sku} - ${comp?.nome ?? '(produto original não encontrado)'}</p>
-      <input id="inputObs" type="text" placeholder="Observação (Opcional)"> <br><br>
-      <div id="btnSim" style="border: 5px solid green; color: white; background-color: green;">SIM</div><br>
-      <div id="btnNao" style="border: 5px solid red; color: white; background-color: red;">NÃO</div>
-    `;
+  ov.querySelector('#eq-confirm-no').onclick = () => fecharModalEquivalente(true);
 
-  const resposta = await perguntarConfirmacao();
-  const inputObs = document.getElementById('inputObs');
-  const observacao = (inputObs && inputObs.value !== "") ? inputObs.value : null;
+  ov.querySelector('#eq-confirm-yes').onclick = async (e) => {
+    // anti-duplo clique
+    const btn = e.currentTarget;
+    if (btn._busy) return;
+    btn._busy = true;
+    btn.disabled = true;
 
-  console.log('Este é o valor do campo de observações >', observacao);
-  painel.classList.add('input-equivalente-off');
-  console.log('Resposta do usuário para Equivalente >', resposta);
+    const nomeColaborador = document.getElementById('infoAgend').dataset.colaborador || 'Desconhecido';
+    const obs = ov.querySelector('#eq-obs')?.value || 'Não informado';
 
-  return { respostaUser: resposta, obs: observacao };
+    const payload = {
+      id_agend: idAgend,
+      sku_original: comp.sku || skuOriginal,
+      gtin_original: comp.gtin || null,
+      id_tiny_original: comp.id_tiny || null,
+      nome_equivalente: prod.descricao,
+      sku_bipado: prod.sku,
+      gtin_bipado: prod.gtin || null,
+      id_tiny_equivalente: prod.id,
+      usuario: nomeColaborador,
+      observacao: obs
+    };
+
+    try {
+      await fetchJSON('/api/equiv/bipar', { method: 'POST', body: payload });
+      notify.success('Produto equivalente adicionado com sucesso!', { duration: 2000 });
+      cleanup();
+      fecharModalEquivalente();
+      carregarProgressoServer();
+    } catch (e) {
+      notify.error(`Erro ao gravar equivalente: ${e}`, { duration: 5000 });
+      btn._busy = false;
+      btn.disabled = false;
+    }
+  };
+
+  return { respostaUser: true, obs: null };
 }
 
 function perguntarConfirmacao() {
@@ -1445,174 +1578,177 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
 })();
 
 async function editarProdutoCompLapis(sku) {
-  // Se precisar popular algo dinamicamente:
-  // document.querySelector('#conteudoModalEditarProduto p:nth-child(2) strong').textContent = sku;
+  // pausa auto-refresh e abre o modal imediatamente (loader)
+  window.pauseAutoRefresh = true;
+
+  const modalEl = document.getElementById('modal-editar-produto');
+  modalEl.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+
+  // overlay
+  let _loadingEl = document.createElement('div');
+  _loadingEl.className = 'loading';
+  _loadingEl.id = 'modal-edit-loading';
+  _loadingEl.textContent = 'Carregando...';
+  modalEl.querySelector('.modal-content').appendChild(_loadingEl);
 
   const listaProdutos = document.getElementById('listaProdutos');
-  const bipados = document.querySelector(`[data-sku="${sku}"]`).dataset.bipados;
 
-  console.log('listaProdutos >', listaProdutos);
-
-  const raw = document.getElementById("js-data").dataset.comps;
-  const produtos = JSON.parse(raw);
-
-  console.log('Produtos >', produtos);
-
-  const comp = produtos.flatMap(p => p.composicoes ?? []).find(c => c.sku === sku);
-
-
-  console.log('Este é o produto composição >', comp);
-
-  const response = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${sku}`);
-  const data = await response.json();
-  console.log('data >', data);
-  let totalBipadosOriginal = 0;
-
-  if (data.bipagem === null || data.bipagem === undefined) {
-    totalBipadosOriginal = 0;
-  } else {
-    totalBipadosOriginal = data.bipagem.bipados;
-  }
-
-  const porcento = comp.unidades_totais > 0 ? Math.min(100, Math.round((totalBipadosOriginal / comp.unidades_totais) * 100)) : 0;
-
-  console.log('Total Bipados Original >', totalBipadosOriginal);
   const nomeProdOrigView = document.getElementById('master-nome');
   const skuView = document.getElementById('master-sku-view');
   const gtinView = document.getElementById('master-gtin');
   const img = document.getElementById('master-img');
 
-  console.log('Valor de comp.nome:', comp.nome);
-  nomeProdOrigView.innerHTML = comp.nome;
-  skuView.innerHTML = comp.sku;
-  gtinView.innerHTML = comp.gtin;
+  // estado inicial (skeleton/placeholder)
+  nomeProdOrigView.textContent = '—';
+  skuView.textContent = sku;
+  gtinView.textContent = '—';
+  img.src = PLACEHOLDER_IMG;
+  img.classList.add('img-skeleton', 'skeleton');
 
-  // Exemplo para mudar a imagem
-  // img.src = "https://blog.abler.com.br/wp-content/uploads/2022/08/Teste-de-Perfil-Comportamental.jpg"
-
-  console.log('Total Bipados original 2>', data);
-  console.log('Total Bipados original 3>', totalBipadosOriginal);
   listaProdutos.innerHTML = `
-  <!-- ============ PRODUTO ORIGINAL (o primeiro da lista) ============ -->
-          <div id="produto-ORIGINAL-${comp.id_tiny}" class="produto-item-modal" data-role="original">
-            <div class="d-flex" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-              <div>
-                <strong id="nome-${sku}">${comp.nome}</strong>
-                <span id="sku-${sku}" class="badge">${sku}</span>
-                <span id="tipo-${sku}" class="badge">Original</span>
-              </div>
-              <div class="small" style="font-size:.85rem; color:#6b7280;">
-                Bipado: <strong id="bipado-${sku}">${totalBipadosOriginal}</strong> /
-                Total: <strong id="total-${sku}">${comp.unidades_totais}</strong>
-                (<span id="percent-${sku}">${porcento}</span>%)
-              </div>
-            </div>
+    <div class="p-3 d-flex align-items-center gap-2">
+      <div class="spinner" aria-label="Carregando"></div>
+      <span style="color:#64748b">Carregando informações…</span>
+    </div>
+  `;
 
-            <!-- Barra de progresso -->
-            <div id="progressWrap-${sku}" class="progress"
-              style="height:10px; background:#e5e7eb; border-radius:6px; overflow:hidden; margin:8px 0;">
-              <div id="progressFill-${sku}" class="progress-bar" role="progressbar"
-                style="width:0%; background:#f59e0b; height:10px;" aria-valuenow="0" aria-valuemin="0"
-                aria-valuemax="100"></div>
-            </div>
+  // mostra o modal AGORA
+  modalEl.style.display = 'block';
+  document.body.style.overflow = 'hidden';
 
-            <!-- Controles de quantidade -->
-            <div class="controls" style="display:flex; align-items:center; gap:8px;">
-              <button id="menos-${sku}" class="btn btn-outline" onclick="removeUnEditarProduto('${sku}');" type="button">−</button>
-              <input id="quantidade-${sku}" type="number" value="${totalBipadosOriginal}" min="0" step="1" style="width:100px;">
-              <button id="mais-${sku}" class="btn btn-outline" onclick="addUnEditarProduto('${sku}');" type="button">+</button>
+  try {
+    // pega composição daquele SKU
+    const raw = document.getElementById("js-data").dataset.comps;
+    const produtos = JSON.parse(raw);
+    const comp = produtos.flatMap(p => p.composicoes ?? []).find(c => c.sku === sku);
+    if (!comp) {
+      notify.error(`Composição não encontrada para o SKU ${sku}.`);
+      fecharModal();
+      return;
+    }
 
-              <div class="ms-auto" style="margin-left:auto; font-size:.85rem; color:#6b7280;">
-                Última ação: <strong id="status-${sku}">—</strong>
-              </div>
-            </div>
-          </div>
-          `;
+    // busca totais do servidor p/ esse SKU original
+    const response = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${encodeURIComponent(sku)}`);
+    const data = await response.json();
 
+    let totalBipadosOriginal = (data?.bipagem?.bipados ?? 0);
+    const porcento = comp.unidades_totais > 0
+      ? Math.min(100, Math.round((totalBipadosOriginal / comp.unidades_totais) * 100))
+      : 0;
 
-  console.log('Req to DB | View EQUIVALENTES >', data);
+    // preenche painel esquerdo (master)
+    nomeProdOrigView.textContent = comp.nome;
+    skuView.textContent = comp.sku;
+    gtinView.textContent = comp.gtin || '—';
+    try {
+      const url = await resolveCompImage(comp);
+      img.src = url || PLACEHOLDER_IMG;
+    } finally {
+      img.classList.remove('img-skeleton', 'skeleton');
+    }
 
-  const fill = document.getElementById(`progressFill-${sku}`);
-  fill.style.width = `${porcento}%`;
-  fill.setAttribute('aria-valuenow', bipados);
-  fill.setAttribute('aria-valuemax', comp.unidades_totais);
-
-
-
-  data.equivalentes.forEach(p => {
-    console.log('data,equivalentes <', p);
-
-    const porcentoEquiv = comp.unidades_totais > 0 ? Math.min(100, Math.round((p.bipados / comp.unidades_totais) * 100)) : 0;
-
-    listaProdutos.innerHTML += `
-      <!-- ============ PRODUTO EQUIVALENTE ============ -->
-      <div id="produto-EQV-${p.id_tiny_equivalente}" class="produto-item-modal" data-role="equivalente">
-        <!-- lixeira no canto direito -->
-
+    // monta a lista à direita (ORIGINAL + EQUIVALENTES)
+    listaProdutos.innerHTML = `
+      <!-- ORIGINAL -->
+      <div id="produto-ORIGINAL-${comp.id_tiny}" class="produto-item-modal" data-role="original">
         <div class="d-flex" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
           <div>
-            <strong id="nome-${p.sku_bipado}">${p.nome_equivalente}</strong>
-            <span id="sku-${p.sku_bipado}" class="badge">${p.sku_bipado}</span>
-            <span id="tipo-${p.sku_bipado}" class="badge">Equivalente</span>
+            <strong id="nome-${sku}">${comp.nome}</strong>
+            <span id="sku-${sku}" class="badge">${sku}</span>
+            <span id="tipo-${sku}" class="badge">Original</span>
           </div>
           <div class="small" style="font-size:.85rem; color:#6b7280;">
-            Bipado: <strong id="bipado-${p.sku_bipado}">${p.bipados}</strong> /
-            Total: <strong id="total-${p.sku_bipado}">${comp.unidades_totais}</strong>
-            (<span id="percent-${p.sku_bipado}">${porcentoEquiv}</span>%)
+            Bipado: <strong id="bipado-${sku}">${totalBipadosOriginal}</strong> /
+            Total: <strong id="total-${sku}">${comp.unidades_totais}</strong>
+            (<span id="percent-${sku}">${porcento}</span>%)
           </div>
         </div>
 
-        <!-- Barra de progresso -->
-        <div id="progressWrap-${p.sku_bipado}" class="progress"
-          style="height:10px; background:#e5e7eb; border-radius:6px; overflow:hidden; margin:8px 0;">
-          <div id="progressFill-${p.sku_bipado}" class="progress-bar" role="progressbar"
-            style="width:0%; background:#3b82f6; height:10px;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-          </div>
+        <div id="progressWrap-${sku}" class="progress"
+             style="height:10px; background:#e5e7eb; border-radius:6px; overflow:hidden; margin:8px 0;">
+          <div id="progressFill-${sku}" class="progress-bar" role="progressbar"
+               style="width:${porcento}%; background:#f59e0b; height:10px;"
+               aria-valuenow="${totalBipadosOriginal}" aria-valuemin="0"
+               aria-valuemax="${comp.unidades_totais}"></div>
         </div>
 
-        <!-- Controles de quantidade -->
         <div class="controls" style="display:flex; align-items:center; gap:8px;">
-          <button id="menos-${p.sku_bipado}" onclick="removeUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">−</button>
-          <input id="quantidade-${p.sku_bipado}" type="number" value="${p.bipados}" min="0" step="1" style="width:100px;">
-          <button id="mais-${p.sku_bipado}" onclick="addUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">+</button>
+          <button id="menos-${sku}" class="btn btn-outline" onclick="removeUnEditarProduto('${sku}');" type="button">−</button>
+          <input id="quantidade-${sku}" type="number" value="${totalBipadosOriginal}" min="0" step="1" style="width:100px;">
+          <button id="mais-${sku}" class="btn btn-outline" onclick="addUnEditarProduto('${sku}');" type="button">+</button>
 
-
-          <div class="last-action-wrap">
-            <button id="excluir-${p.sku_bipado}" class="btn-icon"
-                    aria-label="Excluir equivalente"
-                    title="Excluir equivalente"
-                    data-sku-original="${sku}"
-                    data-sku-equivalente="${p.sku_bipado}"
-                    data-id-tiny="${p.id_tiny_equivalente}"
-                    onclick="excluirEquivalente(this)">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M9 3h6a1 1 0 0 1 1 1v1h4v2H4V5h4V4a1 1 0 0 1 1-1Zm2 5h2v11h-2V8Zm-4 0h2v11H7V8Zm8 0h2v11h-2V8Z"/>
-              </svg>
-            </button>
-
-            <span class="status">
-              Última ação: <strong id="status-${p.sku_bipado}">—</strong>
-            </span>
+          <div class="ms-auto" style="margin-left:auto; font-size:.85rem; color:#6b7280;">
+            Última ação: <strong id="status-${sku}">—</strong>
           </div>
-
-
         </div>
       </div>
-            `;
+    `;
 
+    // acrescenta equivalentes
+    (data?.equivalentes || []).forEach(p => {
+      const porcentoEquiv = comp.unidades_totais > 0
+        ? Math.min(100, Math.round((p.bipados / comp.unidades_totais) * 100))
+        : 0;
 
-    const fillEquiv = document.getElementById(`progressFill-${p.sku_bipado}`);
-    fillEquiv.style.width = `${porcentoEquiv}%`;
-    fillEquiv.setAttribute('aria-valuenow', p.bipados);
-    fillEquiv.setAttribute('aria-valuemax', comp.unidades_totais);
+      listaProdutos.innerHTML += `
+        <div id="produto-EQV-${p.id_tiny_equivalente}" class="produto-item-modal" data-role="equivalente">
+          <div class="d-flex" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <div>
+              <strong id="nome-${p.sku_bipado}">${p.nome_equivalente}</strong>
+              <span id="sku-${p.sku_bipado}" class="badge">${p.sku_bipado}</span>
+              <span id="tipo-${p.sku_bipado}" class="badge">Equivalente</span>
+            </div>
+            <div class="small" style="font-size:.85rem; color:#6b7280;">
+              Bipado: <strong id="bipado-${p.sku_bipado}">${p.bipados}</strong> /
+              Total: <strong id="total-${p.sku_bipado}">${comp.unidades_totais}</strong>
+              (<span id="percent-${p.sku_bipado}">${porcentoEquiv}</span>%)
+            </div>
+          </div>
 
-  });
+          <div id="progressWrap-${p.sku_bipado}" class="progress"
+               style="height:10px; background:#e5e7eb; border-radius:6px; overflow:hidden; margin:8px 0;">
+            <div id="progressFill-${p.sku_bipado}" class="progress-bar" role="progressbar"
+                 style="width:${porcentoEquiv}%; background:#3b82f6; height:10px;"
+                 aria-valuenow="${p.bipados}" aria-valuemin="0"
+                 aria-valuemax="${comp.unidades_totais}"></div>
+          </div>
 
-  // Mostra o modal
+          <div class="controls" style="display:flex; align-items:center; gap:8px;">
+            <button id="menos-${p.sku_bipado}" onclick="removeUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">−</button>
+            <input id="quantidade-${p.sku_bipado}" type="number" value="${p.bipados}" min="0" step="1" style="width:100px;">
+            <button id="mais-${p.sku_bipado}" onclick="addUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">+</button>
+
+            <div class="last-action-wrap">
+              <button id="excluir-${p.sku_bipado}" class="btn-icon"
+                      aria-label="Excluir equivalente"
+                      title="Excluir equivalente"
+                      data-sku-original="${sku}"
+                      data-sku-equivalente="${p.sku_bipado}"
+                      data-id-tiny="${p.id_tiny_equivalente}"
+                      onclick="excluirEquivalente(this)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M9 3h6a1 1 0 0 1 1 1v1h4v2H4V5h4V4a1 1 0 0 1 1-1Zm2 5h2v11h-2V8Zm-4 0h2v11H7V8Zm8 0h2v11h-2V8Z"/>
+                </svg>
+              </button>
+
+              <span class="status">
+                Última ação: <strong id="status-${p.sku_bipado}">—</strong>
+              </span>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
+  } catch (err) {
+    console.error(err);
+    notify.error('Falha ao carregar informações do produto.');
+    fecharModal();
+  }
   document.getElementById('modal-editar-produto').style.display = 'block';
-
-  // Evita o scroll de fundo (opcional)
-  document.body.style.overflow = 'hidden';
+  // remove o overlay de loading, se ainda existir
+  document.getElementById('modal-edit-loading')?.remove();
 }
 
 async function excluirEquivalente(obj) {
@@ -1839,6 +1975,7 @@ async function salvarAlteracoesConfirmacaoGerente() {
 function fecharModal() {
   document.getElementById('modal-editar-produto').style.display = 'none';
   document.body.style.overflow = '';
+  window.pauseAutoRefresh = false;
 }
 
 // Fecha clicando fora

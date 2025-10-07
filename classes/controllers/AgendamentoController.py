@@ -5,7 +5,15 @@ from .DatabaseController import DatabaseController
 from datetime import datetime
 import time, json
 from base_jp_lab import Caller
-from uuid import uuid4
+import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+    )
 
 class AgendamentoController:
     def __init__(self, db_controller:DatabaseController = None, caller_obj:Caller = None):
@@ -21,9 +29,6 @@ class AgendamentoController:
 
     def insert_agendamento(self, id_bd:int = 0, id_agend_ml:str = '', id_tipo:int = 0, empresa:int = 0, id_mktp:int = 0, colaborador = '', entrada:datetime = None, centro_distribuicao:str = ''):
         self.agendamentos.append(Agendamento(id_bd, id_agend_ml, id_tipo, empresa, id_mktp, colaborador, entrada, centro_distribuicao))
-
-    def insert_agendamento_in_bd(self, agendamento:Agendamento = None):
-        self.db_controller.insert_agendamento_in_bd(agendamento.to_tuple())
 
     def search_agendamento(self, att_name:str = '', att_value:str = ''):
         return next((i for i in self.agendamentos if str(getattr(i, att_name)) == att_value), None)
@@ -58,8 +63,9 @@ class AgendamentoController:
                         unidades_de_kits:int = 0,
                         estoque_tiny:int = 0,
                         localizacao:str = '',
-                        estoque_error_flag:str = ''):
-        composicao = Composicao(id_bd=id_bd, fk_id_prod=fk_id_prod, nome=nome, sku=sku, prod_sku=produto.sku, id_tiny=id_tiny, gtin=gtin, prod_gtin=produto.gtin, unidades_por_kit=unidades_por_kit, unidades_de_kits=unidades_de_kits, estoque_tiny=estoque_tiny, localizacao=localizacao, estoque_error_flag=estoque_error_flag)
+                        estoque_error_flag:str = '',
+                        imagem_url:str = ''):
+        composicao = Composicao(id_bd=id_bd, fk_id_prod=fk_id_prod, nome=nome, sku=sku, prod_sku=produto.sku, id_tiny=id_tiny, gtin=gtin, prod_gtin=produto.gtin, unidades_por_kit=unidades_por_kit, unidades_de_kits=unidades_de_kits, estoque_tiny=estoque_tiny, localizacao=localizacao, estoque_error_flag=estoque_error_flag, imagem_url=imagem_url)        
         produto.insert_composicao(composicao)
 
     def insert_composicao_in_bd(self, agendamento:Agendamento = None):
@@ -83,7 +89,7 @@ class AgendamentoController:
                                     empresa: int, 
                                     id_mktp: int,
                                     colaborador: str,
-                                    centro_distribuicao: None) -> Agendamento:
+                                    centro_distribuicao: Optional[str] = None) -> Agendamento:
         """Create complete Agendamento with Produtos from PDF"""
         try:
             # Create base agendamento
@@ -145,7 +151,9 @@ class AgendamentoController:
 
             # Parse genérico (detecta extensão)
             rows = SpreadsheetService.parse_spreadsheet_to_dict(excel_path)
-            print(">>> DEBUG primeira linha:", rows[0])   # DEBUG
+            if rows:
+                logger.debug(">>> primeira linha: %s", rows[0])
+
             for row in rows:
                 # --- fluxo Excel (.xlsx/.xls) ---
                 if 'sku_variacao' in row:
@@ -246,7 +254,9 @@ class AgendamentoController:
                                         unidades_de_kits=produto.unidades,
                                         estoque_tiny=comp_bd[8],
                                         localizacao=comp_bd[9],
-                                        estoque_error_flag=comp_bd[10])
+                                        estoque_error_flag=comp_bd[10],
+                                        imagem_url=(comp_bd[11] if len(comp_bd) > 11 else '')
+                                        )
                     
     def create_agendamento_for_alteracao(self):
         db_resp = self.db_controller.get_all_agendamentos_in_alteracoes()
@@ -255,7 +265,7 @@ class AgendamentoController:
             agendamento = self.get_last_made_agendamento()
 
             produtos = self.get_produtos_from_alteracoes(agendamento)
-            print(produtos)
+            logger.debug("Produtos em alteração: %s", produtos)
             for prod_bd in produtos:
                 self.insert_produto(agendamento=agendamento, 
                                     id_bd=prod_bd[0],
@@ -281,7 +291,9 @@ class AgendamentoController:
                                         unidades_por_kit=comp_bd[6],
                                         unidades_de_kits=produto.unidades,
                                         estoque_tiny=comp_bd[8],
-                                        estoque_error_flag=comp_bd[9])
+                                        estoque_error_flag=comp_bd[9],
+                                        imagem_url=(comp_bd[11] if len(comp_bd) > 11 else '')
+                                        )
                     
     def create_agendamento_for_compras(self):
         db_resp = self.db_controller.get_all_agendamentos_in_compras()
@@ -314,7 +326,9 @@ class AgendamentoController:
                                         unidades_por_kit=comp_bd[6],
                                         unidades_de_kits=produto.unidades,
                                         estoque_tiny=comp_bd[8],
-                                        estoque_error_flag=comp_bd[9])
+                                        estoque_error_flag=comp_bd[9],
+                                        imagem_url=(comp_bd[11] if len(comp_bd) > 11 else '')
+                                        )
                     
     def create_joined_agendamento(self):
         join_agend = JoinedAgendamento()
@@ -346,78 +360,136 @@ class AgendamentoController:
         return self.db_controller.get_composicao_from_compras(produto.id_bd)
 
     def get_last_made_agendamento(self) -> Agendamento:
+        if not self.agendamentos:
+            raise IndexError("Nenhum agendamento carregado em memória.")
         return self.agendamentos[-1]
-    
+
     def get_last_made_agendamento_in_bd(self):
         return self.db_controller.get_last_agendamento()
 
     def get_agendamento_by_id(self, agendamento:Agendamento = None):
         return self.db_controller.get_agendamento_by_bd_id(agendamento.id_bd)
 
+    def _get_tiny_image_by_id(self, id_tiny: str) -> str:
+        """Retorna a URL da primeira imagem (anexo) do produto Tiny, ou ''."""
+        if not id_tiny:
+            return ""
+        resp_details = self.caller.make_call(f"produtos/{id_tiny}")
+        time.sleep(1.25)
+
+        # DEBUG
+        logger.debug("[IMG] detalhes(%s) tipo: %s", id_tiny, type(resp_details).__name__)
+        data = resp_details.get("produto", resp_details) if isinstance(resp_details, dict) else {}
+        anexos = (data or {}).get("anexos") or []
+        logger.debug("[IMG] anexos (1º): %s", anexos[:1])  # só o primeiro p/ não poluir
+
+        for ax in anexos:
+            url = (ax or {}).get("url") or ""
+            if url:
+                return url
+        return ""
+
     def get_prod_data_tiny(self, agendamento:Agendamento = None):
         for produto in agendamento.produtos:
-            # Faz a chamada à API
             resp = self.caller.make_call('produtos', params_add={'codigo': produto.sku})
             time.sleep(1.25)
 
-            # --- CORREÇÃO INÍCIO ---
-            # Verifica se a resposta é um dicionário e se contém a chave 'itens'
+            # DEBUG
+            if isinstance(resp, dict):
+                logger.debug("[TINY] produtos?codigo=%r → tipo %s", produto.sku, type(resp).__name__)
+                logger.debug("[TINY] keys: %s", list(resp.keys()))
+
             if isinstance(resp, dict) and 'itens' in resp:
-                itens = resp['itens']
-                if len(itens) == 1 : 
-                    produto.set_gtin(itens[0].get('gtin'))
-                    produto.set_id_tiny(itens[0].get('id'))
-                    produto.set_is_kit(itens[0].get('tipo'))
+                itens = resp['itens'] or []
+                alvo = None
+
+                if len(itens) == 1:
+                    alvo = itens[0]
                 elif len(itens) > 1:
-                    item_ativo = next((i for i in itens if i.get('situacao') == 'A'), None)
-                    if item_ativo is not None:
-                        produto.set_gtin(item_ativo.get('gtin'))
-                        produto.set_id_tiny(item_ativo.get('id'))
-                        produto.set_is_kit(item_ativo.get('tipo'))
+                    alvo = next((i for i in itens if i.get('situacao') == 'A'), itens[0])
+
+                if alvo:
+                    # setar campos básicos
+                    produto.set_gtin(alvo.get('gtin'))
+                    produto.set_id_tiny(alvo.get('id'))
+                    produto.set_is_kit(alvo.get('tipo'))
+
+                    logger.debug("[TINY] itens.len: %s", len(resp.get('itens', [])))
+
+                    # 🚀 NOVO: buscar imagem pelo id_tiny e setar no produto
+                    try:
+                        tried_fetch = False
+                        img_url = None
+                        if not getattr(produto, "imagem_url", None):
+                            tried_fetch = True
+                            img_url = self._get_tiny_image_by_id(produto.id_tiny)
+
+                        if img_url:
+                            if hasattr(produto, "set_imagem_url"):
+                                produto.set_imagem_url(img_url)
+                            else:
+                                produto.imagem_url = img_url
+                            logger.debug("[IMG] URL definida no produto: %s", img_url)
+                        else:
+                            if tried_fetch:
+                                logger.info("[IMG] Sem anexo/imagem no Tiny para %s (id %s)", produto.sku, produto.id_tiny)
+                            else:
+                                logger.debug("[IMG] Já havia imagem para %s; não buscou.", produto.sku)
+
+                    except Exception as e:
+                        logger.error("[IMG] Falha ao obter imagem para %s: %s", produto.sku, e)
+                if not alvo:
+                    logger.info("[TINY] SKU %s não encontrado/ativo", produto.sku)
+                    continue
             else:
-                # Se a chamada falhou, loga um aviso e continua para o próximo produto
-                print(f"AVISO: Falha ao buscar dados do produto com SKU {produto.sku} no Tiny. Resposta: {resp}")
-            # --- CORREÇÃO FIM ---
+                logger.warning("[TINY] Resposta inesperada para produtos?codigo=%s: %s", produto.sku, resp)
 
-
-    def get_comp_tiny(self, agendamento:Agendamento = None):
-        for produto in agendamento.produtos:
-            if produto.is_kit:
-                resp = self.caller.make_call(f'produtos/{produto.id_tiny}/kit')
-                time.sleep(1.25)
-                for r_comp in resp:
-                    self.insert_composicao(produto, fk_id_prod=produto.id_bd, nome=r_comp['produto']['descricao'], sku=r_comp['produto']['sku'], id_tiny=r_comp['produto']['id'], unidades_por_kit=r_comp['quantidade'], unidades_de_kits=produto.unidades)
-            else:
-                self.insert_composicao(produto, 0, produto.id_bd, produto.nome, produto.sku, produto.id_tiny, produto.gtin, 1, produto.unidades, 0, '')
-
-
-    def get_comp_data_tiny(self, agendamento:Agendamento = None):
+                
+    def get_comp_data_tiny(self, agendamento: Agendamento = None):
         composicoes_dict = self.get_all_composicoes_grouped(agendamento)
         for id_tiny in composicoes_dict:
             resp = self.caller.make_call(f'produtos/{id_tiny}')
             time.sleep(1.25)
-            
-            # --- CORREÇÃO INÍCIO ---
-            # Verifica se a resposta da API foi bem-sucedida (é um dicionário)
+
             if not isinstance(resp, dict):
-                print(f"AVISO: Falha ao buscar dados da composição com id_tiny {id_tiny}. Resposta: {resp}")
-                # Pula para a próxima iteração do loop
+                logger.warning("AVISO: Falha ao buscar dados da composição com id_tiny %s. Resposta: %s", id_tiny, resp)
                 continue
 
-            gtin_value = resp.get('gtin')
-            estoque_info = resp.get('estoque')
+            data = resp.get('produto', resp)
 
-            # Aplica os valores para todas as composições com o mesmo id_tiny
+            gtin_value   = (data or {}).get('gtin')
+            estoque_info = (data or {}).get('estoque')
+
+            # 🔥 NOVO: pega a 1ª imagem dos anexos (se houver)
+            imagem_url = ""
+            try:
+                anexos = (data or {}).get("anexos") or []
+                for ax in anexos:
+                    url = (ax or {}).get("url") or ""
+                    if url:
+                        imagem_url = url
+                        break
+            except Exception as e:
+                logger.debug("[COMP IMG] Falha ao ler anexos para id_tiny %s: %s", id_tiny, e)
+
+            # aplica em TODAS as comps com o mesmo id_tiny
             for composicao in composicoes_dict[id_tiny]:
                 composicao.set_gtin(gtin_value if gtin_value is not None else '')
 
-                if estoque_info:
-                    composicao.set_estoque_tiny(estoque_info.get('quantidade', 0))
-                    composicao.set_localizacao(estoque_info.get('localizacao', ''))
+                if estoque_info and isinstance(estoque_info, dict):
+                    composicao.set_estoque_tiny(estoque_info.get('quantidade', 0) or 0)
+                    composicao.set_localizacao(estoque_info.get('localizacao', '') or '')
                 else:
                     composicao.set_estoque_tiny(0)
                     composicao.set_localizacao('Indefinido')
-            # --- CORREÇÃO FIM ---
+
+                # 🔥 NOVO: guardar a URL da imagem na composição (para ir ao INSERT)
+                if imagem_url:
+                    if hasattr(composicao, "set_imagem_url"):
+                        composicao.set_imagem_url(imagem_url)
+                    else:
+                        # fallback seguro caso não tenha setter no model
+                        composicao.imagem_url = imagem_url
 
     def set_id_bd_for_all(self, agendamento:Agendamento = None, last_id_agend:int = 0):
         agendamento.set_id_bd(last_id_agend)
@@ -443,7 +515,7 @@ class AgendamentoController:
     def return_all_composicoes_from_produto(self, produto:Produto = None):
         return self.db_controller.get_all_composicoes_from_produto(produto.id_bd)
 
-    def return_comp_grouped(self, agendamento:Agendamento = None) -> list[Composicao]:
+    def return_comp_grouped(self, agendamento: Agendamento = None) -> list[JoinedComposicao]:
         composicoes_dict = {}
         
         for produto in agendamento.produtos:
@@ -474,7 +546,7 @@ class AgendamentoController:
             i.set_estoque_error_flag()
 
     def update_empresa_colaborador_bd(self, agendamento:Agendamento = None):
-        self.db_controller.update_empresa_colaborador_agend(agendamento.id_bd, agendamento.empresa, agendamento.colaborador)
+        self.db_controller.update_empresa_colaborador_agend(agendamento.id_bd, agendamento.id_mktp, agendamento.empresa, agendamento.colaborador)
     
 
     def update_agendamento(self, agendamento:Agendamento = None):
@@ -534,7 +606,15 @@ class AgendamentoController:
         return self.db_controller.test_connection()
     
     
-    def update_pdf_agendamento(self, id_bd: int, colaborador: str, empresa: int, id_mktp: int, id_tipo: int, pdf_path: str, new_id_agend_ml: str, centro_distribuicao: None):
+    def update_pdf_agendamento(self, 
+                               id_bd: int, 
+                               colaborador: str, 
+                               empresa: int, 
+                               id_mktp: int, 
+                               id_tipo: int, 
+                               pdf_path: str, 
+                               new_id_agend_ml: str, 
+                               centro_distribuicao: Optional[str] = None):
         try:
             # 1) carrega todos os agendamentos do DB em memória
             self.create_agendamento_from_bd_data()
@@ -608,6 +688,111 @@ class AgendamentoController:
         except Exception as e:
             return False, f"Erro ao atualizar agendamento: {str(e)}"
 
+    def get_comp_tiny(self, agendamento: Agendamento = None):
+        """
+        Busca as composições (kits) dos produtos do agendamento no Tiny.
+        Tenta /produtos/{id}/kit; se vier vazio, faz fallback para /produtos/{id}
+        procurando por 'composicoes' / 'estrutura' / 'componentes'.
+        """
+        for produto in agendamento.produtos:
+            # Se NÃO for kit, cria composição simples (1x o próprio produto)
+            if not getattr(produto, "is_kit", False):
+                self.insert_composicao(
+                    produto,
+                    fk_id_prod=produto.id_bd,
+                    nome=produto.nome,
+                    sku=produto.sku,
+                    id_tiny=produto.id_tiny,
+                    gtin=produto.gtin,
+                    unidades_por_kit=1,
+                    unidades_de_kits=produto.unidades
+                )
+                continue
+
+            itens_norm = []
+
+            # 1) Tenta endpoint oficial de kit
+            try:
+                resp_kit = self.caller.make_call(f"produtos/{produto.id_tiny}/kit")
+                time.sleep(1.25)
+                if isinstance(resp_kit, list):
+                    itens_norm = resp_kit
+                elif isinstance(resp_kit, dict) and isinstance(resp_kit.get("itens"), list):
+                    itens_norm = resp_kit["itens"]
+            except Exception as e:
+                logger.warning("[KIT] Falha em /kit para %s: %s", produto.sku, e)
+
+            # 2) Fallback: pega do detalhe do produto
+            if not itens_norm:
+                try:
+                    resp_det = self.caller.make_call(f"produtos/{produto.id_tiny}")
+                    time.sleep(1.25)
+                    data = resp_det.get("produto", resp_det) if isinstance(resp_det, dict) else {}
+
+                    # a) Novo modelo: 'composicoes' -> [{ item_composicao: {..., quantidade } }]
+                    composicoes = data.get("composicoes") or []
+                    for comp in (composicoes if isinstance(composicoes, list) else []):
+                        item = (comp or {}).get("item_composicao") or {}
+                        if item:
+                            itens_norm.append({
+                                "produto": {
+                                    "id": item.get("id"),
+                                    "sku": item.get("codigo") or item.get("sku"),
+                                    "descricao": item.get("descricao"),
+                                },
+                                "quantidade": item.get("quantidade", 1),
+                            })
+
+                    # b) Algumas contas expõem como 'estrutura' ou 'componentes'
+                    if not itens_norm:
+                        estrutura = data.get("estrutura") or {}
+                        lista_estrutura = estrutura.get("itens") if isinstance(estrutura, dict) else None
+                        candidatos = (
+                            lista_estrutura if isinstance(lista_estrutura, list)
+                            else data.get("componentes") if isinstance(data.get("componentes"), list)
+                            else []
+                        )
+                        for it in candidatos:
+                            # normaliza os campos comuns
+                            prod_blob = it.get("produto", {}) if isinstance(it, dict) else {}
+                            itens_norm.append({
+                                "produto": {
+                                    "id": prod_blob.get("id"),
+                                    "sku": prod_blob.get("codigo") or prod_blob.get("sku"),
+                                    "descricao": prod_blob.get("descricao") or prod_blob.get("nome"),
+                                },
+                                "quantidade": it.get("quantidade", 1),
+                            })
+                except Exception as e:
+                    logger.warning("[KIT] Fallback detalhe falhou p/ %s: %s", produto.sku, e)
+
+            # 3) Se ainda assim não achou, loga e segue
+            if not itens_norm:
+                logger.info("[KIT] Nenhuma composição encontrada p/ %s (id %s).",
+                            produto.sku, produto.id_tiny)
+                continue
+
+            # 4) Cria as composições normalizadas
+            for r in itens_norm:
+                prod_r = r.get("produto") or {}
+                q = r.get("quantidade", 1)
+                try:
+                    q = int(float(q))
+                except Exception:
+                    q = 1
+
+                self.insert_composicao(
+                    produto,
+                    fk_id_prod=produto.id_bd,  # será corrigido depois por set_id_bd_for_composicoes()
+                    nome=prod_r.get("descricao", ""),
+                    sku=prod_r.get("sku", "") or prod_r.get("codigo", ""),
+                    id_tiny=str(prod_r.get("id") or ""),
+                    gtin="",  # GTIN e estoque virão no get_comp_data_tiny()
+                    unidades_por_kit=q,
+                    unidades_de_kits=produto.unidades
+                )
+
+            logger.debug("[KIT] %s → %d itens de composição.", produto.sku, len(produto.composicoes))
 
     def insert_agendamento_in_bd(self, agendamento: Agendamento):
         if self.db_controller.exists_agendamento_ml(agendamento.id_agend_ml):
@@ -640,12 +825,13 @@ class AgendamentoController:
                     time.sleep(1.25)
                     
                     # Etapa 3: Extrair a URL do primeiro anexo, se existir
-                    if resp_details.get('anexos') and len(resp_details['anexos']) > 0:
-                        print(resp_details)
-                        imagem_url = resp_details['anexos'][0].get('url', "")
+                    data = resp_details.get('produto', resp_details) if isinstance(resp_details, dict) else {}
+                    anexos = (data or {}).get('anexos') or []
+                    if anexos:
+                        imagem_url = (anexos[0] or {}).get('url', "")
         except Exception as e:
             # Em um ambiente de produção, seria ideal logar este erro
-            print(f"CONTROLADOR: Erro ao buscar imagem para o SKU {sku}: {e}")
+            logger.exception("Erro ao buscar imagem para SKU %s", sku)
             return "" # Retorna vazio em caso de qualquer erro
             
         return imagem_url
@@ -658,7 +844,7 @@ class AgendamentoController:
             self.db_controller.delete_agendamento_completo(id_agend_bd)
             return True
         except Exception as e:
-            print(f"Erro ao excluir agendamento completo (ID: {id_agend_bd}): {e}")
+            logger.exception("Erro ao excluir agendamento completo (ID: %s)", id_agend_bd)
             return False
     
     # --- EXPEDIÇÃO: iniciar/finalizar ---

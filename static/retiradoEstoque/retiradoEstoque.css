@@ -345,3 +345,118 @@ body {
 .controls .btn-icon:hover {
   background: #fff1f1;
 }
+
+/* === LOADER / SKELETON === */
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(0,0,0,.12);
+  border-left-color: currentColor;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  margin: 0 auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.skeleton {
+  background: linear-gradient(90deg, rgba(0,0,0,.06) 25%, rgba(0,0,0,.12) 37%, rgba(0,0,0,.06) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position:   0% 0; }
+}
+.img-skeleton {
+  width: 120px;
+  height: 120px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* === BOTÕES ICONIZADOS (lápis e +) === */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  transition: transform .06s ease, box-shadow .1s ease, background .2s ease;
+}
+.btn-icon:hover { box-shadow: 0 4px 10px rgba(0,0,0,.08); transform: translateY(-1px); }
+.btn-icon:active { transform: translateY(0); }
+
+.btn-pencil { border-color: #94a3b8; }
+.btn-pencil:hover { background: #f1f5f9; }
+
+.btn-add {
+  background: #16a34a;
+  color: #fff;
+  border-color: #16a34a;
+}
+.btn-add:hover {
+  background: #15803d;
+  border-color: #15803d;
+}
+.btn-icon svg {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+/* overlay "Carregando..." dentro de modais */
+.modal .loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,.7);
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+/* garante que o modal fique por cima do backdrop do Bootstrap */
+#modal-equivalente { z-index: 1085; }
+.modal-backdrop.show { z-index: 1080; }
+
+/* overlay de confirmação dentro do modal */
+#modal-equivalente .eq-confirm-overlay{
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  border-radius: .5rem;
+  padding: 16px;
+  overflow: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,.2);
+}
+
+/* garante que o overlay absoluto “ancore” no content do modal */
+#modal-equivalente .modal-content {
+  position: relative; /* novo */
+}
+
+/* overlay por cima de QUALQUER coisa do modal (inclusive .modal-actions) */
+#modal-equivalente .eq-confirm-overlay{
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  border-radius: .5rem;
+  padding: 16px;
+  overflow: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,.2);
+  z-index: 5;           /* novo: fica acima da .modal-actions (z-index:1) */
+  pointer-events: auto; /* explícito */
+}
+
+/* quando a confirmação estiver aberta, esconda as ações do modal de “Adicionar” */
+#modal-equivalente .modal-content.confirming .modal-actions {
+  display: none; /* novo */
+}

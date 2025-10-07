@@ -7,3 +7,8 @@ uploads
 mapa_diretorio.ini
 mapa_conteudo.ini
 gerar_mapa_diretorio.py
+Disfuncional_Com_Merge.ini
+Funcional_Sem_Merge.ini
+.dirignore
+migrations
+patch

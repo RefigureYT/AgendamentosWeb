@@ -87,20 +87,28 @@
               {{ composicao.comp_origem[0].nome }}
             </span>
 
-            <!-- Editar (lápis) -->
-            <div id="editarProdutoComp-id[{{ composicao.sku }}]"
-                 onclick="editarProdutoCompLapis('{{ composicao.sku }}')"
-                 style="margin-left: 70px; cursor: pointer;">✏️</div>
 
-            <!-- Adicionar equivalente (+) -->
-            <div id="btnEquivalente-{{ composicao.sku }}"
-                 onclick="adicionarEquivalente('{{ composicao.sku }}');"
-                 style="width: 25px; height: 25px; font-size: 40px; color: red; margin-top: -40px; cursor: pointer;">+</div>
+            <div class="sku-actions">
+              <button class="btn-icon btn-pencil" type="button" aria-label="Editar produto"
+                      onclick="editarProdutoCompLapis('{{ composicao.sku }}')">
+                <!-- ícone lápis (SVG) -->
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 20h9"/>
+                  <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+                </svg>
+              </button>
 
-            <!-- Campo de equivalente (toggle) -->
-            <div id="equivalente-{{ composicao.sku }}" class="input-equivalente-off"
-                 style="width: 300px; height: 30px; border: 2px solid red;">
-              <input id="inputEquivalente-{{ composicao.sku }}" type="text">
+              <button id="btnEquivalente-{{ composicao.sku }}"
+                      class="btn-icon btn-add" type="button" aria-label="Adicionar equivalente"
+                      onclick="adicionarEquivalente('{{ composicao.sku }}')">
+
+                <!-- ícone plus (SVG) -->
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              </button>
             </div>
 
             <div class="d-flex align-items-center gap-3">
@@ -157,14 +165,29 @@
     </div>
   </div>
 
+  <!-- Modal: adicionar equivalente -->
+  <div id="modal-equivalente" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="tituloModalEquivalente">
+      <h2 id="tituloModalEquivalente" class="titulo-vermelho">Adicionar equivalente</h2>
+
+      <div class="info-box" style="margin-bottom:12px;">
+        <p>SKU original: <strong id="eq-sku-master">—</strong></p>
+        <p class="text-muted" style="margin:-6px 0 8px 0;font-size:.9rem">
+          Bipe o SKU/GTIN do produto que será usado como equivalente.
+        </p>
+        <input id="eq-input" type="text" class="form-control" placeholder="Bipe aqui o SKU/GTIN">
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-outline" onclick="fecharModalEquivalente()">Cancelar</button>
+        <button type="button" class="btn btn-primary" onclick="confirmarModalEquivalente()">Adicionar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Overlay de erro da busca de equivalente (usado pelo JS) -->
   <div id="erroBuscaEquivalenteDiv" class="input-equivalente-off"
        style="position: fixed; border: 1px solid red; width: 100px; height: 100px;"></div>
-
-  <!-- Painel de confirmação do equivalente (substitui modal bootstrap) -->
-  <div id="confirmaEquivalente" class="input-equivalente-off"
-       style="border: 3px solid red; width: 500px; height: 650px; position: fixed; top: 25%; left: 40%; background-color: white;">
-  </div>
 </div>
 
 <!-- Dados para o JS -->

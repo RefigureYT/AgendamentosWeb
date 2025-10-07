@@ -24,6 +24,7 @@ _TINY_BASE = "https://api.tiny.com.br/public-api/v3"  # segue seu padrão
 _mov_queue: "queue.Queue[dict]" = queue.Queue()
 _mov_status: dict[str, dict] = {}
 _mov_worker_started = False
+_status_lock = threading.Lock()
 
 # Configuração de acesso ao MySQL
 _db_config = {
@@ -55,7 +56,8 @@ def _start_estoque_worker_once():
             print("[estoque-worker] Task bruta:", task)
 
             try:
-                _mov_status[task_id]["status"] = "processando"
+                with _status_lock:
+                    _mov_status[task_id]["status"] = "processando"
 
                 id_produto: int = task["id_produto"]
                 id_deposito: int = task["id_deposito"]
@@ -76,15 +78,16 @@ def _start_estoque_worker_once():
 
                 current_token = token
                 attempt_429 = 0
+                attempt_5xx = 0
                 did_swap_token = False
 
                 print(f"[estoque-worker:{task_id}] url={url}")
                 print(f"[estoque-worker:{task_id}] deposito={id_deposito} produto={id_produto} qtd={quantidade_abs} tipo={tipo_api}")
-                print(f"[estoque-worker:{task_id}] token(recebido)={current_token[:5]}...{current_token[-5:] if len(current_token)>5 else current_token} (len={len(current_token)})")
+                print(f"[estoque-worker:{task_id}] token recebido (len={len(current_token)})")
 
                 while True:
                     auth_header = _normalize_bearer(current_token)
-                    print(f"[estoque-worker:{task_id}] Authorization header=Bearer <{len(current_token)} chars> (prefix ok={auth_header.lower().startswith('bearer ')})")
+                    print(f"[estoque-worker:{task_id}] Authorization header presente (len={len(current_token)})")
 
                     headers = {
                         "Authorization": auth_header,
@@ -168,6 +171,26 @@ def _start_estoque_worker_once():
                                 "detail": "Rate limit persistente; backoff máximo atingido."
                             }
                             break
+                        time.sleep(wait_s)
+                        continue
+
+                    # 5xx -> retry com backoff simples + jitter
+                    if 500 <= r.status_code < 600:
+                        waits = [2, 5, 10]  # segundos base
+                        if attempt_5xx >= len(waits):
+                            print(f"[estoque-worker:{task_id}] ❌ 5xx persistente; tentativas esgotadas.")
+                            with _status_lock:
+                                _mov_status[task_id]["status"] = "falhou"
+                                _mov_status[task_id]["error"] = {
+                                    "status_code": r.status_code,
+                                    "response": resp_json,
+                                    "detail": "Erros 5xx persistentes; tentativas esgotadas."
+                                }
+                            break
+                        import random, time
+                        wait_s = waits[attempt_5xx] + random.uniform(0, 0.5)
+                        print(f"[estoque-worker:{task_id}] 5xx recebido. Esperando {wait_s:.1f}s para retry (tentativa {attempt_5xx+1}/{len(waits)})")
+                        attempt_5xx += 1
                         time.sleep(wait_s)
                         continue
 
@@ -480,8 +503,8 @@ def api_equiv_add_unidades():
 
     if not id_agend or not sku_original or not sku_bipado:
         return jsonify(error="Campos 'id_agend', 'sku_original', 'sku_bipado' são obrigatórios"), 400
-    if quant == 0:
-        return jsonify(error="'quant' deve ser diferente de zero"), 400
+    if quant <= 0:
+        return jsonify(error="'quant' deve ser > 0"), 400
 
     upd_sql = """
         UPDATE agendamento_produto_bipagem_equivalentes
@@ -1017,14 +1040,21 @@ def tiny_produto_por_sku():
 # Helpers CORS
 # ---------------------------------------------------------------
 def _set_cors_headers(resp):
-    # Libere *apenas* o(s) origin(s) que você usa no front
-    origin = request.headers.get('Origin') or '*'
-    resp.headers['Access-Control-Allow-Origin'] = origin
-    resp.headers['Vary'] = 'Origin'
-    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    origin = request.headers.get('Origin')
+    if origin:
+        resp.headers['Access-Control-Allow-Origin'] = origin
+        resp.headers['Vary'] = 'Origin'
+        resp.headers['Access-Control-Allow-Credentials'] = 'true'
+    else:
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
     resp.headers['Access-Control-Allow-Headers'] = 'Authorization, Path, Content-Type'
     resp.headers['Access-Control-Max-Age'] = '600'
     return resp
+
+@bp_retirado.after_request
+def _retirado_after(resp):
+    return _set_cors_headers(resp)
 
 def _cors_error(msg, code):
     resp = make_response(jsonify(error=msg), code)
@@ -1126,16 +1156,17 @@ def transf_estoque():
         task_id = uuid.uuid4().hex
         print(f"[/transf-estoque] enfileirando task_id={task_id} deposito={id_deposito} produto={id_produto} qtd={quantidade} tipo={tipo_api}")
 
-        _mov_status[task_id] = {
-            "status": "enfileirado",
-            "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "params": {
-                "id_produto": id_produto,
-                "id_deposito": id_deposito,
-                "unidades": quantidade,
-                "tipo": tipo_api
+        with _status_lock:
+            _mov_status[task_id] = {
+                "status": "enfileirado",
+                "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "params": {
+                    "id_produto": id_produto,
+                    "id_deposito": id_deposito,
+                    "unidades": quantidade,
+                    "tipo": tipo_api
+                }
             }
-        }
         _mov_queue.put({
             "task_id": task_id,
             "id_produto": id_produto,
@@ -1169,7 +1200,8 @@ def transf_estoque_status(task_id):
         return resp
 
     print(f"[/transf-estoque/status] consulta status task_id={task_id}")
-    st = _mov_status.get(task_id)
+    with _status_lock:
+        st = _mov_status.get(task_id)
     if not st:
         print(f"[/transf-estoque/status] task não encontrada: {task_id}")
         return _cors_error("Task não encontrada", 404)
@@ -1270,11 +1302,12 @@ def estoque_mover():
 
             # 1) SAÍDA (de)
             task_id_s = uuid.uuid4().hex
-            _mov_status[task_id_s] = {
-                "status": "enfileirado",
-                "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "params": {"id_produto": id_produto, "id_deposito": dep_de, "unidades": unidades, "tipo": "S"}
-            }
+            with _status_lock:
+                _mov_status[task_id_s] = {
+                    "status": "enfileirado",
+                    "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "params": {"id_produto": id_produto, "id_deposito": dep_de, "unidades": unidades, "tipo": "S"}
+                }
             _mov_queue.put({
                 "task_id": task_id_s,
                 "id_produto": id_produto,
@@ -1288,11 +1321,12 @@ def estoque_mover():
 
             # 2) ENTRADA (para)
             task_id_e = uuid.uuid4().hex
-            _mov_status[task_id_e] = {
-                "status": "enfileirado",
-                "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "params": {"id_produto": id_produto, "id_deposito": dep_para, "unidades": unidades, "tipo": "E"}
-            }
+            with _status_lock:
+                _mov_status[task_id_e] = {
+                    "status": "enfileirado",
+                    "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "params": {"id_produto": id_produto, "id_deposito": dep_para, "unidades": unidades, "tipo": "E"}
+                }
             _mov_queue.put({
                 "task_id": task_id_e,
                 "id_produto": id_produto,
@@ -1627,4 +1661,89 @@ def tiny_composicao_auto():
 
     except Exception as e:
         app.logger.exception("Falha em /api/tiny/composicao-auto")
+        return jsonify(ok=False, error=str(e)), 500
+    
+@bp_retirado.get("/api/retirado/composicao/<int:id_comp>/imagem")
+def api_retirado_composicao_imagem(id_comp: int):
+    """
+    Retorna a URL da imagem de uma composição.
+    - 1º tenta ler do comp_agend.imagem_url_comp
+    - 2º se vazio, busca no Tiny pelo id_comp_tiny e persiste no BD
+    """
+    cfg = app.config
+    db = cfg["DB_CTRL"]         # DatabaseController
+    ag = cfg["AG_CTRL"]         # AgendamentoController (usa Caller do Tiny)
+
+    try:
+        rows = db.get_composicao_imagem_and_tiny_by_id(id_comp)
+        if not rows:
+            return jsonify(ok=False, url=""), 404
+
+        imagem_url, id_tiny = rows[0][0], rows[0][1]
+
+        # 1) Se já tem imagem no BD, retorna
+        if imagem_url and str(imagem_url).strip():
+            return jsonify(ok=True, url=imagem_url)
+
+        # 2) Fallback Tiny: busca 1º anexo e salva
+        if id_tiny:
+            try:
+                url = ag._get_tiny_image_by_id(str(id_tiny))
+                if url:
+                    db.update_composicao_imagem(id_comp, url)
+                    return jsonify(ok=True, url=url)
+            except Exception as e:
+                app.logger.warning(f"[IMG][{id_comp}] fallback Tiny falhou: {e}")
+
+        # 3) Sem imagem mesmo
+        return jsonify(ok=True, url="")
+
+    except Exception as e:
+        app.logger.warning(f"[IMG][{id_comp}] fallback Tiny falhou: {e}")
+        return jsonify(ok=False, error=str(e)), 500
+    
+@bp_retirado.get("/api/retirado/composicao/imagem")
+def api_retirado_composicao_imagem_by_ref():
+    fk_id_prod = request.args.get("fk_id_prod", type=int)
+    sku        = (request.args.get("sku") or "").strip()
+    id_tiny_q  = (request.args.get("id_tiny") or "").strip()
+    if not fk_id_prod:
+        return jsonify(ok=False, error="fk_id_prod é obrigatório"), 400
+
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT id_comp, imagem_url_comp, id_comp_tiny
+              FROM comp_agend
+             WHERE id_prod_comp = %s
+               AND (%s = '' OR sku_comp = %s)
+             ORDER BY id_comp DESC
+             LIMIT 1
+        """, (fk_id_prod, sku, sku))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+
+        if not row:
+            return jsonify(ok=False, url=""), 404
+
+        id_comp_db, imagem_url, id_tiny_db = row
+        if imagem_url and str(imagem_url).strip():
+            return jsonify(ok=True, url=imagem_url)
+
+        ag = app.config["AG_CTRL"]; db = app.config["DB_CTRL"]
+        id_tiny_final = str(id_tiny_db or id_tiny_q or "").strip()
+        if id_tiny_final:
+            try:
+                url = ag._get_tiny_image_by_id(id_tiny_final)
+                if url:
+                    db.update_composicao_imagem(id_comp_db, url)
+                    return jsonify(ok=True, url=url)
+            except Exception as e:
+                app.logger.warning(f"[IMG][fk={fk_id_prod} sku={sku}] fallback Tiny falhou: {e}")
+
+        return jsonify(ok=True, url="")
+    except Exception as e:
+        app.logger.exception("api_retirado_composicao_imagem_by_ref")
         return jsonify(ok=False, error=str(e)), 500

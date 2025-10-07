@@ -37,6 +37,18 @@ class DatabaseController:
             "UPDATE agendamento SET id_agend_ml = %s, id_tipo_agend = %s, empresa_agend = %s, id_mktp = %s, colaborador_agend = %s, centro_distribuicao = %s WHERE id_agend = %s;",
             (id_agend_ml, id_agend_tipo, empresa, id_mktp, colaborador, centro_distribuicao, id_agend_bd)
         )
+        
+    def get_composicao_imagem_and_tiny_by_id(self, id_comp: int):
+        return self.access.custom_select_query(
+            "SELECT imagem_url_comp, id_comp_tiny FROM comp_agend WHERE id_comp = %s LIMIT 1;",
+            (id_comp,)
+        )
+
+    def update_composicao_imagem(self, id_comp: int, url: str):
+        self.access.custom_i_u_query(
+            "UPDATE comp_agend SET imagem_url_comp = %s WHERE id_comp = %s;",
+            [(url, id_comp)]
+        )
 
     def update_quant_total_compras(self, id_comp:int = 0, quant:id = 0):
         self.access.custom_i_u_query("UPDATE compras_agend SET quant_comprar = quant_comprar - %s WHERE id_compra = %s;", [(quant, id_comp)])
