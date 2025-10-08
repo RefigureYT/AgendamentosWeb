@@ -251,62 +251,158 @@ body {
 }
 
 /* Modal Fechar Caixa - look & feel */
-.fechar-caixa .modal-header{
-  background: linear-gradient(135deg,#198754,#20c997);
-  color:#fff; border-bottom:none;
+.fechar-caixa .modal-header {
+  background: linear-gradient(135deg, #198754, #20c997);
+  color: #fff;
+  border-bottom: none;
 }
-.fechar-caixa .modal-content{ border:0; border-radius:18px; overflow:hidden; }
-.fechar-caixa .modal-body{ padding-top:1.25rem; }
 
-.fechar-caixa-options{
-  display:grid; gap:12px; grid-template-columns:repeat(2,1fr);
+.fechar-caixa .modal-content {
+  border: 0;
+  border-radius: 18px;
+  overflow: hidden;
 }
-@media (max-width: 576px){
-  .fechar-caixa-options{ grid-template-columns:1fr; }
+
+.fechar-caixa .modal-body {
+  padding-top: 1.25rem;
 }
-.fechar-caixa-option{
-  border:2px solid var(--bs-border-color);
-  border-radius:14px; padding:12px;
-  cursor:pointer; transition:all .15s ease-in-out;
-  user-select:none; background:#fff;
+
+.fechar-caixa-options {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, 1fr);
 }
-.fechar-caixa-option:hover{ transform:translateY(-1px); }
-.fechar-caixa-option.active{
-  border-color:var(--bs-success);
-  box-shadow:0 0 0 4px rgba(25,135,84,.12);
+
+@media (max-width: 576px) {
+  .fechar-caixa-options {
+    grid-template-columns: 1fr;
+  }
 }
-.fechar-caixa-option .title{ font-weight:600; }
-.fechar-caixa-option .desc{ font-size:.925rem; color:#6c757d; margin-top:2px; }
+
+.fechar-caixa-option {
+  border: 2px solid var(--bs-border-color);
+  border-radius: 14px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all .15s ease-in-out;
+  user-select: none;
+  background: #fff;
+}
+
+.fechar-caixa-option:hover {
+  transform: translateY(-1px);
+}
+
+.fechar-caixa-option.active {
+  border-color: var(--bs-success);
+  box-shadow: 0 0 0 4px rgba(25, 135, 84, .12);
+}
+
+.fechar-caixa-option .title {
+  font-weight: 600;
+}
+
+.fechar-caixa-option .desc {
+  font-size: .925rem;
+  color: #6c757d;
+  margin-top: 2px;
+}
 
 /* A11y: foco visível nas opções do Fechar Caixa */
-.fechar-caixa-option:focus-visible{
-  outline: 3px solid rgba(13,110,253,.35);
+.fechar-caixa-option:focus-visible {
+  outline: 3px solid rgba(13, 110, 253, .35);
   outline-offset: 2px;
 }
 
 /* Garantir contraste em itens concluídos */
 #lista-anuncios .produto-item.produto-concluido a,
-#lista-anuncios .produto-item.produto-concluido .btn{
-  color:#fff !important;
-  border-color: rgba(255,255,255,.35);
-}
-#lista-anuncios .produto-item.produto-concluido .btn:hover{
-  background: rgba(255,255,255,.08);
+#lista-anuncios .produto-item.produto-concluido .btn {
+  color: #fff !important;
+  border-color: rgba(255, 255, 255, .35);
 }
 
-@media (max-width: 768px){
-  #lista-anuncios{ max-height: 54vh; }
-  #caixas-container{ max-height: 32vh; }
+#lista-anuncios .produto-item.produto-concluido .btn:hover {
+  background: rgba(255, 255, 255, .08);
 }
+
+@media (max-width: 768px) {
+  #lista-anuncios {
+    max-height: 54vh;
+  }
+
+  #caixas-container {
+    max-height: 32vh;
+  }
+}
+
 /* Empilha imagem e lista no modal de confirmação em telas bem pequenas */
-@media (max-width: 576px){
-  .modal-main-layout{ flex-direction: column; }
-  .modal-image-container{ width:100%; }
+@media (max-width: 576px) {
+  .modal-main-layout {
+    flex-direction: column;
+  }
+
+  .modal-image-container {
+    width: 100%;
+  }
 }
 
-@media (prefers-reduced-motion: reduce){
-  .item-caixa-novo{ animation: none !important; }
-  .caixa-card, .add-new-box, .fechar-caixa-option{
+@media (prefers-reduced-motion: reduce) {
+  .item-caixa-novo {
+    animation: none !important;
+  }
+
+  .caixa-card,
+  .add-new-box,
+  .fechar-caixa-option {
     transition: none !important;
   }
+}
+
+/* Popover bonitinho */
+.popover-wide.popover {
+  max-width: 380px;
+}
+
+.product-popover .pp-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.product-popover img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.product-popover .meta {
+  font-size: .9rem;
+  line-height: 1.25;
+}
+
+.product-popover .k {
+  color: #6c757d;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* Ícones de info */
+#lista-anuncios .info-trigger,
+#modalConfirmeAnuncio .info-componente {
+  cursor: help;
+  opacity: .85;
+}
+
+#lista-anuncios .produto-item.produto-concluido .info-trigger {
+  color: #fff !important;
+  opacity: 1;
+}
+
+/* Deixa status com ícone e contador lado a lado */
+.componente-status {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
 }

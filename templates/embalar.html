@@ -94,11 +94,13 @@
             data-id-ml="{{ produto.id_ml }}"
             data-gtin="{{ produto.gtin }}"
             data-id-tiny="{{ produto.id_tiny }}"
-            data-unidades="{{ produto.unidades }}">
+            data-unidades="{{ produto.unidades }}"
+            data-nome="{{ produto.nome }}"
+            data-imagem-url="{{ produto.imagemUrl or '' }}">
           <div class="produto-info">{{ produto.nome }}</div>
           <div class="produto-meta">
             <span class="sku">{{ produto.sku }}</span>
-            <i class="bi bi-info-circle"></i>
+            <i class="bi bi-info-circle info-trigger" tabindex="0" aria-label="Detalhes do produto"></i>
             <span class="unidades">Unidades: {{ produto.unidades }}</span>
           </div>
         </li>
