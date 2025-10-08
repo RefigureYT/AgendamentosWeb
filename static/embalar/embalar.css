@@ -406,3 +406,13 @@ body {
   align-items: center;
   gap: .5rem;
 }
+
+/* Botão de reimpressão ao lado do SKU/etiqueta */
+#lista-anuncios .btn-reimprimir {
+  padding: 2px 8px;
+  line-height: 1;
+}
+
+#lista-anuncios .produto-item.produto-concluido .btn-reimprimir {
+  border-color: rgba(255, 255, 255, .5);
+}

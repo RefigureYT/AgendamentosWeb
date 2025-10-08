@@ -357,6 +357,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const isMercadoLivre = () =>
     Number.parseInt(idMktp ?? "0", 10) === 1 || /MERCADO\s*LIVRE/i.test(String(marketplace));
 
+  const isShopee = () => parseInt(idMktp, 10) === 3;
+  const isMLouShopee = () => [1, 3].includes(parseInt(idMktp, 10));
+
   function assertMLAllowedOrWarn() {
     if (isMercadoLivre()) return true;
     Swal.fire({
@@ -1163,6 +1166,20 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
       itemLi.dataset.sku = produtoData.id_ml; // Muda o SKU do item para a etiqueta
       skuSpan.textContent = produtoData.id_ml;
       skuSpan.classList.add("etiqueta");
+
+      // --- [REIMPRIMIR] injeta o botão assim que o produto é iniciado ---
+      if (isMLouShopee()) { // Mercado Livre ou Shopee
+        const meta = itemLi.querySelector(".produto-meta");
+        if (!meta.querySelector(".btn-reimprimir")) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn btn-sm btn-outline-secondary ms-2 btn-reimprimir";
+          btn.title = "Reimprimir etiquetas deste anúncio";
+          btn.innerHTML = '<i class="bi bi-printer"></i>';
+          // coloca o botão antes do contador de unidades
+          meta.insertBefore(btn, meta.querySelector(".unidades"));
+        }
+      }
     }
 
     unidadesSpan.textContent = `Bipados: ${produtoData.bipados}/${totalNec}`;
@@ -1190,6 +1207,33 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     }
     // A chamada para atualizarPainelEsquerdo() foi removida daqui.
   }
+
+  // --- [REIMPRIMIR] handler global (delegação) ---
+  document.getElementById("lista-anuncios").addEventListener("click", async (ev) => {
+    const btn = ev.target.closest(".btn-reimprimir");
+    if (!btn) return;
+
+    const li = btn.closest("li.produto-item");
+    const idMl = li?.dataset.idMl;
+    const produto = produtos.find(p => p.id_ml === idMl);
+    if (!produto) return;
+
+    const { value: qtdRaw } = await Swal.fire({
+      title: "Reimprimir etiquetas",
+      input: "number",
+      inputLabel: "Quantas etiquetas faltam?",
+      inputValue: 1,
+      inputAttributes: { min: 1, step: 1 },
+      showCancelButton: true,
+      confirmButtonText: "Imprimir",
+      cancelButtonText: "Cancelar"
+    });
+    if (!qtdRaw) return;
+
+    const qtd = Math.max(1, parseInt(qtdRaw, 10) || 1);
+
+    reimprimirEtiquetas(produto.sku, qtd); // o dispatcher já decide: ML, Shopee ou alerta "indisponível"
+  });
 
   inputSku.addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
@@ -1410,6 +1454,22 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     }
   }
 
+  function reimprimirEtiquetas(sku, qtd) {
+    const q = Number(qtd);
+    if (!Number.isFinite(q) || q <= 0) {
+      Swal.fire("Quantidade inválida", "Informe um número maior que zero.", "warning");
+      return;
+    }
+    switch (parseInt(idMktp, 10)) {
+      case 1: // Mercado Livre
+        return gerarEtiquetaMeLi(sku, q);
+      case 3: // Shopee
+        return gerarEtiquetaShopee(sku, q);
+      default:
+        Swal.fire("Reimpressão indisponível", "Este marketplace ainda não tem reimpressão.", "info");
+    }
+  }
+
   function gerarEtiquetaMeLi(sku, un = null) {
     const anuncio = produtos.find((p) => p.sku === sku);
     if (!anuncio) return;
@@ -1486,21 +1546,22 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     imprimirEtiqueta(zpl, "id");
   }
 
-  function gerarEtiquetaShopee(sku) {
+  function gerarEtiquetaShopee(sku, un = null) {
     const anuncio = produtos.find((p) => p.sku === sku);
     if (!anuncio) return;
 
     const nomeAnuncio = anuncio.nome;
     const etiqueta = anuncio.id_ml;
+    const unidadesTotais = un === null ? anuncio.unidades : Number(un);
 
     console.log("LOG: Gerando etiqueta Shopee para o SKU:", sku, anuncio);
 
     const zplConstructor = []; // Array para armazenar as etiquetas (cada índice será separado por quebra de linha "\n")
 
     console.log('anuncio:', anuncio);
-    console.log('Quantidade:', anuncio.unidades);
+    console.log('Quantidade:', unidadesTotais);
 
-    for (let i = 0; i < anuncio.unidades; i++) {
+    for (let i = 0; i < unidadesTotais; i++) {
       zplConstructor.push("^XA");
       zplConstructor.push("^CI28");
 
@@ -1535,9 +1596,8 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   inicializarPopoversDeImagem();
   await carregarCaixasSalvas();
   await buscarDadosEmbalagem(); // Busca inicial
-  const SYNC_MS = 2000; // em vez de 1000
-  // Para voltar o Refresh automático, basta descomentar essa linha
-  // const syncId = setInterval(buscarDadosEmbalagem, SYNC_MS);
+  const SYNC_MS = 1 * 60 * 1000; // 1 minuto  
+  const syncId = setInterval(buscarDadosEmbalagem, SYNC_MS);
   window.addEventListener('beforeunload', () => clearInterval(syncId));
 
 
@@ -1608,7 +1668,7 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
 
   function funcoesDisponiveis() {
     console.log('======= IDENTIFICAÇÃO =======');
-    console.log('gerarEtiquetaShopee(\"sku\");');
+    console.log('gerarEtiquetaShopee(\"sku\", \"un\");');
     console.log('gerarEtiquetaMeLi(\"sku\", \"un\");\n\n');
 
 
