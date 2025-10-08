@@ -214,16 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
   );
 
   console.log('Esse aqui é o resultado askdaldkajsdl >', resultado);
-
-  carregarGtinComposicoes();
 });
-
-function carregarGtinComposicoes() {
-  let composicoes = [];
-  let vistos = new Set();
-
-
-}
 
 // ─── busca estado no servidor e atualiza UI ─────────────────────
 async function carregarProgressoServer() {
@@ -231,7 +222,7 @@ async function carregarProgressoServer() {
     const resp = await fetch(`/api/bipados-total/${idAgend}`);
     if (!resp.ok) throw new Error(resp.statusText);
     const dados = await resp.json();
-    console.log('Kelvinhoooo >', dados);
+    // console.log('Kelvinhoooo >', dados);
     // const mapa = Object.fromEntries(dados.map(x => [x.sku, x.bipados]));
     const mapa = Object.fromEntries(dados.map(x => [x.sku_original, x.bipados_total]));
 
@@ -250,7 +241,6 @@ async function carregarProgressoServer() {
     console.error('Falha ao carregar progresso:', e);
   }
 }
-
 
 // ─── atualiza cores, barra e texto de um item ─────────────────────
 function atualizarUI(item, bip) {
@@ -271,7 +261,6 @@ function atualizarUI(item, bip) {
     barra.classList.replace('bg-success', 'bg-warning');
   }
 }
-
 
 // ─── separa e ordena pendentes/concluídos ─────────────────────
 function distribuirItens() {
@@ -301,7 +290,6 @@ function distribuirItens() {
   //   .forEach(el => concl.appendChild(el));
 }
 
-
 // ─── contador de tempo ─────────────────────
 function iniciarContadorTempo() {
   const tempoP = document.getElementById('tempoP');
@@ -323,7 +311,6 @@ function pararContadorTempo() {
   clearInterval(intervaloTempo);
 }
 
-
 // ─── envio de bipagem ─────────────────────
 async function biparProduto() {
   const skuEl = document.getElementById('skuInput');
@@ -334,7 +321,13 @@ async function biparProduto() {
 
   if (!sku || !Number.isFinite(qtd) || qtd <= 0) return;
 
-  const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(s) : s;
+
+  // usar em seletores CSS
+  const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+
+  // usar ao imprimir valores em HTML (Swal/innerHTML)
+  const escHtml = (s) => String(s ?? '')
+    .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
   const onlyDigits = (v) => String(v ?? '').replace(/\D+/g, '');
   const toNum = (v, def = 0) => {
     const n = Number(v);
@@ -346,21 +339,23 @@ async function biparProduto() {
 
   // 2) Se não achou, tenta mapear pelo SKU/GTIN das composições e ajustar para o SKU da composição
   if (!item) {
-    const raw = document.getElementById('js-data')?.dataset?.comps || '[]';
-    let produtos = [];
+    let produtos = _getCompsJson();
     try { produtos = JSON.parse(raw); } catch { }
 
     let foundComp = null;
-    outer:
-    for (const produto of produtos) {
-      const comps = Array.isArray(produto.composicoes) ? produto.composicoes : [];
-      for (const c of comps) {
-        if (String(c.sku ?? '').trim() === sku || (c.gtin && onlyDigits(c.gtin) === onlyDigits(sku))) {
-          foundComp = c;
-          break outer;
-        }
-      }
-    }
+    // outer:
+    // for (const produto of produtos) {
+    //   console.log(produto);
+    //   const comps = Array.isArray(produto.composicoes) ? produto.composicoes : [];
+    //   for (const c of comps) {
+    //     if (String(c.sku ?? '').trim() === sku || (c.gtin && onlyDigits(c.gtin) === onlyDigits(sku))) {
+    //       foundComp = c;
+    //       break outer;
+    //     }
+    //   }
+    // }
+    foundComp = produtos.find(prod => prod.composicoes.find(c => c.sku.toLowerCase().trim() === sku.toLowerCase().trim() || c.gtin === sku));
+
     if (foundComp) {
       sku = String(foundComp.sku ?? '').trim(); // ajusta p/ SKU real da composição
       item = document.querySelector(`.produto-item[data-sku="${esc(sku)}"]`);
@@ -407,6 +402,11 @@ async function biparProduto() {
     }
   }
 
+  if (!itemOriginal) {
+    Swal.fire({ icon: 'error', title: 'SKU não encontrado!', timer: 2500, showConfirmButton: false });
+    return;
+  }
+
   // 5) Valores do DOM (fallback local)
   let atualDom = toNum(itemOriginal?.dataset?.bipados, 0); // total já bipado (diretos + equivalentes)
   let totalDom = toNum(itemOriginal?.dataset?.total, 0);
@@ -440,7 +440,7 @@ async function biparProduto() {
     Swal.fire({
       icon: 'error',
       title: 'Total excedido!',
-      html: `Bipagem de <b>${qtd}</b> excede o total permitido para <b>${esc(skuOriginalParaValidar)}</b>.<br>
+      html: `Bipagem de <b>${qtd}</b> excede o total permitido para <b>${escHtml(skuOriginalParaValidar)}</b>.<br>
              Atual: <b>${atual}</b> • Total: <b>${total}</b>`,
       timer: 5000,
       showConfirmButton: false
@@ -634,7 +634,7 @@ async function getTinyToken(empresa, marketplace) {
     });
 
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
+      throw new Error(`HTTP ${resp.status} | ${resp.json}`);
     }
 
     const data = await resp.json();
@@ -777,6 +777,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') fecharModalEquivalente(true);
 });
 
+
 async function verificaAdicaoProdutoEquivalentePermitido(valorBipado) {
   const raw = document.getElementById("js-data").dataset.comps;
   const anunciosOriginais = JSON.parse(raw);
@@ -855,74 +856,171 @@ async function verificaAdicaoProdutoEquivalentePermitido(valorBipado) {
 }
 
 async function buscaProdutoEquivalente(valorBipado, token) {
+  const urlDefault = 'https://api.tiny.com.br/public-api/v3';
+  // const urlSku = urlDefault + `/produtos?codigo=${valorBipado}`; // Assumi que é um SKU
+  // const urlGtin = urlDefault + `/produtos?gtin=${valorBipado}`; // Assumi que é um GTIN/EAN
   const isLikelyGTIN = (v) => /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(v);
+  let result = null;
 
-  // regra que impede usar item do próprio agendamento como equivalente
   const permitidoAddEquivalente = await verificaAdicaoProdutoEquivalentePermitido(valorBipado);
+
   if (permitidoAddEquivalente !== null) {
-    if (permitidoAddEquivalente.result === 1 || permitidoAddEquivalente.result === 2) {
+    // messageBuscaEquivalenteTiny(permitidoAddEquivalente);
+    if (permitidoAddEquivalente.result === 1) {
       notify.error(permitidoAddEquivalente.message, { type: 'info', duration: 5000 });
-      return permitidoAddEquivalente.result; // 1 ou 2
+      result = 1;
+      console.log('Result para adição do bagulho equivalente >', result);
+      return result;
+    } else if (permitidoAddEquivalente.result === 2) {
+      notify.error(permitidoAddEquivalente.message, { type: 'info', duration: 5000 });
+      result = 2;
+      console.log('Result para adição do bagulho equivalente >', result);
+      return result;
+    } else {
+      console.log('Result para adição do bagulho equivalente > Não retornou nada aí vai voltar nulo');
+      return; // Não consigo imaginar que caso pode cair...
     }
-    return; // não deveria cair aqui, mas mantém o comportamento
   }
 
-  // helper para buscar no Tiny com tratamento único de erro e parse
-  const tinyFetch = async (qs) => {
-    const r = await fetch(`/api/tiny-proxy?${qs}`, {
-      method: 'GET',
-      headers: {
-        'Path': '/public-api/v3/produtos',
-        'Authorization': 'Bearer ' + token
-      }
-    });
-
-    // tenta ler uma vez, sem consumir o body original
-    const clone = r.clone();
-    let data = await clone.json().catch(() => null);
-
-    if (!r.ok) {
-      const fallbackText =
-        (data && data.detalhes && data.detalhes[0] && data.detalhes[0].mensagem) ||
-        (data && data.error) ||
-        await r.text().catch(() => '');
-      throw new Error(`Erro ${r.status}: ${fallbackText || 'Tiny retornou erro'}`);
-    }
-
-    // se o clone falhou em JSON (content-type inesperado), lê do original agora
-    if (!data) data = await r.json().catch(() => ({}));
-    return data;
-  };
-
   try {
+    // const tinySku = await fetch(urlSku, {
+    //   method: 'GET',
+    //   headers: {
+    //     'Authorization': `Bearer ${token}`
+    //   }
+    // });
+
+    // const data = await tinySku.json();
+
+    // Ex.: buscar produto pelo código (SKU)
+
     if (isLikelyGTIN(valorBipado)) {
-      // 1) Tenta por GTIN
-      const byGtin = await tinyFetch(`gtin=${encodeURIComponent(valorBipado)}`);
-      if (Array.isArray(byGtin?.itens) && byGtin.itens.length > 0) return byGtin;
+      // Se determinado como GTIN, tenta por GTIN
+      console.log('DETERMINADO COMO GTIN >', valorBipado);
 
-      // 2) Fallback por SKU
-      const bySku = await tinyFetch(`codigo=${encodeURIComponent(valorBipado)}`);
-      if (Array.isArray(bySku?.itens) && bySku.itens.length > 0) return bySku;
+      // BUSCA POR GTIN/EAN
+      const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}`, {
+        method: 'GET',
+        headers: {
+          'Path': '/public-api/v3/produtos',
+          'Authorization': 'Bearer ' + token
+        }
+      });
 
-      // nada encontrado
-      return 3;
-    } else {
-      // 1) Tenta por SKU
-      const bySku = await tinyFetch(`codigo=${encodeURIComponent(valorBipado)}`);
-      if (Array.isArray(bySku?.itens) && bySku.itens.length > 0) return bySku;
+      const dataGtin = await tentativaGtin.json();
+      console.log('Resultado por GTIN:', dataGtin);
 
-      // 2) Fallback por GTIN
-      const byGtin = await tinyFetch(`gtin=${encodeURIComponent(valorBipado)}`);
-      if (Array.isArray(byGtin?.itens) && byGtin.itens.length > 0) return byGtin;
+      if (dataGtin.itens.length === 0) {
+        console.log('NENHUM PRODUTO ENCONTRADO POR GTIN');
+        console.log('Tentando como SKU');
 
-      // nada encontrado
-      return 3;
+        // BUSCA POR SKU
+        const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}`;
+        const tentativaSku = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Path': '/public-api/v3/produtos',
+            'Authorization': 'Bearer ' + token
+          }
+        });
+        const dataSku = await tentativaSku.json();
+        console.log('RESULT POR SKU: ', dataSku);
+
+        if (dataSku.itens.length === 0) {
+          console.log('INFELIZMENTE NÃO FOI POSSÍVEL ENCONTRAR NENHUM PRODUTO NEM COM SKU NEM COM GTIN');
+          result = 3;
+          return result;
+        } else {
+          result = dataSku;
+        }
+      } else {
+        result = dataGtin;
+      }
+      return result;
+    }
+    else {
+      // Caso contrário faz como SKU primeiro
+
+      console.log('DETERMINADO COMO SKU >', valorBipado);
+
+      // BUSCA POR SKU
+      const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}`;
+      const tentativaSku = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Path': '/public-api/v3/produtos',
+          'Authorization': 'Bearer ' + token
+        }
+      });
+      const dataSku = await tentativaSku.json();
+      console.log('RESULT POR SKU: ', dataSku);
+
+      if (dataSku.itens.length === 0) {
+        console.log('NADA ENCONTRADO');
+        console.log('Tentando agora a pesquisa por GTIN/EAN');
+
+        // BUSCA POR GTIN/EAN
+        const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}`, {
+          method: 'GET',
+          headers: {
+            'Path': '/public-api/v3/produtos',
+            'Authorization': 'Bearer ' + token
+          }
+        });
+
+        console.log(tentativaGtin.status);
+
+        let data = null;
+        let text = null;
+
+        // Tenta JSON; se falhar, lê como texto
+        try {
+          data = await tentativaGtin.clone().json();
+        } catch {
+          text = await tentativaGtin.text();
+        }
+
+        if (!tentativaGtin.ok) {
+          // 4xx/5xx
+          const msg =
+            (data && data.detalhes && data.detalhes[0] && data.detalhes[0].mensagem) ||
+            (data && data.error) || // caso o seu proxy retorne {error: "..."}
+            text ||
+            'Erro ao consultar Tiny \nCOD Err: #j3uY3c6FC8Sd';
+
+          console.log(`Erro ${tentativaGtin.status}:`, msg);
+          throw new Error(`Erro ${tentativaGtin.status}:`, msg);
+        } else {
+          // Sucesso 2xx
+          console.log('OK:', data);
+        }
+
+
+        const dataGtin = await tentativaGtin.json();
+        console.log('Resultado por GTIN:', dataGtin);
+
+        if (dataGtin.itens.length === 0) {
+          console.log('INFELIZMENTE NÃO FOI POSSÍVEL ENCONTRAR NENHUM PRODUTO NEM COM SKU NEM COM GTIN');
+          result = 3;
+          return result;
+        } else {
+          result = dataGtin;
+        }
+      } else {
+        result = dataSku;
+      }
+
+      return result;
     }
   } catch (error) {
-    const msg = String(error || '');
-    // mantém tua convenção: 3 = “não encontrado / inválido”
-    if (msg.includes('400')) return 3;
-    notify.error(error, { type: 'info', duration: 5000 });
+    console.log(`Deu erro na requisição TINY com SKU: ${error}`);
+    const erro = error.toString();
+    if (erro.includes("400")) {
+      result = 3;
+      return result;
+    } else {
+      notify.error(error, { type: 'info', duration: 5000 })
+    }
   }
 }
 
@@ -998,13 +1096,15 @@ async function addDbEquivalente(sku, valorBipado) {
   // 1) Localiza o produto de referência (case-insensitive)
   let prodRef = null;
   for (const p of produtos) {
-    for (const c of (p.composicoes || [])) {
-      if (String(c.sku).toLowerCase() === String(sku).toLowerCase()) {
+    // console.log(p);
+    const composicoes = p.composicoes;
+    for (const c of composicoes) {
+      // console.log('>', c);
+      if (c.sku === sku) {
         prodRef = c;
         break;
       }
     }
-    if (prodRef) break;
   }
   if (!prodRef) {
     notify.error(`SKU de referência não encontrado: ${sku}`, { type: 'info', duration: 4000 });
@@ -1969,22 +2069,22 @@ async function verificarSeECaixaFechada(valorLido) {
 
 async function salvarAlteracoesConfirmacaoGerente() {
 
-  return true
+    return true
 }
 
 function fecharModal() {
-  document.getElementById('modal-editar-produto').style.display = 'none';
-  document.body.style.overflow = '';
-  window.pauseAutoRefresh = false;
+    document.getElementById('modal-editar-produto').style.display = 'none';
+    document.body.style.overflow = '';
+    window.pauseAutoRefresh = false;
 }
 
 // Fecha clicando fora
 window.addEventListener('click', (e) => {
-  const modal = document.getElementById('modal-editar-produto');
-  if (e.target === modal) fecharModal();
+    const modal = document.getElementById('modal-editar-produto');
+    if (e.target === modal) fecharModal();
 });
 
 // Fecha com ESC
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') fecharModal();
+    if (e.key === 'Escape') fecharModal();
 });

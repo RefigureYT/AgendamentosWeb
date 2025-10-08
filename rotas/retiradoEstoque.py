@@ -391,7 +391,6 @@ def api_bipar():
         app.logger.exception("Erro em api_bipar")
         return jsonify(error=str(e)), 500
 
-
 def normalize_gtin(value):
     if value is None:
         return None
@@ -671,7 +670,6 @@ def api_equiv_listar(id_agend):
     except Exception as e:
         app.logger.exception("Erro em /api/equiv/<id>")
         return jsonify(error=str(e)), 500
-
 
 @bp_retirado.route('/api/equiv/delete', methods=['DELETE'])
 def api_equiv_delete():
@@ -1077,7 +1075,6 @@ def _to_opt_str_first(v):
     s = _to_str_first(v).strip()
     return s if s else None
 
-
 @bp_retirado.route('/transf-estoque', methods=['POST', 'OPTIONS'])
 def transf_estoque():
     """
@@ -1473,7 +1470,6 @@ def tiny_produto_por_sku_interno():
         app.logger.exception("Falha ao consultar Tiny por SKU")
         return jsonify(ok=False, error=str(e)), 500
 
-
 @bp_retirado.route('/api/tiny/produto/<int:id_tiny>', methods=['GET'])
 def tiny_produto_por_id_interno(id_tiny: int):
     """
@@ -1492,7 +1488,6 @@ def tiny_produto_por_id_interno(id_tiny: int):
     except Exception as e:
         app.logger.exception("Falha ao consultar Tiny por ID")
         return jsonify(ok=False, error=str(e)), 500
-
 
 @bp_retirado.route('/api/tiny/produto/<int:id_tiny>/kit', methods=['GET'])
 def tiny_produto_kit_interno(id_tiny: int):
