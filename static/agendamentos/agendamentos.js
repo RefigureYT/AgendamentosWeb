@@ -416,3 +416,107 @@ function abrirModalRelatorio(idAgendamentoML) {
             conteudoDiv.innerHTML = '<div class="alert alert-danger">Não foi possível carregar o relatório. Tente novamente mais tarde.</div>';
         });
 }
+
+// =============== OLHO: modal com opções ===============
+function abrirModalOlho(idBd, idTipo) {
+    const modalEl = document.getElementById('modalOlho');
+    modalEl.dataset.id = idBd;
+    modalEl.dataset.tipo = idTipo;
+    document.getElementById('olho_id_text').textContent = idBd;
+    new bootstrap.Modal(modalEl).show();
+}
+
+// Botão: Entrar para visualizar (somente leitura)
+(() => {
+    const btn = document.getElementById('btnOlhoVisualizar');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        const modalEl = document.getElementById('modalOlho');
+        const id = modalEl.dataset.id;
+        const tipo = modalEl.dataset.tipo;
+        // fecha o modal e vai para a tela em modo "visualizar"
+        const inst = bootstrap.Modal.getInstance(modalEl);
+        if (inst) inst.hide();
+        window.location.href = `/retirado?id=${id}&tipo=${tipo}&mudar=False`;
+    });
+})();
+
+// Botão: Ver transferências entre depósitos
+(() => {
+    const btn = document.getElementById('btnOlhoTransferencias');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+        const modalOlho = document.getElementById('modalOlho');
+        const id = modalOlho.dataset.id;
+        const inst = bootstrap.Modal.getInstance(modalOlho);
+        if (inst) inst.hide();
+        await verTransferenciasAgendamento(id);
+    });
+})();
+
+async function verTransferenciasAgendamento(idAgend) {
+    const modalEl = document.getElementById('modalTransferencias');
+    const body = document.getElementById('conteudo-transferencias');
+    body.innerHTML = `
+    <div class="d-flex justify-content-center align-items-center p-4">
+      <div class="spinner-border" role="status"><span class="visually-hidden">Carregando...</span></div>
+      <span class="ms-3">Carregando transferências...</span>
+    </div>`;
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+
+    try {
+        const resp = await fetch(`/api/retirado/${idAgend}/originais-equivalentes`, { credentials: 'include' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const dados = await resp.json();
+        console.log(dados);
+
+        const linhas = [];
+        const add = (item, tipo) => {
+            const sku = item.sku ?? item.sku_bipado ?? item.sku_comp ?? '';
+            const nome = item.nome ?? item.nome_equivalente ?? item.nome_original ?? item.nome_comp ??'';
+            const qtd = item.qtd_mov_conf ?? item.qtd ?? item.qtd_conf ?? '';
+            const saida = item.lanc_conf_s ?? '';
+            const entrada = item.lanc_conf_e ?? '';
+            linhas.push(`
+        <tr>
+          <td>${tipo}</td>
+          <td>${sku}</td>
+          <td>${nome}</td>
+          <td class="text-end">${qtd || '-'}</td>
+          <td>${saida || '-'}</td>
+          <td>${entrada || '-'}</td>
+        </tr>`);
+        };
+
+        (dados.originais || []).forEach(o => add(o, 'Original'));
+        (dados.equivalentes || []).forEach(e => add(e, 'Equivalente'));
+
+        body.innerHTML = `
+      <div class="mb-2 small text-muted">Agendamento: <strong>${idAgend}</strong></div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="min-width:110px">Tipo</th>
+              <th>SKU</th>
+              <th>Produto</th>
+              <th class="text-end">Qtd mov.</th>
+              <th>Saída (idLanc)</th>
+              <th>Entrada (idLanc)</th>
+            </tr>
+          </thead>
+          <tbody>${linhas.join('')}</tbody>
+        </table>
+      </div>
+      <div class="small text-muted">
+        Os códigos “idLanc” são os lançamentos retornados pelo Tiny. “-” indica que ainda não houve movimentação registrada.
+      </div>`;
+    } catch (err) {
+        console.error(err);
+        body.innerHTML = `
+      <div class="alert alert-danger">
+        Não foi possível carregar as transferências deste agendamento.
+      </div>`;
+    }
+}

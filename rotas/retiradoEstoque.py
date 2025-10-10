@@ -9,7 +9,7 @@ import re
 import threading
 import queue
 import uuid
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 from datetime import datetime
 import pytz
 
@@ -58,6 +58,15 @@ def _start_estoque_worker_once():
             try:
                 with _status_lock:
                     _mov_status[task_id]["status"] = "processando"
+
+                # NOVO: marca status={etapa}=1 e,
+                # se for SAÍDA ('S'), incrementa qtd_mov_{etapa} com a quantidade desta task.
+                meta = (_mov_status.get(task_id) or {}).get("meta") or task.get("meta") or {}
+                try:
+                    rc = db_set_status_run(meta)
+                    print(f"[estoque-worker:{task_id}] db_set_status_run -> rows={rc}")
+                except Exception as e:
+                    print(f"[estoque-worker:{task_id}] db_set_status_run ERRO: {e}")
 
                 id_produto: int = task["id_produto"]
                 id_deposito: int = task["id_deposito"]
@@ -135,6 +144,32 @@ def _start_estoque_worker_once():
                         print(f"[estoque-worker:{task_id}] ✅ CONCLUÍDO. JSON:", resp_json)
                         _mov_status[task_id]["status"] = "concluido"
                         _mov_status[task_id]["result"] = resp_json
+
+                        # Extrai id de lançamento (ajuste conforme o JSON real do Tiny)
+                        lanc_id = None
+                        try:
+                            lanc_id = (
+                                resp_json.get('idLancamento')
+                                or resp_json.get('id')
+                                or resp_json.get('lancamentoId')
+                                or (resp_json.get('lancamento') or {}).get('id')
+                            )
+                        except Exception:
+                            lanc_id = None
+
+                        try:
+                            rows = 0
+                            if lanc_id is not None:
+                                if task['tipo_api'] == 'S':
+                                    rows = db_on_saida_ok(meta, str(lanc_id))
+                                elif task['tipo_api'] == 'E':
+                                    rows = db_on_entrada_ok(meta, str(lanc_id), quantidade_abs)
+                                print(f"[estoque-worker:{task_id}] DB atualizado (rows={rows}) lanc_id={lanc_id}")
+                            else:
+                                print(f"[estoque-worker:{task_id}] sem lanc_id no retorno; nada gravado.")
+                        except Exception as e:
+                            print(f"[estoque-worker:{task_id}] ERRO ao persistir lanc_id/status: {e}")
+                            
                         break
 
                     # 401/403 -> tenta trocar token UMA vez
@@ -1241,7 +1276,7 @@ def estoque_mover():
 
     Body JSON:
     {
-      "empresa": "jaupesca",                # opcional (reserve para seleção de token no futuro)
+      "empresa": "jaupesca",                # opcional (reserva p/ seleção de token no futuro)
       "observacoes": "texto...",            # opcional
       "preco_unitario": 0,                  # opcional (default 0)
       "movimentos": [
@@ -1251,13 +1286,18 @@ def estoque_mover():
           "de": 785301556,                  # depósito origem (Saída)
           "para": 822208355,                # depósito destino (Entrada)
           "unidades": 5,                    # > 0
-          "preco_unitario": 0               # opcional (sobrepõe o geral)
-        },
-        ...
+          "preco_unitario": 0,              # opcional (sobrepõe o geral)
+
+          # ---- META opcional (usado pelo worker para marcar BD) ----
+          "equivalente": false,             # bool -> True = tabela de equivalentes; False = comp_agend
+          "etapa": "conf",                  # "conf" | "exp"
+          "pk": 987,                        # id da linha-alvo no BD
+          "qtd_mov": 5                      # quantidade que será gravada em qtd_mov_<etapa>
+        }
       ]
     }
 
-    Resposta: 202 Accepted
+    Resposta (202 Accepted):
     {
       "ok": true,
       "tasks": [
@@ -1268,9 +1308,12 @@ def estoque_mover():
           "para": 822208355,
           "unidades": 5,
           "task_saida": "<id>",
-          "task_entrada": "<id>"
-        },
-        ...
+          "task_entrada": "<id>",
+          "equivalente": false,
+          "etapa": "conf",
+          "pk": 987,
+          "db_update_planned": true
+        }
       ]
     }
     """
@@ -1286,10 +1329,13 @@ def estoque_mover():
     try:
         _start_estoque_worker_once()
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         empresa = _to_opt_str_first(data.get('empresa'))
         observacoes_base = _to_opt_str_first(data.get('observacoes')) or ''
-        preco_unitario_default = float(data.get('preco_unitario') or 0)
+        try:
+            preco_unitario_default = float(data.get('preco_unitario') or 0)
+        except (TypeError, ValueError):
+            return _cors_error("Campo 'preco_unitario' (global) deve ser numérico", 400)
 
         movs = data.get('movimentos')
         if isinstance(movs, dict):
@@ -1309,19 +1355,46 @@ def estoque_mover():
                 dep_de = int(mv.get('de'))
                 dep_para = int(mv.get('para'))
                 unidades = float(mv.get('unidades'))
-
-                # 🔒 Guard: bloqueia origem == destino (ex.: 141 -> 141)
-                if dep_de == dep_para:
-                    return _cors_error(
-                        f"Depósitos de origem e destino são iguais (#{dep_de}). Operação inválida.",
-                        400
-                    )
-
-                if unidades <= 0:
-                    return _cors_error("Cada movimento deve ter 'unidades' > 0", 400)
-                preco_unit = float(mv.get('preco_unitario') if mv.get('preco_unitario') is not None else preco_unitario_default)
             except (TypeError, ValueError):
                 return _cors_error("Campos do movimento inválidos (id_produto/de/para inteiros; unidades numérico)", 400)
+
+            if unidades <= 0:
+                return _cors_error("Cada movimento deve ter 'unidades' > 0", 400)
+
+            if dep_de == dep_para:
+                return _cors_error(
+                    f"Depósitos de origem e destino são iguais (#{dep_de}). Operação inválida.",
+                    400
+                )
+
+            # preço unitário do item (sobrepõe o global, se presente)
+            try:
+                if mv.get('preco_unitario') is not None:
+                    preco_unit = float(mv.get('preco_unitario'))
+                else:
+                    preco_unit = float(preco_unitario_default)
+            except (TypeError, ValueError):
+                return _cors_error("preco_unitario (do item) deve ser numérico", 400)
+
+            # -------- META opcional para o worker marcar BD ----------
+            equivalente = bool(mv.get('equivalente', False))
+            etapa = _to_opt_str_first(mv.get('etapa'))  # 'conf' | 'exp'
+            pk_raw = mv.get('pk')
+            try:
+                pk = int(pk_raw) if pk_raw is not None else None
+            except (TypeError, ValueError):
+                pk = None
+            qtd_mov = mv.get('qtd_mov')
+
+            meta_ok = etapa in ('conf', 'exp') and isinstance(pk, int)
+            meta = {
+                "equivalente": equivalente,
+                "etapa": etapa,
+                "pk": pk,
+                "qtd_mov": qtd_mov,
+                "sku": sku
+            }
+            # ----------------------------------------------------------
 
             # 1) SAÍDA (de)
             task_id_s = uuid.uuid4().hex
@@ -1329,7 +1402,8 @@ def estoque_mover():
                 _mov_status[task_id_s] = {
                     "status": "enfileirado",
                     "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "params": {"id_produto": id_produto, "id_deposito": dep_de, "unidades": unidades, "tipo": "S"}
+                    "params": {"id_produto": id_produto, "id_deposito": dep_de, "unidades": unidades, "tipo": "S"},
+                    "meta": meta
                 }
             _mov_queue.put({
                 "task_id": task_id_s,
@@ -1340,6 +1414,7 @@ def estoque_mover():
                 "token": token,
                 "observacoes": observacoes_base,
                 "preco_unitario": preco_unit,
+                "meta": meta
             })
 
             # 2) ENTRADA (para)
@@ -1348,7 +1423,8 @@ def estoque_mover():
                 _mov_status[task_id_e] = {
                     "status": "enfileirado",
                     "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "params": {"id_produto": id_produto, "id_deposito": dep_para, "unidades": unidades, "tipo": "E"}
+                    "params": {"id_produto": id_produto, "id_deposito": dep_para, "unidades": unidades, "tipo": "E"},
+                    "meta": meta
                 }
             _mov_queue.put({
                 "task_id": task_id_e,
@@ -1359,11 +1435,21 @@ def estoque_mover():
                 "token": token,
                 "observacoes": observacoes_base,
                 "preco_unitario": preco_unit,
+                "meta": meta
             })
 
             out.append({
-                "sku": sku, "id_produto": id_produto, "de": dep_de, "para": dep_para,
-                "unidades": unidades, "task_saida": task_id_s, "task_entrada": task_id_e
+                "sku": sku,
+                "id_produto": id_produto,
+                "de": dep_de,
+                "para": dep_para,
+                "unidades": unidades,
+                "task_saida": task_id_s,
+                "task_entrada": task_id_e,
+                "equivalente": equivalente,
+                "etapa": etapa,
+                "pk": pk,
+                "db_update_planned": bool(meta_ok)
             })
 
         resp = make_response(jsonify(ok=True, tasks=out), 202)
@@ -1388,10 +1474,10 @@ def _tiny_auth_header(tok: str) -> dict:
     return {"Authorization": tok, "User-Agent": "AgendamentosWeb/1.0", "Accept": "application/json"}
 
 def _tiny_call_json(
-    path: str, 
-    params: dict | None = None, 
-    method: str = "GET", 
-    json_body: dict | None = None,
+    path: str,
+    params: Optional[dict] = None,
+    method: str = "GET",
+    json_body: Optional[dict] = None,
     timeout: int = 20
 ):
     """
@@ -2132,6 +2218,130 @@ def tiny_kit_item():
             return jsonify(ok=False, error='Rate limit do Tiny. Tente novamente.'), 429
         return jsonify(ok=False, error='Falha ao contatar Tiny', detalhe=str(e)), 502
 
+# ===== Helpers de atualização no BD para lanc_*, status_*, qtd_mov_* =====
+
+# --- FIX 1: coluna PK correta para comp_agend --------------------------
+def _table_and_cols(meta: dict):
+    etapa = (meta or {}).get('etapa')
+    pk = (meta or {}).get('pk')
+    equivalente = bool((meta or {}).get('equivalente'))
+    if etapa not in ('conf', 'exp') or not isinstance(pk, int):
+        return None
+
+    if equivalente:
+        table = 'agendamento_produto_bipagem_equivalentes'
+        id_col = 'id'                      # ok
+    else:
+        table = 'comp_agend'
+        id_col = 'id_prod_comp'            # <-- era 'id_comp'
+
+    col_lanc_s = f"lanc_{etapa}_s"
+    col_lanc_e = f"lanc_{etapa}_e"
+    col_status = f"status_{etapa}"
+    col_qtd    = f"qtd_mov_{etapa}"
+    return table, id_col, pk, col_lanc_s, col_lanc_e, col_status, col_qtd
+
+def _db_conn():
+    return mysql.connector.connect(**_db_config)
+
+def db_set_status_run(meta: dict):
+    r = _table_and_cols(meta)
+    if not r:
+        print(f"[db] db_set_status_run: meta inválido: {meta}")
+        return 0
+    table, id_col, pk, _, _, col_status, _ = r
+    sql = f"UPDATE {table} SET {col_status}=%s WHERE {id_col}=%s"
+    conn = _db_conn()
+    try:
+        c = conn.cursor()
+        c.execute(sql, (1, pk))
+        rows = c.rowcount
+        conn.commit()
+        c.close()
+        print(f"[db] {sql} -> rows={rows} (pk={pk})")
+        return rows
+    except Exception as e:
+        print(f"[db] ERRO em db_set_status_run: {e} | sql={sql} | pk={pk}")
+        raise
+    finally:
+        conn.close()
+
+def db_on_saida_ok(meta: dict, lanc_id: str) -> int:
+    r = _table_and_cols(meta)
+    if not r:
+        print(f"[db] db_on_saida_ok: meta inválido: {meta}")
+        return 0
+    table, id_col, pk, col_lanc_s, _, _, _ = r
+    conn = _db_conn()
+    try:
+        c = conn.cursor()
+        c.execute(f"UPDATE {table} SET {col_lanc_s}=%s WHERE {id_col}=%s", (str(lanc_id), pk))
+        rows = c.rowcount
+        conn.commit()
+        c.close()
+        print(f"[db] {table}.{col_lanc_s} <- {lanc_id} (pk={pk}) rows={rows}")
+        return rows
+    finally:
+        conn.close()
+
+def db_on_entrada_ok(meta: dict, lanc_id: str, unidades: float) -> int:
+    r = _table_and_cols(meta)
+    if not r:
+        print(f"[db] db_on_entrada_ok: meta inválido: {meta}")
+        return 0
+    table, id_col, pk, _, col_lanc_e, col_status, col_qtd = r
+    try:
+        qtd = float(unidades)
+    except (TypeError, ValueError):
+        qtd = 0.0
+    conn = _db_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            f"UPDATE {table} "
+            f"SET {col_lanc_e}=%s, {col_status}=%s, {col_qtd}=COALESCE({col_qtd},0)+%s "
+            f"WHERE {id_col}=%s",
+            (str(lanc_id), 2, qtd, pk)
+        )
+        rows = c.rowcount
+        conn.commit()
+        c.close()
+        print(f"[db] {table}.{col_lanc_e} <- {lanc_id}, {col_status}=2, {col_qtd}+={qtd} (pk={pk}) rows={rows}")
+        return rows
+    finally:
+        conn.close()
+
+def db_on_saida_fail(meta: dict, err: Optional[str] = None):
+    r = _table_and_cols(meta)
+    if not r:
+        return
+    table, id_col, pk, _, _, col_status, _ = r
+    conn = _db_conn()
+    try:
+        with conn.cursor() as c:
+            c.execute(
+                f"UPDATE {table} SET {col_status}=%s WHERE {id_col}=%s",
+                (4, pk)  # 4 = ERR (falha na saída)
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+def db_on_entrada_fail(meta: dict, err: Optional[str] = None):
+    r = _table_and_cols(meta)
+    if not r:
+        return
+    table, id_col, pk, _, _, col_status, _ = r
+    conn = _db_conn()
+    try:
+        with conn.cursor() as c:
+            c.execute(
+                f"UPDATE {table} SET {col_status}=%s WHERE {id_col}=%s",
+                (3, pk)  # 3 = PARC (falha na entrada)
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 @bp_retirado.route('/api/agendamento/<int:id_agend_ml>/completo', methods=['GET'])
 def api_agendamento_completo(id_agend_ml: int):
@@ -2256,7 +2466,7 @@ def api_agendamento_completo(id_agend_ml: int):
 # Rota para "Quem sou eu?"
 # -------------------------------
 # --- [1] Helper: busca usuário no DB pelo id da sessão -----------------
-def _get_current_user_from_db() -> dict | None:
+def _get_current_user_from_db() -> Optional[dict]:
     """Lê session['id_usuario'] e retorna o usuário do banco (sem senha)."""
     uid = session.get('id_usuario')
     if not uid:
@@ -2320,3 +2530,76 @@ def api_me():
     resp = make_response(jsonify(authenticated=True, user=safe_user), 200)
     _set_cors_headers(resp)
     return resp
+
+@bp_retirado.route('/api/retirado/<int:id_agend>/originais-equivalentes', methods=['GET'])
+def api_originais_equivalentes(id_agend: int):
+    """
+    GET /api/retirado/<id_agend>/originais-equivalentes
+
+    Retorna:
+    {
+      "ok": true,
+      "id_agend_ml": <id>,
+      "originais":     [ ... linhas de comp_agend ... ],
+      "equivalentes":  [ ... linhas de agendamento_produto_bipagem_equivalentes ... ]
+    }
+
+    - originais: **todas as colunas** de comp_agend referentes ao agendamento informado,
+      filtrando via JOIN com produtos_agend (p.id_agend_prod = :id_agend).
+    - equivalentes: **todas as colunas** de agendamento_produto_bipagem_equivalentes
+      com id_agend_ml = :id_agend.
+    """
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur  = conn.cursor(dictionary=True)
+
+        # comp_agend do agendamento (filtra pelo produtos_agend.id_agend_prod)
+        cur.execute("""
+            SELECT c.*
+              FROM comp_agend AS c
+              JOIN produtos_agend AS p
+                ON p.id_prod = c.id_prod_comp
+             WHERE p.id_agend_prod = %s
+             ORDER BY c.id_comp
+        """, (id_agend,))
+        originais = cur.fetchall() or []
+
+        # equivalentes do agendamento
+        cur.execute("""
+            SELECT *
+              FROM agendamento_produto_bipagem_equivalentes
+             WHERE id_agend_ml = %s
+             ORDER BY sku_original, sku_bipado, id
+        """, (id_agend,))
+        equivalentes = cur.fetchall() or []
+
+        cur.close(); conn.close()
+
+        # serialização de datas para string
+        def _ser(row):
+            out = {}
+            for k, v in row.items():
+                if isinstance(v, (datetime, date)):
+                    out[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    out[k] = v
+            return out
+
+        payload = {
+            "ok": True,
+            "id_agend_ml": id_agend,
+            "originais":    [_ser(r) for r in originais],
+            "equivalentes": [_ser(r) for r in equivalentes],
+        }
+        resp = make_response(jsonify(payload), 200)
+        _set_cors_headers(resp)
+        return resp
+
+    except Exception as e:
+        try:
+            app.logger.exception("Erro em /api/retirado/<id>/originais-equivalentes")
+        except Exception:
+            pass
+        resp = make_response(jsonify(ok=False, error=str(e)), 500)
+        _set_cors_headers(resp)
+        return resp

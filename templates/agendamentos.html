@@ -156,8 +156,9 @@
 
           <!-- Botão visualizar -->
           <a class="btn btn-outline-secondary btn-sm"
-             href="/retirado?id={{ agendamento.id_bd }}&tipo={{ agendamento.id_tipo }}&mudar=False"
-             title="Visualizar">
+            href="#"
+            onclick="abrirModalOlho('{{ agendamento.id_bd }}','{{ agendamento.id_tipo }}'); return false;"
+            title="Visualizar">
             <i class="bi bi-eye"></i>
           </a>
 
@@ -348,6 +349,50 @@
         </div>
         <div class="modal-body" id="conteudo-relatorio">
           <p>Carregando relatório...</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Escolha do olho -->
+  <div class="modal fade" id="modalOlho" tabindex="-1" aria-labelledby="modalOlhoLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalOlhoLabel">O que você deseja fazer?</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3">Agendamento <strong id="olho_id_text"></strong></p>
+          <div class="d-grid gap-2">
+            <button class="btn btn-outline-primary" id="btnOlhoVisualizar">
+              <i class="bi bi-eye"></i> Entrar para visualizar
+            </button>
+            <button class="btn btn-outline-secondary" id="btnOlhoTransferencias">
+              <i class="bi bi-arrow-left-right"></i> Ver transferências entre depósitos
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Transferências -->
+  <div class="modal fade" id="modalTransferencias" tabindex="-1" aria-labelledby="modalTransferenciasLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTransferenciasLabel">Transferências deste agendamento</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body" id="conteudo-transferencias">
+          <div class="d-flex justify-content-center align-items-center p-4">
+            <div class="spinner-border" role="status"><span class="visually-hidden">Carregando...</span></div>
+            <span class="ms-3">Carregando...</span>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
