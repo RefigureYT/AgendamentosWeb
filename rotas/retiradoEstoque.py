@@ -226,6 +226,7 @@ def api_bipagem_detalhe():
     GET /api/bipagem/detalhe?id_agend_ml=123&sku=API1
 
     Retorna:
+      - produto_original (linha completa de produtos_agend)
       - bipagem (1 linha de agendamento_produto_bipagem)
       - equivalentes (N linhas de agendamento_produto_bipagem_equivalentes)
       - totais (diretos, equivalentes_total, total)
@@ -244,7 +245,24 @@ def api_bipagem_detalhe():
         if len(sku) > 30:
             return _cors_error("Query 'sku' excede 30 caracteres", 400)
 
-        # SQL
+        # SQLs
+        sql_prod_original = """
+            SELECT
+                id_prod,
+                id_agend_prod,
+                id_prod_ml,
+                id_prod_tiny,
+                sku_prod,
+                gtin_prod,
+                unidades_prod,
+                e_kit_prod,
+                nome_prod,
+                estoque_flag_prod,
+                imagem_url_prod
+            FROM produtos_agend
+            WHERE id_agend_prod = %s AND sku_prod = %s
+            LIMIT 1
+        """
         sql_bipagem = """
             SELECT id_agend_ml, sku, bipados
             FROM agendamento_produto_bipagem
@@ -275,7 +293,11 @@ def api_bipagem_detalhe():
         conn = mysql.connector.connect(**_db_config)
         cur  = conn.cursor(dictionary=True)
 
-        # 1) Direto
+        # 0) Produto original completo (produtos_agend)
+        cur.execute(sql_prod_original, (id_agend_ml, sku))
+        produto_original = cur.fetchone()  # dict | None
+
+        # 1) Direto (bipagem)
         cur.execute(sql_bipagem, (id_agend_ml, sku))
         bipagem = cur.fetchone()  # dict | None
 
@@ -297,13 +319,13 @@ def api_bipagem_detalhe():
             except (TypeError, ValueError):
                 return default
 
-        # normaliza datas
+        # normaliza datas de equivalentes
         for row in (equivalentes or []):
             for k, v in list(row.items()):
                 row[k] = serialize(v)
 
         # totais robustos
-        bipados_diretos = to_int_safe(bipagem.get("bipados")) if bipagem else 0
+        bipados_diretos = to_int_safe((bipagem or {}).get("bipados"))
         bipados_equivalentes_total = sum(to_int_safe(e.get("bipados")) for e in (equivalentes or []))
         bipados_total = bipados_diretos + bipados_equivalentes_total
 
@@ -311,15 +333,19 @@ def api_bipagem_detalhe():
             "ok": True,
             "id_agend_ml": id_agend_ml,
             "sku": sku,
-            "bipagem": bipagem,                 # dict ou null
-            "equivalentes": equivalentes,       # lista (0..N)
+
+            # 🔻 NOVO: linha completa do produto original
+            "produto_original": produto_original,   # dict ou null (todos os campos de produtos_agend)
+
+            "bipagem": bipagem,                     # dict ou null (agendamento_produto_bipagem)
+            "equivalentes": equivalentes,           # list (0..N)
             "totais": {
                 "bipados_diretos": bipados_diretos,
                 "bipados_equivalentes_total": bipados_equivalentes_total,
                 "bipados_total": bipados_total
             }
         }), 200)
-        _set_cors_headers(resp)  # inofensivo se mesma origem
+        _set_cors_headers(resp)
         return resp
 
     except Exception as e:
@@ -1355,6 +1381,53 @@ def estoque_mover():
     
 # ===================== HELPERS NOVOS =====================
 
+def _tiny_auth_header(tok: str) -> dict:
+    tok = tok.strip()
+    if not tok.lower().startswith("bearer "):
+        tok = f"Bearer {tok}"
+    return {"Authorization": tok, "User-Agent": "AgendamentosWeb/1.0", "Accept": "application/json"}
+
+def _tiny_call_json(
+    path: str, 
+    params: dict | None = None, 
+    method: str = "GET", 
+    json_body: dict | None = None,
+    timeout: int = 20
+):
+    """
+    Chama a API pública v3 do Tiny com fallback para 401/403 (troca token 1x).
+    - Propaga 429 (sem retry) para o caller decidir.
+    - Em sucesso (2xx) retorna (status_code, json_dict).
+    - Em erro, retorna (status_code, json_dict_ou_texto).
+    """
+    base = "https://api.tiny.com.br/public-api/v3"
+    url = f"{base}/{path.lstrip('/')}"
+    token = _get_tiny_token_for_user()  # pega do DB
+    if not token:
+        return 503, {"error": "Token do Tiny indisponível no servidor"}
+
+    def _do_call(tok: str):
+        headers = _tiny_auth_header(tok)
+        try:
+            r = requests.request(method, url, headers=headers, params=params, json=json_body, timeout=timeout)
+        except requests.RequestException as e:
+            return 502, {"error": "Falha ao contatar Tiny", "detalhe": str(e)}
+        try:
+            payload = r.json()
+        except Exception:
+            payload = (r.text or "")
+        return r.status_code, payload
+
+    # 1ª tentativa
+    sc, payload = _do_call(token)
+    if sc in (401, 403):
+        # tenta pegar outro token do DB e repetir uma única vez
+        new_tok = _get_fallback_token_from_db()
+        if new_tok and new_tok != token:
+            sc, payload = _do_call(new_tok)
+
+    return sc, payload
+
 def _require_session_user():
     """Garante usuário logado via session. Retorna (ok:bool, resp:Response|None)."""
     if 'id_usuario' not in session:
@@ -1742,3 +1815,508 @@ def api_retirado_composicao_imagem_by_ref():
     except Exception as e:
         app.logger.exception("api_retirado_composicao_imagem_by_ref")
         return jsonify(ok=False, error=str(e)), 500
+
+@bp_retirado.route('/api/resolve-referencia', methods=['POST'])
+def api_resolve_referencia():
+    """
+    POST /api/resolve-referencia
+    Body: { "id_agend": 123, "ref": "<sku | gtin | id_tiny>" }
+    Retorna: { acao: 'bipe_direto'|'bipe_equivalente'|'sugerir_equivalente',
+               sku_original?, sku_bipado?, gtin_bipado?, id_tiny_equivalente? }
+    """
+    data = request.get_json() or {}
+    try:
+        id_agend = int(data.get('id_agend'))
+    except (TypeError, ValueError):
+        return jsonify(error="'id_agend' deve ser inteiro"), 400
+
+    ref_raw = str(data.get('ref') or '').strip()
+    if not ref_raw:
+        return jsonify(error="'ref' é obrigatória"), 400
+
+    sku_like     = ref_raw.lower()
+    gtin_like    = normalize_gtin(ref_raw)
+    id_tiny_like = to_int_or_none(ref_raw)
+
+    conn = mysql.connector.connect(**_db_config)
+    cur  = conn.cursor(dictionary=True)
+
+    # 1) Bipe direto (SKU original do agendamento)
+    cur.execute("""
+        SELECT sku AS sku_original
+          FROM agendamento_produto_bipagem
+         WHERE id_agend_ml=%s AND LOWER(sku)=LOWER(%s)
+         LIMIT 1
+    """, (id_agend, sku_like))
+    r = cur.fetchone()
+    if r:
+        cur.close(); conn.close()
+        return jsonify(acao='bipe_direto', sku_original=r['sku_original'])
+
+    # 2) Já cadastrado como equivalente (por SKU, GTIN ou ID Tiny)
+    cur.execute("""
+        SELECT sku_original, sku_bipado, gtin_bipado, id_tiny_equivalente
+          FROM agendamento_produto_bipagem_equivalentes
+         WHERE id_agend_ml=%s AND (
+                LOWER(sku_bipado)=LOWER(%s)
+             OR (%s IS NOT NULL AND gtin_bipado=%s)
+             OR (%s IS NOT NULL AND id_tiny_equivalente=%s)
+         )
+         LIMIT 1
+    """, (id_agend, sku_like, gtin_like, gtin_like, id_tiny_like, id_tiny_like))
+    r = cur.fetchone()
+    cur.close(); conn.close()
+
+    if r:
+        return jsonify(acao='bipe_equivalente', **r)
+
+    # 3) Não bateu em nada que já exista no agendamento → sugerir equivalente
+    return jsonify(acao='sugerir_equivalente', ref=ref_raw)
+
+@bp_retirado.route('/api/tiny/buscar-produto', methods=['GET'])
+def tiny_buscar_produto():
+    """
+    GET /api/tiny/buscar-produto?valor=<EAN_ou_SKU>
+      - Requer sessão válida (usuário logado)
+      - Tenta EAN/GTIN (ativo), senão SKU (ativo)
+      - Retorna somente se houver exatamente 1 produto ativo
+      - 401/403: tenta trocar o token 1x e refaz
+      - 429: retorna 429 pedindo para aguardar e tentar novamente
+      - Caso contrário (0 ou múltiplos): 400 "produto não encontrado"
+    """
+    ok, resp = _require_session_user()
+    if not ok:
+        return resp  # 401
+
+    valor = (request.args.get('valor') or request.args.get('q') or '').strip()
+    if not valor:
+        return _cors_error('Parâmetro "valor" é obrigatório', 400)
+
+    base_url = f"{_TINY_BASE}/produtos"
+
+    # token inicial
+    current_token = _get_tiny_token_for_user()
+    if not current_token:
+        return _cors_error('Não foi possível obter token do Tiny', 503)
+
+    did_swap_token = False  # controla tentativa única de troca de token
+
+    def _headers(tok: str):
+        return {
+            "Authorization": _normalize_bearer(tok),
+            "User-Agent": "AgendamentosWeb/1.0",
+            "Accept": "application/json",
+        }
+
+    def _request_with_auth(params: dict):
+        """Faz uma chamada ao Tiny com possível troca de token para 401/403.
+           Retorna (json_dict|None, flask_response|None)."""
+        nonlocal current_token, did_swap_token
+
+        for attempt in (0, 1):  # no máx 2 tentativas (2ª só se trocar token)
+            try:
+                r = requests.get(base_url, headers=_headers(current_token), params=params, timeout=20)
+            except requests.RequestException as e:
+                app.logger.exception("Falha ao chamar Tiny em /api/tiny/buscar-produto")
+                return None, make_response(jsonify(ok=False, error=f'Erro ao contatar Tiny: {e}'), 502)
+
+            # 429 -> devolve para o front aguardar
+            if r.status_code == 429:
+                msg = 'Tiny retornou 429 (rate limit). Aguarde alguns segundos e tente bipar novamente.'
+                return None, _cors_error(msg, 429)
+
+            # 401/403 -> tenta trocar token UMA vez
+            if r.status_code in (401, 403):
+                if not did_swap_token:
+                    new_tok = _get_fallback_token_from_db()
+                    if new_tok and new_tok != current_token:
+                        did_swap_token = True
+                        current_token = new_tok
+                        continue  # refaz com o novo token
+                # se já tentou trocar ou não há token novo, devolve erro
+                return None, make_response(jsonify(ok=False, error='Falha de autenticação no Tiny'), r.status_code)
+
+            # Demais códigos inesperados
+            if not (200 <= r.status_code < 300):
+                return None, make_response(jsonify(ok=False, error='Resposta inesperada do Tiny', status=r.status_code), 502)
+
+            # Tenta interpretar JSON
+            try:
+                j = r.json()
+            except Exception:
+                return None, make_response(jsonify(ok=False, error='Corpo não-JSON recebido do Tiny'), 502)
+
+            if not isinstance(j, dict):
+                return None, make_response(jsonify(ok=False, error='Formato inesperado do Tiny'), 502)
+
+            return j, None
+
+        # não deveria chegar aqui
+        return None, make_response(jsonify(ok=False, error='Falha interna de autenticação'), 500)
+
+    def _filtrar_unico_ativo_por_gtin(itens, ean_digits):
+        ativos = [
+            i for i in (itens or [])
+            if (i or {}).get('situacao') == 'A'
+            and re.sub(r'\D+', '', str((i or {}).get('gtin', ''))) == ean_digits
+        ]
+        return ativos[0] if len(ativos) == 1 else None
+
+    # 1) tentar por EAN/GTIN primeiro
+    ean_digits = re.sub(r'\D+', '', valor)
+    if len(ean_digits) >= 8:
+        j, err = _request_with_auth({"gtin": ean_digits, "situacao": "A"})
+        if err:
+            return err
+        unico = _filtrar_unico_ativo_por_gtin(j.get("itens"), ean_digits)
+        if unico:
+            return jsonify(ok=True, itens=[unico])
+
+        # fallback: pesquisa genérica (algumas contas não filtram bem por gtin)
+        j2, err2 = _request_with_auth({"pesquisa": ean_digits})
+        if err2:
+            return err2
+        unico = _filtrar_unico_ativo_por_gtin(j2.get("itens"), ean_digits)
+        if unico:
+            return jsonify(ok=True, itens=[unico])
+
+    # 2) se EAN não resolveu, tentar por SKU (codigo) só ativos
+    j3, err3 = _request_with_auth({"codigo": valor, "situacao": "A"})
+    if err3:
+        return err3
+    itens3 = (j3 or {}).get("itens") or []
+    ativos_codigo = [i for i in itens3 if (i or {}).get("situacao") == "A"]
+    if len(ativos_codigo) == 1:
+        return jsonify(ok=True, itens=[ativos_codigo[0]])
+
+    # 3) nada encontrado (ou múltiplos) -> 400
+    return _cors_error("produto não encontrado", 400)
+
+@bp_retirado.route('/api/tiny/kit-item', methods=['GET'])
+def tiny_kit_item():
+    """
+    GET /api/tiny/kit-item?valor=<id|ean|sku>
+
+    Ordem de tentativa:
+      1) ID Tiny (Number)
+      2) EAN/GTIN (Number com 8/12/13/14 dígitos)
+      3) SKU (String)
+
+    Respostas:
+      200: {"ok": true, "origem": "id|ean|sku", "item": {"id_tiny": int, "sku": str, "descricao": str, "quantidade": number}}
+      400: {"ok": false, "error": "Produto não encontrado / não é kit"}
+      401: {"ok": false, "error": "Não autenticado"}
+      409: {"ok": false, "error": "Kit possui múltiplos itens", "count": N}
+      429: {"ok": false, "error": "Rate limit do Tiny. Tente novamente."}
+      502: {"ok": false, "error": "Falha ao contatar Tiny", "detalhe": "..."}
+      503: {"ok": false, "error": "Token do Tiny indisponível no servidor"}
+    """
+    # 0) sessão obrigatória
+    if 'id_usuario' not in session:
+        return jsonify(ok=False, error='Não autenticado'), 401
+
+    valor = (request.args.get('valor') or '').strip()
+    if not valor:
+        return jsonify(ok=False, error='Parâmetro "valor" é obrigatório'), 400
+
+    # -------- helpers (usam _tiny_call_json com fallback 401/403) --------
+    def _buscar_produtos(params: dict):
+        sc, resp = _tiny_call_json("produtos", params=params, method="GET")
+        if sc == 429:
+            raise RuntimeError("429")
+        if sc == 503:
+            # helper retorna 503 quando o token não está disponível
+            return sc, {"error": "Token do Tiny indisponível no servidor"}
+        if 200 <= sc < 300 and isinstance(resp, dict):
+            return sc, (resp.get("itens") or [])
+        # Erro “de rede/serviço” – deixa o caller mapear
+        return sc, resp
+
+    def _kit_por_id(id_tiny: int):
+        sc, resp = _tiny_call_json(f"produtos/{id_tiny}/kit", method="GET")
+        if sc == 429:
+            raise RuntimeError("429")
+        if sc == 503:
+            return sc, {"error": "Token do Tiny indisponível no servidor"}
+        if 200 <= sc < 300:
+            if isinstance(resp, list):
+                return sc, resp
+            if isinstance(resp, dict) and "itens" in resp:
+                return sc, (resp.get("itens") or [])
+            return sc, []
+        return sc, resp
+
+    def _escolhe_ativo(itens):
+        for i in (itens or []):
+            if (i or {}).get('situacao') == 'A':
+                return i
+        return itens[0] if itens else None
+
+    def _ok_unico_item(kit, origem):
+        if not kit:
+            return jsonify(ok=False, error='Produto não encontrado ou não é kit'), 400
+        if len(kit) > 1:
+            return jsonify(ok=False, error='Kit possui múltiplos itens', count=len(kit)), 409
+        k = kit[0] or {}
+        prod = k.get('produto') or {}
+        return jsonify(ok=True, origem=origem, item={
+            "id_tiny": prod.get('id'),
+            "sku": prod.get('sku'),
+            "descricao": prod.get('descricao'),
+            "quantidade": k.get('quantidade')
+        }), 200
+
+    # 1) tenta como ID (Number)
+    digits = re.sub(r'\D+', '', valor)
+    try:
+        if digits and digits == valor and digits.isdigit():
+            sc, kit = _kit_por_id(int(digits))
+            if sc == 503:
+                return jsonify(ok=False, error='Token do Tiny indisponível no servidor'), 503
+            if isinstance(kit, list) and kit:
+                return _ok_unico_item(kit, 'id')
+            # Se não achou kit por ID, segue para EAN/SKU
+    except RuntimeError as e:
+        if str(e) == "429":
+            return jsonify(ok=False, error='Rate limit do Tiny. Tente novamente.'), 429
+
+    # 2) tenta como EAN/GTIN (8/12/13/14 dígitos)
+    try:
+        ean = digits
+        if ean and len(ean) in (8, 12, 13, 14):
+            sc, itens = _buscar_produtos({'gtin': ean, 'situacao': 'A'})
+            if sc == 503:
+                return jsonify(ok=False, error='Token do Tiny indisponível no servidor'), 503
+            if not (isinstance(itens, list) and itens):
+                # fallback leve: pesquisa genérica e filtra por gtin igual
+                sc, itens = _buscar_produtos({'pesquisa': ean})
+                if sc == 503:
+                    return jsonify(ok=False, error='Token do Tiny indisponível no servidor'), 503
+                if isinstance(itens, list):
+                    itens = [i for i in itens if re.sub(r'\D+', '', str((i or {}).get('gtin', ''))) == ean]
+                else:
+                    itens = []
+
+            ativo = _escolhe_ativo(itens)
+            if ativo and ativo.get('id'):
+                sc, kit = _kit_por_id(int(ativo['id']))
+                if sc == 503:
+                    return jsonify(ok=False, error='Token do Tiny indisponível no servidor'), 503
+                if isinstance(kit, list) and kit:
+                    return _ok_unico_item(kit, 'ean')
+            # Se não achou por EAN, cai para SKU
+    except RuntimeError as e:
+        if str(e) == "429":
+            return jsonify(ok=False, error='Rate limit do Tiny. Tente novamente.'), 429
+
+    # 3) tenta como SKU (String)
+    try:
+        sc, itens = _buscar_produtos({'codigo': valor, 'situacao': 'A'})
+        if sc == 503:
+            return jsonify(ok=False, error='Token do Tiny indisponível no servidor'), 503
+        if not (isinstance(itens, list) and itens):
+            return jsonify(ok=False, error='Produto não encontrado'), 400
+
+        ativo = _escolhe_ativo(itens)
+        if ativo and ativo.get('id'):
+            sc, kit = _kit_por_id(int(ativo['id']))
+            if sc == 503:
+                return jsonify(ok=False, error='Token do Tiny indisponível no servidor'), 503
+            if isinstance(kit, list) and kit:
+                return _ok_unico_item(kit, 'sku')
+
+        return jsonify(ok=False, error='Produto não encontrado'), 400
+
+    except RuntimeError as e:
+        if str(e) == "429":
+            return jsonify(ok=False, error='Rate limit do Tiny. Tente novamente.'), 429
+        return jsonify(ok=False, error='Falha ao contatar Tiny', detalhe=str(e)), 502
+
+
+@bp_retirado.route('/api/agendamento/<int:id_agend_ml>/completo', methods=['GET'])
+def api_agendamento_completo(id_agend_ml: int):
+    """
+    GET /api/agendamento/<id>/completo
+    Retorna TODOS os produtos originais do agendamento + bipados diretos + equivalentes (completo) + totais.
+    Estrutura:
+    {
+      ok: true,
+      id_agend_ml: 326,
+      produtos: [
+        {
+          produto_original: { ... (todas colunas de produtos_agend) ... },
+          bipagem: { id_agend_ml, sku, bipados } | null,
+          equivalentes: [ ... linhas completas de agendamento_produto_bipagem_equivalentes ... ],
+          totais: { bipados_diretos, bipados_equivalentes_total, bipados_total }
+        },
+        ...
+      ],
+      totais_gerais: { diretos, equivalentes, total }
+    }
+    """
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur  = conn.cursor(dictionary=True)
+
+        # 1) Todos os produtos originais do agendamento
+        sql_prod = """
+            SELECT
+              id_prod, id_agend_prod, id_prod_ml, id_prod_tiny, sku_prod, gtin_prod,
+              unidades_prod, e_kit_prod, nome_prod, estoque_flag_prod, imagem_url_prod
+            FROM produtos_agend
+            WHERE id_agend_prod = %s
+            ORDER BY sku_prod ASC
+        """
+        cur.execute(sql_prod, (id_agend_ml,))
+        produtos = cur.fetchall() or []
+
+        # 2) Bipados diretos (mapa por SKU)
+        sql_dir = """
+            SELECT sku, COALESCE(bipados,0) AS bipados
+            FROM agendamento_produto_bipagem
+            WHERE id_agend_ml = %s
+        """
+        cur.execute(sql_dir, (id_agend_ml,))
+        diretos_rows = cur.fetchall() or []
+        diretos_map = { (r.get("sku") or "").strip(): int(r.get("bipados") or 0) for r in diretos_rows }
+
+        # 3) Todos equivalentes do agendamento (e já agrupamos por sku_original)
+        sql_eq = """
+            SELECT
+                id, id_agend_ml, sku_original, gtin_original, id_tiny_original,
+                nome_equivalente,
+                sku_bipado, gtin_bipado, id_tiny_equivalente,
+                bipados, criado_por, criado_em, atualizado_em, observacao
+            FROM agendamento_produto_bipagem_equivalentes
+            WHERE id_agend_ml = %s
+            ORDER BY sku_original, sku_bipado
+        """
+        cur.execute(sql_eq, (id_agend_ml,))
+        equivalentes_all = cur.fetchall() or []
+
+        # Agrupa equivalentes por sku_original e soma totais
+        from collections import defaultdict
+        equiv_by_orig = defaultdict(list)
+        equiv_tot_map = defaultdict(int)
+        for e in equivalentes_all:
+            so = (e.get("sku_original") or "").strip()
+            equiv_by_orig[so].append(e)
+            equiv_tot_map[so] += int(e.get("bipados") or 0)
+
+        cur.close(); conn.close()
+
+        # 4) Monta payload por produto
+        itens = []
+        total_diretos = 0
+        total_equivs  = 0
+
+        for p in produtos:
+            sku = (p.get("sku_prod") or "").strip()
+            d   = int(diretos_map.get(sku, 0))
+            eqs = equiv_by_orig.get(sku, [])
+            eqt = int(equiv_tot_map.get(sku, 0))
+
+            total_diretos += d
+            total_equivs  += eqt
+
+            # bipagem “direta” no mesmo formato do /api/bipagem/detalhe
+            bipagem = {"id_agend_ml": id_agend_ml, "sku": sku, "bipados": d} if d or (sku in diretos_map) else None
+
+            itens.append({
+                "produto_original": p,   # TODAS as colunas de produtos_agend
+                "bipagem": bipagem,
+                "equivalentes": eqs,     # linhas completas
+                "totais": {
+                    "bipados_diretos": d,
+                    "bipados_equivalentes_total": eqt,
+                    "bipados_total": d + eqt
+                }
+            })
+
+        resp = make_response(jsonify({
+            "ok": True,
+            "id_agend_ml": id_agend_ml,
+            "produtos": itens,
+            "totais_gerais": {
+                "bipados_diretos": total_diretos,
+                "bipados_equivalentes_total": total_equivs,
+                "bipados_total": total_diretos + total_equivs
+            }
+        }), 200)
+        _set_cors_headers(resp)
+        return resp
+
+    except Exception as e:
+        app.logger.exception("Erro em /api/agendamento/<id>/completo")
+        resp = make_response(jsonify(ok=False, error=str(e)), 500)
+        _set_cors_headers(resp)
+        return resp
+
+# -------------------------------
+# Rota para "Quem sou eu?"
+# -------------------------------
+# --- [1] Helper: busca usuário no DB pelo id da sessão -----------------
+def _get_current_user_from_db() -> dict | None:
+    """Lê session['id_usuario'] e retorna o usuário do banco (sem senha)."""
+    uid = session.get('id_usuario')
+    if not uid:
+        return None
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur  = conn.cursor(dictionary=True)
+        # Ajuste o nome da tabela/colunas se necessário
+        cur.execute("""
+            SELECT 
+                id_usuario,
+                nome_usuario,
+                nome_display_usuario,
+                role,
+                role_mask
+            FROM usuarios
+            WHERE id_usuario = %s
+            LIMIT 1
+        """, (uid,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        return row
+    except Exception as e:
+        # loga mas não vaza detalhes
+        try:
+            app.logger.exception("Falha ao buscar usuário no DB")
+        except Exception:
+            pass
+        return None
+
+
+# --- [2] Endpoint: /api/me ---------------------------------------------
+@bp_retirado.route('/api/me', methods=['GET'])
+def api_me():
+    """
+    Retorna o usuário atualmente logado (via session) com dados vindos do MySQL.
+    Ex.: { authenticated: true, user: { id_usuario, nome_usuario, ... } }
+    """
+    # Garante sessão válida (você já tem before_request, mas mantemos explícito)
+    if 'id_usuario' not in session:
+        resp = make_response(jsonify(authenticated=False, error="Não autenticado"), 401)
+        _set_cors_headers(resp)
+        return resp
+
+    user = _get_current_user_from_db()
+    if not user:
+        # Se chegou aqui, a sessão existe mas não achou o usuário no DB
+        resp = make_response(jsonify(authenticated=False, error="Usuário não encontrado no banco"), 404)
+        _set_cors_headers(resp)
+        return resp
+
+    # Nunca exponha senha_usuario
+    safe_user = {
+        "id_usuario": user.get("id_usuario"),
+        "nome_usuario": user.get("nome_usuario"),
+        "nome_display_usuario": user.get("nome_display_usuario"),
+        "role": user.get("role"),
+        "role_mask": user.get("role_mask"),
+    }
+
+    resp = make_response(jsonify(authenticated=True, user=safe_user), 200)
+    _set_cors_headers(resp)
+    return resp

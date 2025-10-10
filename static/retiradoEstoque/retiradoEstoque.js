@@ -74,6 +74,33 @@ function _findCompBySku(sku) {
   return null;
 }
 
+// ======================================================
+const normSku = v => String(v ?? '').trim().toLowerCase();
+const onlyDigits = v => String(v ?? '').replace(/\D/g, '');
+
+// usar em seletores CSS
+const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+
+// usar ao imprimir valores em HTML (Swal/innerHTML)
+const escHtml = (s) => String(s ?? '')
+  .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+const toNum = (v, def = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+
+// GTIN válido: 8, 12, 13 ou 14 dígitos
+const normGTIN = v => {
+  const d = onlyDigits(v);
+  return (d.length === 8 || d.length === 12 || d.length === 13 || d.length === 14) ? d : null;
+};
+
+// ID Tiny: só dígitos; se vazio vira null (assim não "casa" quando ambos são vazios)
+const normIdTiny = v => {
+  const d = onlyDigits(v);
+  return d.length ? d : null;
+};
+// ======================================================
 // Resolve a imagem da composição com 3 tentativas:
 // 1) imagem vinda no JSON
 // 2) endpoint backend (se existir)
@@ -162,7 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Aqui ele pega as informações que estão no HTML e transforma em variáveis usáveis no JS
   const raw = document.getElementById("js-data").dataset.comps;
   const produtos = JSON.parse(raw);
-  console.log('>', produtos);
+  // console.log('>', produtos); // TODO REMOVER DEPOIS (DEBUG)
 
   const empresaId = parseInt(document.getElementById("infoAgend").dataset.empresa, 10);
   const empresaNome =
@@ -176,12 +203,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const marketplaceAgendamento = document.getElementById("infoAgend").dataset.marketplace;
 
   // Testa as variáveis
-  console.log('Empresa>', empresaNome);
-  console.log('Nº Agendamento>', numeroAgendamento);
-  console.log('Colaborador>', nomeColaborador);
-  console.log('Marketplace>', marketplaceAgendamento);
+  // console.log('Empresa>', empresaNome); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Nº Agendamento>', numeroAgendamento); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Colaborador>', nomeColaborador); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Marketplace>', marketplaceAgendamento); // TODO REMOVER DEPOIS (DEBUG)
 
-  console.log('Produtos>', produtos);
+  // console.log('Produtos>', produtos); // TODO REMOVER DEPOIS (DEBUG)
 
   let obj = [];
 
@@ -213,7 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
     p.composicoes.some(c => c.sku === "JP12324")
   );
 
-  console.log('Esse aqui é o resultado askdaldkajsdl >', resultado);
+  // console.log('Esse aqui é o resultado askdaldkajsdl >', resultado); // TODO REMOVER DEPOIS (DEBUG)
 });
 
 // ─── busca estado no servidor e atualiza UI ─────────────────────
@@ -313,183 +340,94 @@ function pararContadorTempo() {
 
 // ─── envio de bipagem ─────────────────────
 async function biparProduto() {
-  const skuEl = document.getElementById('skuInput');
-  const qtdEl = document.getElementById('quantidadeInput');
+  atualizarContadores();
+  const skuEl = document.getElementById('skuInput'); // Define o elemento input de sku/gtin
+  const qtdEl = document.getElementById('quantidadeInput'); // Define o elemento input de unidades
 
-  let sku = (skuEl?.value || '').trim();
-  let qtd = Number(qtdEl?.value);
+  let sku = (skuEl?.value || '').trim(); // Define o valor inserido no input de sku/gtin
+  let qtd = Number(qtdEl?.value); // Define a quantidade 
 
-  if (!sku || !Number.isFinite(qtd) || qtd <= 0) return;
+  if (!sku || !Number.isFinite(qtd) || qtd <= 0) return; // Se algum dos valores estiver vazio ou inválido, não faz nada
 
+  const jsonComps = _getCompsJson(); // Captura todos os produtos em JSON retorna uma lista
+  console.log('jsonComps >', jsonComps);
 
-  // usar em seletores CSS
-  const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+  // Cada produto dentro da lista tem "composicoes" dentro dele sempre vai ter um produto, podendo ser ele mesmo (se for produto SIMPLES)
+  // ou mais de um se for KIT, tendo isso em mente, o código abaixo ele procura por cada uma das composições e retorna a primeira que o valor bipado
+  // bata com o SKU ou então com o GTIN/EAN da composição
+  // Ele retorna a composição que bateu
 
-  // usar ao imprimir valores em HTML (Swal/innerHTML)
-  const escHtml = (s) => String(s ?? '')
-    .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-  const onlyDigits = (v) => String(v ?? '').replace(/\D+/g, '');
-  const toNum = (v, def = 0) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : def;
-  };
+  //Faz uma verificação antes de prosseguir
+  const comps = (jsonComps || []).flatMap(p => p.composicoes || [])
+  if (comps.length <= 0) return;
+  let prodBipado = comps.find(c => normSku(c.sku) === normSku(sku) || normGTIN(c.gtin) === onlyDigits(sku));
+  console.log('prodBipado >', prodBipado);
+
+  let item = null;
+  if (prodBipado) {
+    item = document.querySelector(`.produto-item[data-sku="${esc(prodBipado.sku)}"]`);
+    if (!item) return;
+
+    console.log('Adicionando unidades ao banco (prod Original)');
+
+    // Antes de adicionar as unidades ao banco e mandar ele atualizar as coisa tudo
+    // Vamos primeiro fazer uma verificação
+    // Se o valor total vai exceder o necessário (Ex: Precisa ir 100, já foi bipado 90 se o usuário bipar mais do que 10 ele não permite e dá erro.)
+
+    if (await validarSeNaoExcedeuQuantidadeMaxima(item, qtd)) {
+      await addUnidadesProdOriginal(prodBipado, qtd);
+      atualizarContadores();
+      console.log('Adicionando unidades ao banco (prod Original)');
+    }
+  }
 
   // 1) Tenta achar o item pelo SKU informado (SKU original no DOM)
-  let item = document.querySelector(`.produto-item[data-sku="${esc(sku)}"]`);
+  console.log(item);
 
-  // 2) Se não achou, tenta mapear pelo SKU/GTIN das composições e ajustar para o SKU da composição
-  if (!item) {
-    let produtos = _getCompsJson();
-    try { produtos = JSON.parse(raw); } catch { }
 
-    let foundComp = null;
-    // outer:
-    // for (const produto of produtos) {
-    //   console.log(produto);
-    //   const comps = Array.isArray(produto.composicoes) ? produto.composicoes : [];
-    //   for (const c of comps) {
-    //     if (String(c.sku ?? '').trim() === sku || (c.gtin && onlyDigits(c.gtin) === onlyDigits(sku))) {
-    //       foundComp = c;
-    //       break outer;
-    //     }
-    //   }
-    // }
-    foundComp = produtos.find(prod => prod.composicoes.find(c => c.sku.toLowerCase().trim() === sku.toLowerCase().trim() || c.gtin === sku));
-
-    if (foundComp) {
-      sku = String(foundComp.sku ?? '').trim(); // ajusta p/ SKU real da composição
-      item = document.querySelector(`.produto-item[data-sku="${esc(sku)}"]`);
-    }
-  }
+  // 2) Se não achou, tenta mapear pelo SKU/GTIN das composições e ajustar para o SKU da composição (LEGACY)
+  // 2) Se não achou verifica se é um produto equivalente (NEW)
 
   // 3) Busca equivalentes do agendamento
-  const listaEquivalentes = await listarEquivalentes(idAgend); // deve retornar { bruto: [...] }
-  let produtoBipado = null;
-  for (const prod of (listaEquivalentes?.bruto || [])) {
-    if (prod.sku_bipado === sku || onlyDigits(prod.gtin_bipado) === onlyDigits(sku)) {
-      produtoBipado = prod;
-      break;
-    }
-  }
+  if (!prodBipado) {
+    const listaEquivalentes = await listarEquivalentes(idAgend); // deve retornar { bruto: [...] }
+    console.log('listaEquivalentes >', listaEquivalentes);
+    let prodEquiv = listaEquivalentes.bruto.find(p => normSku(p.sku_bipado) === normSku(sku) || onlyDigits(p.gtin_bipado) === onlyDigits(sku));
 
-  // 4) Determinar o item "original" no DOM para cálculo de total:
-  // - Se veio por equivalente, o original é produtoBipado.sku_original
-  // - Caso contrário, é o próprio `item` encontrado pelo SKU original
-  let itemOriginal = item;
-  let skuOriginalParaValidar = item?.getAttribute('data-sku') || sku;
+    // Se ele acha um produto equivalente ele já está subindo no banco certinho!
+    if (prodEquiv) {
+      console.log('prodEquiv >', prodEquiv);
+      console.log('Adicionando ao banco a unidade equivalente...');
 
-  if (produtoBipado) {
-    skuOriginalParaValidar = String(produtoBipado.sku_original || '').trim();
-    itemOriginal = document.querySelector(`.produto-item[data-sku="${esc(skuOriginalParaValidar)}"]`);
-  }
-
-  if (!itemOriginal) {
-    // Ele vai tentar buscar como se fosse uma caixa fechada 
-    // (Pega o KIT verifica se tem apenas um produto como composição e se esse produto está no agendamento)
-    const prod = await verificarSeECaixaFechada(skuOriginalParaValidar);
-
-    if (prod) {
-      qtd = prod.un;
-      sku = prod.sku;
-      // Muito importante: agora o “original” passa a ser o SKU do componente
-      skuOriginalParaValidar = prod.sku;
-      itemOriginal = document.querySelector(`.produto-item[data-sku="${esc(sku)}"]`);
-
-      if (!itemOriginal) {
-        Swal.fire({ icon: 'error', title: 'SKU não encontrado!', timer: 2500, showConfirmButton: false });
+      // Verifica se excede o limite
+      item = document.querySelector(`.produto-item[data-sku="${esc(prodEquiv.sku_original)}"]`);
+      if (!item) {
+        await Swal.fire({
+          icon: 'error',
+          title: 'Produto não localizado neste agendamento.',
+          text: 'O item bipado não pertence a este agendamento.',
+          timer: 3500, showConfirmButton: false
+        });
         return;
       }
-    }
-  }
 
-  if (!itemOriginal) {
-    Swal.fire({ icon: 'error', title: 'SKU não encontrado!', timer: 2500, showConfirmButton: false });
-    return;
-  }
-
-  // 5) Valores do DOM (fallback local)
-  let atualDom = toNum(itemOriginal?.dataset?.bipados, 0); // total já bipado (diretos + equivalentes)
-  let totalDom = toNum(itemOriginal?.dataset?.total, 0);
-
-  // 6) (Recomendado) Consultar o total atual FRESCO no servidor (diretos + equivalentes)
-  let atualServidor = null;
-  try {
-    const qs = new URLSearchParams({ id_agend_ml: String(idAgend), sku: skuOriginalParaValidar });
-    const resp = await fetch(`/api/bipagem/detalhe?${qs.toString()}`);
-    if (resp.ok) {
-      const j = await resp.json();
-      const t = j?.totais?.bipados_total;
-      if (Number.isFinite(Number(t))) atualServidor = Number(t);
-      // Se quiser, também pode sincronizar o DOM aqui:
-      // itemOriginal.dataset.bipados = String(atualServidor);
-    }
-  } catch (e) {
-    console.warn('Falha ao consultar totais no servidor:', e);
-  }
-
-  const atual = Number.isFinite(atualServidor) ? atualServidor : atualDom;
-  const total = totalDom;
-
-  // 7) Checagem robusta
-  if (!Number.isFinite(atual) || !Number.isFinite(total)) {
-    Swal.fire({ icon: 'error', title: 'Dados inválidos para validação de total.', timer: 3000, showConfirmButton: false });
-    return;
-  }
-
-  if (atual + qtd > total) {
-    Swal.fire({
-      icon: 'error',
-      title: 'Total excedido!',
-      html: `Bipagem de <b>${qtd}</b> excede o total permitido para <b>${escHtml(skuOriginalParaValidar)}</b>.<br>
-             Atual: <b>${atual}</b> • Total: <b>${total}</b>`,
-      timer: 5000,
-      showConfirmButton: false
-    });
-    return;
-  }
-
-  // 8) Executar a bipagem (direto vs equivalente)
-  try {
-    if (!produtoBipado) {
-      // Direto (SKU original)
-      const resp = await fetch('/api/bipar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_agend: idAgend, sku: skuOriginalParaValidar, quant: qtd })
-      });
-      if (!resp.ok) throw new Error(await resp.text());
-      const data = await resp.json(); // { sku, bipados, ... } -> bipados = total (diretos + equivalentes)
-      const itm = document.querySelector(`.produto-item[data-sku="${esc(data.sku)}"]`);
-      if (itm) {
-        itm.dataset.bipados = String(toNum(data.bipados, atual) /* segurança */);
-        atualizarUI(itm, toNum(data.bipados, atual));
+      if (await validarSeNaoExcedeuQuantidadeMaxima(item, qtd)) {
+        await addUnidadesEquivalentes(prodEquiv, qtd);
         atualizarContadores();
-        const completos = verificarSeFinalizouTudo();
-        if (!completos) distribuirItens();
+        console.log('Adicionado ao banco!');
       }
     } else {
-      // Equivalente
-      const add = await addUnidadesEquivalentes(produtoBipado, qtd);
-      // add.bipados_total = total acumulado (diretos + equivalentes) do SKU ORIGINAL
-      const itm = document.querySelector(`.produto-item[data-sku="${esc(produtoBipado.sku_original)}"]`);
-      if (itm) {
-        itm.dataset.bipados = String(toNum(add?.bipados_total, atual + qtd));
-        atualizarUI(itm, toNum(add?.bipados_total, atual + qtd));
-        atualizarContadores();
-        const completos = verificarSeFinalizouTudo();
-        if (!completos) distribuirItens();
-      }
+      console.log('Não encontrou nenhum produto equivalente.') // Depois a lógica vai ser ele procurar no Tiny
+      const buscarTiny = await buscarProdutoTiny(sku); // Busca o produto no Tiny (Primeiro por EAN e depois por SKU)
+      await defineProdFazBipagem(buscarTiny, qtd, prodBipado, prodEquiv, comps, listaEquivalentes);
     }
-  } catch (err) {
-    console.error('Erro ao registrar bipagem:', err);
-    Swal.fire({ icon: 'error', title: 'Erro ao registrar bipagem', text: String(err?.message || err) });
-    return;
   }
 
-  // 9) Reset UI
+  // Reset UI
   skuEl.value = '';
   qtdEl.value = 1;
   skuEl.focus();
+  atualizarContadores();
 }
 
 // ─── atualiza "Em andamento" e "Finalizados" ─────────────────────
@@ -565,7 +503,6 @@ async function finalizarAgendamento() {
 
     // ✅ primeiro finaliza, depois dispara a transferência
     await agendamentoFinalizadoChamarTransferencia();
-
     await Swal.fire({
       icon: 'success',
       title: 'Sucesso!',
@@ -573,6 +510,7 @@ async function finalizarAgendamento() {
       timer: 1500,
       showConfirmButton: false
     });
+
     window.location.href = '/agendamentos/ver?finalizado=conferencia_ok';
   } catch (err) {
     console.error(err);
@@ -899,7 +837,7 @@ async function buscaProdutoEquivalente(valorBipado, token) {
       console.log('DETERMINADO COMO GTIN >', valorBipado);
 
       // BUSCA POR GTIN/EAN
-      const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}`, {
+      const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}&situacao=A`, {
         method: 'GET',
         headers: {
           'Path': '/public-api/v3/produtos',
@@ -915,7 +853,7 @@ async function buscaProdutoEquivalente(valorBipado, token) {
         console.log('Tentando como SKU');
 
         // BUSCA POR SKU
-        const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}`;
+        const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}&situacao=A`;
         const tentativaSku = await fetch(url, {
           method: 'GET',
           headers: {
@@ -944,7 +882,7 @@ async function buscaProdutoEquivalente(valorBipado, token) {
       console.log('DETERMINADO COMO SKU >', valorBipado);
 
       // BUSCA POR SKU
-      const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}`;
+      const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}&situacao=A`;
       const tentativaSku = await fetch(url, {
         method: 'GET',
         headers: {
@@ -960,7 +898,7 @@ async function buscaProdutoEquivalente(valorBipado, token) {
         console.log('Tentando agora a pesquisa por GTIN/EAN');
 
         // BUSCA POR GTIN/EAN
-        const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}`, {
+        const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}&situacao=A`, {
           method: 'GET',
           headers: {
             'Path': '/public-api/v3/produtos',
@@ -1054,6 +992,13 @@ async function fetchJSON(url, { method = 'GET', headers = {}, body, timeoutMs = 
   return res.json();
 }
 
+async function resolveReferenciaUniversal(ref) {
+  return fetchJSON('/api/resolve-referencia', {
+    method: 'POST',
+    body: { id_agend: idAgend, ref }
+  });
+}
+
 async function listarEquivalentes(idAgend) {
   const data = await fetchJSON(`/api/equiv/${idAgend}`);
   console.table(data);
@@ -1065,6 +1010,293 @@ async function listarEquivalentes(idAgend) {
   return { bruto: data, porOriginal: agrupado };
 }
 
+async function validarSeNaoExcedeuQuantidadeMaxima(item, qtd) {
+  console.log('ITEM >>>', item);
+  if (!item) return false;
+
+  const totalDom = toNum(item?.dataset?.total, 0);
+  let atual = toNum(item?.dataset?.bipados, 0); // fallback local
+  const sku = item?.dataset?.sku;
+
+  // 2) checagem robusta
+  if (!Number.isFinite(atual) || !Number.isFinite(totalDom)) {
+    await Swal.fire({
+      icon: 'error',
+      title: 'Dados inválidos para validação de total.',
+      timer: 3000,
+      showConfirmButton: false
+    });
+    return false;
+  }
+
+  // 3) valida limite
+  const permitido = totalDom - atual;
+  if (qtd > permitido) {
+    await Swal.fire({
+      icon: 'error',
+      title: 'Total excedido!',
+      html: `Você pode adicionar no máximo <b>${permitido}</b> unidade(s) para <b>${escHtml(sku)}</b>.<br>
+             Atual: <b>${atual}</b> • Total: <b>${totalDom}</b>`,
+      timer: 5000,
+      showConfirmButton: false
+    });
+    return false;
+  }
+
+  return true;
+}
+
+async function defineProdFazBipagem(buscarTiny, qtd, prodBipado, prodEquiv, comps, listaEquivalentes) {
+  if (!buscarTiny) return;
+  if (!buscarTiny.ok) { // Se não encontrar ou der qualquer erro
+
+    if (buscarTiny.status === 429) {
+      Swal.fire({ icon: 'error', title: 'Muitas consultas em pouco tempo. Aguarde alguns segundos e tente novamente.', timer: 3000, showConfirmButton: false });
+      return;
+    } else if (buscarTiny.status === 401) {
+      Swal.fire({ icon: 'error', title: `Sessão expirada. Por favor faça login novamente.`, timer: 3000, showConfirmButton: false });
+      return;
+    } else if (buscarTiny.status === 400) {
+      Swal.fire({ icon: 'error', title: 'Nenhum produto encontrado com o SKU/EAN enviado', timer: 2500, showConfirmButton: false });
+    } else {
+      Swal.fire({ icon: 'error', title: `ERRO: ${buscarTiny.error}`, timer: 2500, showConfirmButton: false });
+      console.log('ERRO:', buscarTiny.error);
+      return;
+    }
+  }
+
+  console.log('Resposta da requisição ao Tiny >', buscarTiny); // DEBUG
+  const prodBipadoSave = prodBipado;
+  const prodEquivSave = prodEquiv;
+  const compsSave = comps;
+  const listaEquivalentesSave = listaEquivalentes;
+
+  const prodTiny = buscarTiny.itens[0]; // Captura o primeiro índice (único produto localizado a partir do valor bipado)
+  if (!prodTiny) { // Se não conseguir encontrar... (não faço ideia de como cairia aqui)
+    Swal.fire({ icon: 'error', title: `Por favor contate um administrador do sistema. Erro no Tiny. Dados no Console`, timer: 2500, showConfirmButton: false });
+    console.log('prodBipado >', prodBipado);
+    console.log('prodEquiv >', prodEquiv);
+    console.log('buscarTiny >', buscarTiny);
+    console.log('prodTiny >', prodTiny);
+    return;
+  }
+
+  // Existe a possibilidade do usuário bipar uma caixa fechada
+  // A caixa fechada ela contém X unidades dentro dela
+  // O Tiny reconhece como KIT, tendo em sua composição apenas um produto real
+  // Dentro dele se mostra também várias unidades, sendo assim, precisamos verificar se ele está bipando uma caixa ou um produto simples.
+  // Se simples => 1 Un (ou quantas o usuário definiu)
+  // Se KIT => X Un (Quantas unidades estiverem no KIT)
+
+  if (prodTiny.tipo === "S") { // Simples
+    prodBipado = comps.find(c => normSku(c.sku) === normSku(prodTiny.sku) || normGTIN(c.gtin) === onlyDigits(prodTiny.gtin)); // A partir disso ele define o produtoOriginal bipado
+
+    if (!prodBipado) { // Se não conseguir encontrar, pode ser que não seja um produto original, pode ser um produto equivalente
+      // Então ele tenta buscar um produto equivalente também
+      prodEquiv = listaEquivalentes.bruto.find(p => normSku(p.sku_bipado) === normSku(prodTiny.sku) || onlyDigits(p.gtin_bipado) === onlyDigits(prodTiny.gtin));
+
+      if (!prodEquiv) {
+        Swal.fire({ icon: 'error', title: 'Nenhum produto encontrado com o SKU/EAN enviado', timer: 2500, showConfirmButton: false });
+        return;
+      }
+
+      // Verifica se não excede o limite
+      const item = document.querySelector(`.produto-item[data-sku="${esc(prodEquiv.sku_original)}"]`);
+      if (!item) {
+        await Swal.fire({
+          icon: 'error',
+          title: 'Produto fora do agendamento',
+          text: 'O item bipado não pertence a este agendamento.',
+          timer: 3500, showConfirmButton: false
+        });
+        return;
+      }
+
+      if (await validarSeNaoExcedeuQuantidadeMaxima(item, qtd)) {
+        await addUnidadesEquivalentes(prodEquiv, qtd);
+        atualizarContadores();
+      }
+      return;
+    } else {
+      // Verifica se não excede o limite
+      const item = document.querySelector(`.produto-item[data-sku="${esc(prodBipado.sku)}"]`);
+      if (!item) {
+        await Swal.fire({
+          icon: 'error',
+          title: 'Produto fora do agendamento',
+          text: 'O item bipado não pertence a este agendamento.',
+          timer: 3500, showConfirmButton: false
+        });
+        return;
+      }
+
+      if (await validarSeNaoExcedeuQuantidadeMaxima(item, qtd)) {
+        await addUnidadesProdOriginal(prodBipado, qtd);
+        atualizarContadores();
+      }
+      return;
+    }
+  } else if (prodTiny.tipo === "K") {
+    console.log('ProdTiny para KIT >', prodTiny);
+    const compKit = (await buscarCompKit(prodTiny.id))?.item;
+    if (!compKit) return;
+
+    console.log('compKit >', compKit);
+
+    const buscarTinyComp = await buscarProdutoTiny(compKit.sku); // Busca o produto no Tiny (Primeiro por EAN e depois por SKU)
+    console.log('buscarTinyComp >', buscarTinyComp);
+    await defineProdFazBipagem(buscarTinyComp, compKit.quantidade, prodBipadoSave, prodEquivSave, compsSave, listaEquivalentesSave);
+    return;
+  }
+}
+
+async function buscarCompKit(idEanSku) {
+  const url = `/api/tiny/kit-item?valor=${encodeURIComponent(idEanSku)}`;
+
+  try {
+    const r = await fetch(url, { credentials: 'include' });
+
+    // sucesso
+    if (r.ok) {
+      // sempre tente parsear JSON; se não for JSON, lança (o endpoint sempre manda JSON)
+      return await r.json();
+    }
+
+    // falha HTTP: tenta extrair payload de erro uma vez só
+    const errPayload =
+      (await r.clone().json().catch(() => null)) ||
+      { error: await r.clone().text().catch(() => 'Erro desconhecido') };
+
+    // roteia por status
+    switch (r.status) {
+      case 400:
+        await Swal.fire({
+          icon: 'error',
+          title: 'Produto não encontrado ou não é KIT',
+          timer: 2500,
+          showConfirmButton: false
+        });
+        break;
+
+      case 401:
+        await Swal.fire({
+          icon: 'error',
+          title: 'Sessão expirada. Faça login novamente.',
+          timer: 3000,
+          showConfirmButton: false
+        });
+        break;
+
+      case 409: {
+        const count = errPayload?.count ?? 'vários';
+        await Swal.fire({
+          icon: 'error',
+          title: `Kit com múltiplos itens (${count}).`,
+          text: 'Esta operação exige kits com apenas 1 item.',
+          timer: 3500,
+          showConfirmButton: false
+        });
+        break;
+      }
+
+      case 429:
+        await Swal.fire({
+          icon: 'error',
+          title: 'Muitas consultas em pouco tempo.',
+          text: 'Aguarde alguns segundos e tente novamente.',
+          timer: 3000,
+          showConfirmButton: false
+        });
+        break;
+
+      case 502:
+        console.error('Detalhe Tiny:', errPayload?.detalhe || errPayload?.error);
+        await Swal.fire({
+          icon: 'error',
+          title: 'Falha ao contatar Tiny',
+          text: 'Mais detalhes no console (chamar ADM).',
+          timer: 3000,
+          showConfirmButton: false
+        });
+        break;
+
+      case 503:
+        await Swal.fire({
+          icon: 'error',
+          title: 'Token do Tiny indisponível no servidor',
+          text: 'Chame um administrador.',
+          timer: 3000,
+          showConfirmButton: false
+        });
+        break;
+
+      default:
+        console.error('Erro inesperado:', r.status, errPayload);
+        await Swal.fire({
+          icon: 'error',
+          title: 'Erro inesperado',
+          text: 'Veja detalhes no console (chamar ADM).',
+          timer: 3000,
+          showConfirmButton: false
+        });
+    }
+
+    // Retorna um shape de erro consistente para quem chamou (se precisar checar)
+    return { ok: false, status: r.status, ...errPayload };
+
+  } catch (e) {
+    // erro de rede / CORS / abort
+    console.error('Network/Fetch error:', e);
+    await Swal.fire({
+      icon: 'error',
+      title: 'Falha de rede',
+      text: 'Não foi possível contatar o servidor. Verifique sua conexão.',
+      timer: 3000,
+      showConfirmButton: false
+    });
+    return { ok: false, status: 0, error: 'network_error' };
+  }
+}
+
+async function buscarProdutoTiny(sku) {
+  try {
+    const r = await fetch(`/api/tiny/buscar-produto?valor=${encodeURIComponent(sku)}`);
+    if (!r.ok) throw r;
+    //   {
+    //   const txt = await r.text().catch(() => '');
+    //   throw new Error(`HTTP ${r.status} – ${txt}`);
+    // }
+    return r.json();
+  } catch (e) {
+    if (e.status === 400) {
+      Swal.fire({ icon: 'error', title: 'Nenhum produto encontrado com o SKU/EAN enviado', timer: 2500, showConfirmButton: false });
+      console.log('ERRO:', e);
+      return;
+    }
+    Swal.fire({ icon: 'error', title: `ERRO: ${e}`, timer: 2500, showConfirmButton: false });
+    console.log('ERRO:', e);
+    return;
+  }
+}
+async function addUnidadesProdOriginal(prodOriginal, qtd) {
+  const payload = {
+    id_agend: idAgend,
+    sku: prodOriginal.sku,
+    quant: qtd
+  };
+
+  const r = await fetch('/api/bipar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`HTTP ${r.status} – ${txt}`);
+  }
+  return r.json();
+}
 async function addUnidadesEquivalentes(produtoBipado, qtd) {
   const payload = {
     id_agend: idAgend,
@@ -1262,97 +1494,111 @@ function perguntarConfirmacao() {
   });
 }
 
-async function agendamentoFinalizadoChamarTransferencia() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const idAgend = parseInt(urlParams.get('id'), 10);
-
-  // Ajuste esses IDs conforme seu mapeamento atual (ou traga do expedicao.js para 1 fonte só)
-  const DEPOSITO_ORIGEM = 822208355; // Produção
-  const DEPOSITO_DESTINO = 785301556; // Exemplo: Mercado Livre
-
-  const toInt = v => {
-    const n = Number(v);
-    return Number.isFinite(n) ? Math.trunc(n) : null;
-  };
-
-  // lê composições do <div id="js-data" data-comps="...">
-  let comps = [];
-  try {
-    const raw = document.getElementById('js-data')?.dataset?.comps || '[]';
-    comps = JSON.parse(raw);
-  } catch { }
-
-  // Para cada SKU do agendamento, traz totais (originais + equivalentes)
-  const mapaTotais = new Map(); // sku_original -> total bipado (direto + equiv)
-  for (const p of comps) {
-    const skuOriginal = String(p.sku || '').trim();
-    if (!skuOriginal) continue;
-
-    const qs = new URLSearchParams({ id_agend_ml: String(idAgend), sku: skuOriginal });
-    try {
-      const resp = await fetch(`/api/bipagem/detalhe?${qs}`);
-      if (!resp.ok) continue;
-      const j = await resp.json();
-      const total = toInt(j?.totais?.bipados_total) || 0;
-      mapaTotais.set(skuOriginal, total);
-    } catch { }
+//? Ajuste esses IDs conforme seu mapeamento atual (ou traga do expedicao.js para 1 fonte só)
+//? const DEPOSITO_ORIGEM = 785301556; //* Estoque (151) 
+//? const DEPOSITO_DESTINO = 822208355; //* Produção (141)
+async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301556, DEPOSITO_DESTINO = 822208355) {
+  // * Apenas um guardinha de trânsito... Não é para acontecer, mas vai que o depósito origem e destino são iguais né...
+  if (DEPOSITO_ORIGEM === DEPOSITO_DESTINO) {
+    throw new Error('Depósitos iguais — operação inválida.');
   }
 
-  // Resolve id_tiny de cada sku_original (ou do equivalente quando aplicável)
-  const todosProdutos = (() => {
-    try {
-      const raw = document.getElementById('js-data-produtos')?.dataset?.produtos;
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  })();
+  //? Busca a bipagem no banco
+  const url = `/api/agendamento/${idAgend}/completo`;
+  const resp = await fetch(url);
+  if (!resp.ok) { //! Se deu algum erro na requisição ele ignora e não faz a transferência de *NADA*
+    throw new Error(`Erro: ${resp.status} \n${resp.statusText}`);
+  }
 
-  const resolverIdTiny = (sku) => {
-    const d = String(sku || '');
-    const bySku = todosProdutos.find(p => String(p.sku) === d);
-    if (bySku && (bySku.id_tiny || bySku.id)) return bySku.id_tiny || bySku.id;
-    const digits = d.replace(/\D+/g, '');
-    if (digits) {
-      const byGtin = todosProdutos.find(p => String(p.gtin || '').replace(/\D+/g, '') === digits);
-      if (byGtin && (byGtin.id_tiny || byGtin.id)) return byGtin.id_tiny || byGtin.id;
+  // * Se deu tudo certo então define bipagemCompleta
+  const bipagemCompleta = await resp.json();
+  let listaObjPrincipal = []; //? Cria uma lista de objetos principal, ele será colocado dentro de "movimentos" no payload...
+  //? Ele que será enviado para a rota fazer a transferência, ele basicamente avisa quais produtos devem ser transferidos, quantos e em qual depósito.
+  // console.log('bipagemCompleta (DEBUG) >', bipagemCompleta); // TODO REMOVER DEPOIS (DEBUG)
+
+  // ? Inicia um Looping onde esse looping serve para poder capturar os produtos do Agendamento e criar um objeto, a
+  for (const prod of bipagemCompleta.produtos) {
+    const p = prod.produto_original; // * Para facilitar na construção do Objeto
+    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
+    //! Eu não tinha pensado nisso... Mas também é possível que não vá NADA do produto original!
+    //! Exemplo: Produto original = Vara azul | Mas não vai vara azul, vai a vara verde, adiciona como equivalente apenas!
+    if (prod.bipagem.bipados > 0) { //! Sendo assim, caso aconteça de não ser enviado nada do produto original apenas não faça o objeto do produto original no Payload!
+      const objProdOriginal = { // ? Cira o objeto para o produto original
+        // equivalente: false, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
+        sku: p.sku_prod, // ? SKU do produto que vai ser transferido (Original)
+        id_produto: p.id_prod_tiny, // ? ID do produto que vai ser transferido (Original)
+        de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
+        para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
+        unidades: prod.bipagem.bipados, // ? Quantidade que foi bipado do produto (Original)
+        preco_unitario: 0 // * Isso daqui é opicional...
+      }
+      listaObjPrincipal.push(objProdOriginal); // ? Adiciona o objeto criado na lista de objetos
     }
-    return null;
-  };
 
-  // Monta movimentos somando por id_produto
-  const somaPorId = new Map();
-  for (const [skuOriginal, unidades] of mapaTotais.entries()) {
-    const idTiny = toInt(resolverIdTiny(skuOriginal));
-    const un = toInt(unidades);
-    if (!idTiny || !un || un <= 0) continue;
-    somaPorId.set(idTiny, (somaPorId.get(idTiny) || 0) + un);
+    if (prod.equivalentes.length > 0) { //! Existe a possibilidadde de não haver produtos equivalentes, nesse caso apenas ignora
+      for (const equiv of prod.equivalentes) {
+        if (equiv.bipados <= 0) continue; //! Existe a possibilidade de haver produtos equivalentes porém sem ter sido bipado nenhuma unidade! Nesse caso, apenas ignore.
+        const objProdEquiv = { // ? Cira o objeto para o produto equivalente
+          // equivalente: true, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
+          sku: equiv.sku_bipado, // ? SKU do produto que vai ser transferido (Equivalente)
+          id_produto: equiv.id_tiny_equivalente, // ? ID do produto que vai ser transferido (Equivalente)
+          de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
+          para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
+          unidades: equiv.bipados, // ? Quantidade que foi bipado do produto (Equivalente)
+          preco_unitario: 0 // * Isso daqui é opicional...
+        }
+        listaObjPrincipal.push(objProdEquiv); // ? Adiciona o objeto criado na lista de objetos
+      }
+    } else { continue }
   }
 
-  const movimentos = Array.from(somaPorId.entries()).map(([id_produto, unidades]) => ({
-    id_produto,
-    de: DEPOSITO_ORIGEM,
-    para: DEPOSITO_DESTINO,
-    unidades,
-    preco_unitario: 0
-  }));
+  // ! Não sei se isso é uma possibilidade, mas é bom evitar...
+  // ! Caso aconteça de não ter nada a transferir, retorna erro.
+  if (listaObjPrincipal.length <= 0) throw new Error('Nada para transferir (bipagem total = 0).');
+  // console.log('Objeto Principal (DEBUG) >', listaObjPrincipal); // TODO REMOVER DEPOIS (DEBUG)
 
-  if (!movimentos.length) {
-    await Swal.fire('Atenção', 'Nenhuma movimentação válida foi encontrada.', 'warning');
-    return;
+  // ? Definindo variáveis para OBS (Tiny)
+  const empresa = { 1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports" }
+  const info = document.getElementById("infoAgend")?.dataset || {};
+  const empresaId = parseInt(info.empresa, 10);
+  const numAg = info.agendamento;
+  const mktp = info.marketplace;
+
+  // Definindo Usuário que fez a transferência
+  let user = ((await whoAmI())?.nome_display_usuario || "Indefinido");
+
+  // console.log('User >', user); // TODO REMOVER DEPOIS (DEBUG)
+  const payload = {
+    empresa: empresa[empresaId],             // opcional (futuro: seleção de token)
+    observacoes: `Conferência - AgendamentosWeb \nAg.: ${numAg}\nMktp.: ${mktp}\nEmp.: ${empresa[empresaId]}\nCo.: ${user}`,      // opcional
+    preco_unitario: 0,               // opcional; default=0
+    movimentos: listaObjPrincipal
   }
 
-  // Enfileira no backend
-  const observacoes = `Conferência ${idAgend} – saída Prod. e entrada no destino`;
-  const r = await fetch('/estoque/mover', {
+  // console.log('Payload pronto para a transferência >', payload); // TODO REMOVER DEPOIS (DEBUG)
+
+  // console.log('Preparando fetch para transferência de estoque...'); // TODO REMOVER DEPOIS (DEBUG)
+
+  const transfReq = await fetch('/estoque/mover', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ observacoes, preco_unitario: 0, movimentos })
+    credentials: 'same-origin',
+    body: JSON.stringify(payload)
   });
-  const payload = await r.json().catch(() => ({}));
 
-  if (!r.ok || !payload.ok) {
-    const msg = payload?.error || payload?.detalhe || r.statusText;
-    throw new Error(msg);
+  if (!transfReq.ok) {
+    const txt = await transfReq.text().catch(() => '');
+    throw new Error(`Falha na transferência (${transfReq.status} ${transfReq.statusText}) ${txt}`);
   }
+
+  return;
+}
+
+async function whoAmI() {
+  const r = await fetch('/api/me', { credentials: 'same-origin' });
+  if (!r.ok) return null;
+  const j = await r.json();
+  return j.authenticated ? j.user : null;
 }
 
 async function moverEstoque(movimentos, meta = {}) {
@@ -2069,22 +2315,22 @@ async function verificarSeECaixaFechada(valorLido) {
 
 async function salvarAlteracoesConfirmacaoGerente() {
 
-    return true
+  return true
 }
 
 function fecharModal() {
-    document.getElementById('modal-editar-produto').style.display = 'none';
-    document.body.style.overflow = '';
-    window.pauseAutoRefresh = false;
+  document.getElementById('modal-editar-produto').style.display = 'none';
+  document.body.style.overflow = '';
+  window.pauseAutoRefresh = false;
 }
 
 // Fecha clicando fora
 window.addEventListener('click', (e) => {
-    const modal = document.getElementById('modal-editar-produto');
-    if (e.target === modal) fecharModal();
+  const modal = document.getElementById('modal-editar-produto');
+  if (e.target === modal) fecharModal();
 });
 
 // Fecha com ESC
 window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') fecharModal();
+  if (e.key === 'Escape') fecharModal();
 });
