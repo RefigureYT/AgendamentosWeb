@@ -474,7 +474,7 @@ async function verTransferenciasAgendamento(idAgend) {
         const linhas = [];
         const add = (item, tipo) => {
             const sku = item.sku ?? item.sku_bipado ?? item.sku_comp ?? '';
-            const nome = item.nome ?? item.nome_equivalente ?? item.nome_original ?? item.nome_comp ??'';
+            const nome = item.nome ?? item.nome_equivalente ?? item.nome_original ?? item.nome_comp ?? '';
             const qtd = item.qtd_mov_conf ?? item.qtd ?? item.qtd_conf ?? '';
             const saida = item.lanc_conf_s ?? '';
             const entrada = item.lanc_conf_e ?? '';
@@ -520,3 +520,27 @@ async function verTransferenciasAgendamento(idAgend) {
       </div>`;
     }
 }
+
+
+// Modo dev: ?devModal=olho  | ?devModal=transf | ?devModal=olho,transf
+(function () {
+    const params = new URLSearchParams(location.search);
+    const raw = params.get('devModal');
+    if (!raw) return;
+
+    const map = {
+        olho: 'modalOlho',
+        transf: 'modalTransferencias',
+        transferencias: 'modalTransferencias'
+    };
+
+    raw.split(',').map(s => s.trim().toLowerCase()).forEach(key => {
+        const idModal = map[key] || key; // também aceita o próprio id
+        const el = document.getElementById(idModal);
+        if (!el) return;
+
+        const modal = new bootstrap.Modal(el, { backdrop: 'static', keyboard: false });
+        el.addEventListener('hide.bs.modal', (e) => e.preventDefault()); // não deixa fechar
+        modal.show();
+    });
+})();

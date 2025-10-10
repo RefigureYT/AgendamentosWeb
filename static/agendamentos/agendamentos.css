@@ -13,7 +13,8 @@ body {
 } */
 
 .status-finalizado {
-    background-color: #6c757d;  /* cinza */
+    background-color: #6c757d;
+    /* cinza */
     color: white;
 }
 
@@ -170,8 +171,189 @@ body {
         border-radius: .2rem;
     }
 
-    .pedido-numero, .new-agend {
+    .pedido-numero,
+    .new-agend {
         font-size: 1.3rem;
     }
 
+}
+
+/* ====== Modal Transferências: pastinhas (originais → equivalentes) ====== */
+.transf-header .status-conferencia {
+    background-color: #ff9933;
+    /* segue sua paleta */
+    color: #fff;
+}
+
+.transf-accordion {
+    display: grid;
+    gap: .75rem;
+}
+
+/* Card do produto original */
+.prod-card {
+    background: #fff;
+    border-radius: .75rem;
+    border: 1px solid #dee2e6;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+}
+
+/* Cabeçalho clicável */
+.prod-header {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: .75rem;
+    padding: .85rem 1rem;
+    background: linear-gradient(90deg, rgba(233, 241, 251, .7), rgba(255, 255, 255, .8));
+    border: 0;
+    outline: none;
+    cursor: pointer;
+    text-align: left;
+}
+
+.prod-header:hover {
+    background: linear-gradient(90deg, rgba(233, 241, 251, 1), rgba(255, 255, 255, 1));
+}
+
+.prod-header .left {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-width: 0;
+}
+
+.prod-header .right {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.prod-header .sku {
+    font-weight: 700;
+    letter-spacing: .5px;
+    color: #2c3e50;
+}
+
+.prod-header .nome {
+    color: #4a4a4a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* “Pills” de resumo à direita */
+.prod-header .pill {
+    background: #f5f7fb;
+    border: 1px solid #e6e9f2;
+    padding: .25rem .5rem;
+    border-radius: .5rem;
+    font-size: .85rem;
+    color: #2c3e50;
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+}
+
+.prod-header .pill .lbl {
+    color: #6b7280;
+}
+
+/* Chevron que gira */
+.prod-header .chevron {
+    font-size: 1rem;
+    transition: transform .2s ease;
+    margin-left: .25rem;
+}
+
+.prod-header[aria-expanded="true"] .chevron {
+    transform: rotate(180deg);
+}
+
+/* Faixa visual na esquerda do card */
+.prod-card {
+    position: relative;
+}
+
+.prod-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 0 auto;
+    /* default nada */
+}
+
+.prod-header .badge-tipo-original {
+    --bcol: #0d6efd;
+}
+
+.badge-tipo-original {
+    background: #0d6efd;
+    color: #fff;
+}
+
+/* Corpo da área de equivalentes */
+.equiv-body {
+    padding: .75rem 1rem 1rem;
+    background: #fff;
+    border-top: 1px dashed #e2e6ef;
+    animation: fadein .2s ease-out;
+}
+
+@keyframes fadein {
+    from {
+        opacity: 0;
+        transform: translateY(-3px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Badge “EQUIVALENTE” */
+.badge-tipo-equivalente {
+    background: #6c757d;
+    color: #fff;
+}
+
+/* Badges de status locais (sem interferir nos seus) */
+.badge-ok {
+    background: #198754;
+    /* Bootstrap success */
+    color: #fff;
+}
+
+.badge-pendente {
+    background: #ffc107;
+    /* Bootstrap warning */
+    color: #212529;
+}
+
+.badge-erro {
+    background: #dc3545;
+    /* Bootstrap danger */
+    color: #fff;
+}
+
+/* Tabela mais “apertadinha” */
+#modalTransferencias .table td,
+#modalTransferencias .table th {
+    vertical-align: middle;
+    padding: .5rem .5rem;
+    font-size: .95rem;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .prod-header {
+        grid-template-columns: 1fr;
+    }
+
+    .prod-header .right {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
 }
