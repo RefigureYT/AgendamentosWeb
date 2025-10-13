@@ -455,72 +455,588 @@ function abrirModalOlho(idBd, idTipo) {
 })();
 
 async function verTransferenciasAgendamento(idAgend) {
-    const modalEl = document.getElementById('modalTransferencias');
-    const body = document.getElementById('conteudo-transferencias');
-    body.innerHTML = `
-    <div class="d-flex justify-content-center align-items-center p-4">
-      <div class="spinner-border" role="status"><span class="visually-hidden">Carregando...</span></div>
-      <span class="ms-3">Carregando transferências...</span>
-    </div>`;
-    const modal = new bootstrap.Modal(modalEl);
-    modal.show();
+    carregarInfoEmpresaModal(idAgend);
+    // ---------- Helpers robustos ----------
+    const toStr = v => (v === null || v === undefined) ? '' : String(v);
+    const esc = s => toStr(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); // XSS básico
+    const slug = s => toStr(s).replace(/[^\w\-]+/g, '-'); // id html seguro
+    const asInt = v => Number.isFinite(v) ? v : parseInt(v ?? 0, 10) || 0;
+    const isZeroLike = v => v === null || v === undefined || v === '' || Number(v) === 0;
 
+    const isUnusedEquiv = (e) => {
+        // Não usado = zero mov./bipagem e sem lançamentos
+        const noMoves = isZeroLike(e.qtd_mov_conf) && isZeroLike(e.qtd_mov_exp) && isZeroLike(e.bipados);
+        const noLanc = !e.lanc_conf_s && !e.lanc_conf_e && !e.lanc_exp_s && !e.lanc_exp_e;
+        return noMoves && noLanc;
+    };
+
+    const isUnusedComp = (c, pack, prod) => {
+        // “não usado” = sem movimentos e sem lançamentos...
+        const noMoves = isZeroLike(c.qtd_mov_conf) && isZeroLike(c.qtd_mov_exp);
+        const noLanc = !c.lanc_conf_s && !c.lanc_conf_e && !c.lanc_exp_s && !c.lanc_exp_e;
+
+        // ...mas se houve bipagem direta do ORIGINAL (mesmo SKU), então NÃO é “não usado”
+        const bipSku = pack?.bipagemDireta?.sku;
+        const bipQtd = asInt(pack?.bipagemDireta?.bipados);
+        const skuComp = c?.sku_comp || '';
+        const skuProd = prod?.sku_prod || '';
+
+        const isOriginalSku = (skuComp && skuComp === skuProd) || (skuComp && bipSku && skuComp === bipSku);
+        const usedByDirectBip = isOriginalSku && bipQtd > 0;
+
+        return !usedByDirectBip && noMoves && noLanc;
+    };
+
+
+    const mascarar = (val) => {
+        if (val === null || val === undefined || val === '') return '—';
+        const s = String(val);
+        return s.length > 6 ? `${s.slice(0, 3)}...${s.slice(-3)}` : s;
+    };
+
+    const statusMap = Object.freeze({
+        0: 'Pendente',
+        1: 'Em execução',
+        2: 'Concluído',
+        3: 'Erro',
+        4: 'Ignorado'
+    });
+    const statusClassMap = Object.freeze({
+        0: 'pendente',
+        1: 'execucao',
+        2: 'ok',
+        3: 'erro',
+        4: 'ignorado'
+    });
+
+    // ordem de severidade para agregação de status (maior prioridade primeiro)
+    const SEVERITY = [3, 1, 0, 2, 4]; // Erro > Execução > Pendente > OK > Ignorado
+
+    const aggStatus = (list) => {
+        const set = new Set(list.filter(v => v !== null && v !== undefined));
+        if (set.size === 0) return 0; // default "pendente" se não há info
+        // se todos forem iguais, retorna o próprio
+        if (set.size === 1) return [...set][0];
+        // senão, aplica severidade
+        for (const s of SEVERITY) if (set.has(s)) return s;
+        return 0;
+    };
+
+    const badgeHTML = (st) => {
+        const s = (st in statusMap) ? st : 0;
+        const cls = statusClassMap[s] || 'pendente';
+        const icon = s === 1 ? '<i class="bi bi-arrow-repeat spin"></i> ' :
+            s === 3 ? '<i class="bi bi-exclamation-triangle-fill"></i> ' : '';
+        return `<span class="badge badge-${cls}">${icon}${statusMap[s]}</span>`;
+    };
+
+    const chip = (label, val, statusRef) => {
+        // statusRef é o status (conf ou exp) para definir classe 'erro' ou 'muted' quando nulo
+        const isNull = (val === null || val === undefined || val === '');
+        const cls = isNull ? (statusRef === 3 ? 'erro' : 'muted') : '';
+        return `<span class="chip-lcto ${cls}">${esc(label)}: ${isNull ? '—' : mascarar(val)}</span>`;
+    };
+
+    const statusbarClass = (confAgg, expAgg) => {
+        const worst = aggStatus([confAgg, expAgg]); // 3 > 1 > 0 > 2 > 4
+        if (worst === 3) return 'statusbar--erro';
+        if (worst === 1) return 'statusbar--exec';
+        if (worst === 0) return 'statusbar--pendente';
+        if (worst === 2) return 'statusbar--ok';
+        if (worst === 4) return 'statusbar--muted'; // tudo ignorado
+        return 'statusbar--muted';
+    };
+
+    const sumQtdMovConf = (comps, equivs, bipagemDireta) => {
+        const a = (comps ?? []).reduce((s, c) => s + asInt(c.qtd_mov_conf), 0);
+        const b = (equivs ?? []).reduce((s, e) => s + asInt(e.qtd_mov_conf), 0);
+        const c = asInt(bipagemDireta?.bipados ?? 0);
+        // regra prática: totals.bipados_total costuma existir e ser a verdade, mas se faltar, soma.
+        return a + b + c;
+    };
+
+    const sumQtdMovSucesso = (comps, equivs) => {
+        const conclComps = (comps ?? []).reduce((s, c) => s + (asInt(c.status_conf) === 2 ? asInt(c.qtd_mov_conf) : 0), 0);
+        const conclEquivs = (equivs ?? []).reduce((s, e) => s + (asInt(e.status_conf) === 2 ? asInt(e.qtd_mov_conf) : 0), 0);
+        return conclComps + conclEquivs;
+    };
+
+    // ---------- UI setup ----------
+    // fecha o modal "olho" se aberto
+    const modalOlho = document.getElementById('modalOlho');
+    const instOlho = modalOlho ? bootstrap.Modal.getInstance(modalOlho) : null;
+    if (instOlho) instOlho.hide();
+
+    // abre o modal de transferências
+    const modalTransf = new bootstrap.Modal(document.getElementById('modalTransferencias'));
+    modalTransf.show();
+
+    const pastasContainer = document.getElementsByClassName('transf-accordion')[0];
+    if (!pastasContainer) return console.error('[verTransferenciasAgendamento] .transf-accordion não encontrado');
+
+    // ---------- Fetch ----------
+    let data;
     try {
-        const resp = await fetch(`/api/retirado/${idAgend}/originais-equivalentes`, { credentials: 'include' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const dados = await resp.json();
-        console.log(dados);
-
-        const linhas = [];
-        const add = (item, tipo) => {
-            const sku = item.sku ?? item.sku_bipado ?? item.sku_comp ?? '';
-            const nome = item.nome ?? item.nome_equivalente ?? item.nome_original ?? item.nome_comp ?? '';
-            const qtd = item.qtd_mov_conf ?? item.qtd ?? item.qtd_conf ?? '';
-            const saida = item.lanc_conf_s ?? '';
-            const entrada = item.lanc_conf_e ?? '';
-            linhas.push(`
-        <tr>
-          <td>${tipo}</td>
-          <td>${sku}</td>
-          <td>${nome}</td>
-          <td class="text-end">${qtd || '-'}</td>
-          <td>${saida || '-'}</td>
-          <td>${entrada || '-'}</td>
-        </tr>`);
-        };
-
-        (dados.originais || []).forEach(o => add(o, 'Original'));
-        (dados.equivalentes || []).forEach(e => add(e, 'Equivalente'));
-
-        body.innerHTML = `
-      <div class="mb-2 small text-muted">Agendamento: <strong>${idAgend}</strong></div>
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th style="min-width:110px">Tipo</th>
-              <th>SKU</th>
-              <th>Produto</th>
-              <th class="text-end">Qtd mov.</th>
-              <th>Saída (idLanc)</th>
-              <th>Entrada (idLanc)</th>
-            </tr>
-          </thead>
-          <tbody>${linhas.join('')}</tbody>
-        </table>
-      </div>
-      <div class="small text-muted">
-        Os códigos “idLanc” são os lançamentos retornados pelo Tiny. “-” indica que ainda não houve movimentação registrada.
-      </div>`;
+        const r = await fetch(`/api/retirado/${idAgend}/produtos-detalhados`, { headers: { 'Accept': 'application/json' } });
+        if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+        data = await r.json();
     } catch (err) {
-        console.error(err);
-        body.innerHTML = `
-      <div class="alert alert-danger">
-        Não foi possível carregar as transferências deste agendamento.
-      </div>`;
+        console.error('Falha ao buscar dados:', err);
+        pastasContainer.innerHTML = `<div class="alert alert-danger">Não foi possível carregar as transferências (id ${esc(idAgend)}).</div>`;
+        return;
     }
+
+    const itens = data?.produtosOriginais ?? [];
+    if (!Array.isArray(itens) || itens.length === 0) {
+        pastasContainer.innerHTML = `<div class="alert alert-warning">Nenhum item encontrado para este agendamento.</div>`;
+        return;
+    }
+
+    // ---------- Render ----------
+    const htmlCards = [];
+    itens.forEach((pack, idx) => {
+        const prod = pack.produto || {};
+        const comps = Array.isArray(pack.composicoes) ? pack.composicoes : [];
+        const equivs = Array.isArray(pack.equivalentes) ? pack.equivalentes : [];
+
+        // Agregações: originais/equivalentes “não usados” => Ignorado (4)
+        const compConfList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_conf));
+        const compExpList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_exp));
+        const equivConfList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_conf));
+        const equivExpList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_exp));
+
+        const confAgg = aggStatus([...compConfList, ...equivConfList]);
+        const expAgg = aggStatus([...compExpList, ...equivExpList]);
+
+        const cardCls = statusbarClass(confAgg, expAgg);
+
+        // Listas de status efetivos por linha (ORIGINAL + EQUIVALENTE)
+        const confEffList = [...compConfList, ...equivConfList];
+        const expEffList = [...compExpList, ...equivExpList];
+
+        // Cabeçalho: Qtd Agendada / Movida
+        const qtdAgendada = asInt(prod.unidades_prod);
+
+        // Soma apenas o que está CONCLUÍDO (status_conf === 2).
+        // Bipagem direta só entra se o agregado de Conferência do card estiver Concluído.
+        const qtdMovida = (() => {
+            const base = sumQtdMovSucesso(comps, equivs);
+            const bipSucesso = (confAgg === 2) ? asInt(pack?.bipagemDireta?.bipados) : 0;
+            return base + bipSucesso;
+        })();
+
+
+        // ID/anchor seguro
+        const anchorId = `equiv-${slug(prod.sku_prod || prod.id_prod || `item-${idx}`)}`;
+        const ariaExpanded = (idx === 0) ? 'true' : 'false';
+        const collapseCls = (idx === 0) ? 'collapse show' : 'collapse';
+
+        // Tabela: linhas ORIGINAL (composições) + EQUIVALENTE (quando houver)
+        const linhas = [];
+
+        // Linhas de composições (ORIGINAL)
+        for (const c of comps) {
+            const stConfRaw = asInt(c.status_conf);
+            const stExpRaw = asInt(c.status_exp);
+            const effConf = isUnusedComp(c, pack, prod) ? 4 : stConfRaw; // Ignorado se bipagem=0 e sem mov/lanc
+            const effExp = isUnusedComp(c, pack, prod) ? 4 : stExpRaw;
+
+            const lancs = [
+                chip('S', c.lanc_conf_s, effConf),
+                chip('E', c.lanc_conf_e, effConf),
+                '<br>',
+                chip('S', c.lanc_exp_s, effExp),
+                chip('E', c.lanc_exp_e, effExp),
+            ].join(' ');
+
+            linhas.push(`
+            <tr>
+                <td><span class="badge badge-tipo-original">ORIGINAL</span></td>
+                <td>${esc(c.sku_comp)}</td>
+                <td>${esc(c.nome_comp)}</td>
+                <td class="text-end">${asInt(c.qtd_mov_conf)}</td>
+                <td>${badgeHTML(effConf)}</td>
+                <td>${badgeHTML(effExp)}</td>
+                <td class="d-none d-md-table-cell">${lancs}</td>
+            </tr>
+            `);
+        }
+
+        // Linhas de equivalentes (EQUIVALENTE)
+        if (equivs.length > 0) {
+            for (const e of equivs) {
+                const stConfRaw = asInt(e.status_conf);
+                const stExpRaw = asInt(e.status_exp);
+                const effConf = isUnusedEquiv(e) ? 4 : stConfRaw; // coerce -> Ignorado
+                const effExp = isUnusedEquiv(e) ? 4 : stExpRaw;
+
+                const lancs = [
+                    chip('S', e.lanc_conf_s, effConf),
+                    chip('E', e.lanc_conf_e, effConf),
+                    '<br>',
+                    chip('S', e.lanc_exp_s, effExp),
+                    chip('E', e.lanc_exp_e, effExp),
+                ].join(' ');
+
+                linhas.push(`
+                <tr>
+                    <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+                    <td>${esc(e.sku_bipado)}</td>
+                    <td>${esc(e.nome_equivalente ?? 'Equivalente')}</td>
+                    <td class="text-end">${asInt(e.qtd_mov_conf)}</td>
+                    <td>${badgeHTML(effConf)}</td>
+                    <td>${badgeHTML(effExp)}</td>
+                    <td class="d-none d-md-table-cell">${lancs}</td>
+                </tr>
+                `);
+            }
+        } else {
+            // Informação quando não houve equivalente (mantém compatível com teu HTML de exemplo)
+            linhas.push(`
+        <tr class="row-informativo">
+          <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+          <td>—</td>
+          <td>Sem equivalente — movimentação feita com o ORIGINAL</td>
+          <td class="text-end">—</td>
+          <td><span class="badge badge-ignorado">Ignorado</span></td>
+          <td><span class="badge badge-ignorado">Ignorado</span></td>
+          <td class="d-none d-md-table-cell">
+            <span class="chip-lcto muted">——</span> <span class="chip-lcto muted">——</span>
+          </td>
+        </tr>
+      `);
+        }
+
+        // Mini-notes dinâmico (rico)
+        const notes = [];
+
+        // Diagnóstico de erros
+        const confErrs = confEffList.filter(s => s === 3).length;
+        const expErrs = expEffList.filter(s => s === 3).length;
+        const hasErro = (confErrs + expErrs) > 0;
+        if (hasErro) {
+            notes.push(`<div class="error"><i class="bi bi-bug-fill"></i> Falhas detectadas: <strong>${confErrs}</strong> em Conferência e <strong>${expErrs}</strong> em Expedição.</div>`);
+        }
+
+        // Execução em curso
+        const emExecOps = confEffList.filter(s => s === 1).length + expEffList.filter(s => s === 1).length;
+        if (emExecOps > 0) {
+            notes.push(`<div><i class="bi bi-arrow-repeat"></i> Worker em curso para <strong>${emExecOps}</strong> operação(ões).</div>`);
+        }
+
+        // Aguardando expedição (sem erro)
+        if (!hasErro && confAgg === 2 && expAgg !== 2) {
+            notes.push(`<div><i class="bi bi-clock-history"></i> Conferência concluída; aguardando expedição.</div>`);
+        }
+
+        // Equivalentes/Originais não utilizados
+        const allEquivUnused = equivs.length > 0 && equivs.every(isUnusedEquiv);
+        if (allEquivUnused) {
+            notes.push(`<div><i class="bi bi-slash-circle"></i> Equivalentes não utilizados: marcados como <strong>Ignorados</strong>.</div>`);
+        }
+        const allCompUnused = comps.length > 0 && comps.every(c => isUnusedComp(c, pack, prod));
+        if (allCompUnused) {
+            notes.push(`<div><i class="bi bi-slash-circle"></i> Originais não utilizados neste envio.</div>`);
+        }
+
+        // Progresso (parcial ou concluído)
+        if (!hasErro && qtdMovida > 0 && qtdMovida < qtdAgendada) {
+            notes.push(`<div><i class="bi bi-bar-chart"></i> Parcial: movido <strong>${qtdMovida}</strong> de <strong>${qtdAgendada}</strong>.</div>`);
+        }
+        if (!hasErro && confAgg === 2 && expAgg === 2 && qtdMovida >= qtdAgendada) {
+            notes.push(`<div><i class="bi bi-check2-circle"></i> Transferência concluída (<strong>${qtdAgendada}</strong>/<strong>${qtdAgendada}</strong>).</div>`);
+        }
+
+        // Bipagem direta (informativo)
+        if (pack?.bipagemDireta?.bipados) {
+            notes.push(`<div><i class="bi bi-upc-scan"></i> Bipagem direta do original: <strong>${asInt(pack.bipagemDireta.bipados)}</strong>.</div>`);
+        }
+
+        // Sem tentativas
+        const noAttempts = confEffList.every(s => s === 0) && expEffList.every(s => s === 0) && qtdMovida === 0;
+        if (noAttempts && !hasErro && emExecOps === 0) {
+            notes.push(`<div><i class="bi bi-info-circle"></i> Sem tentativas registradas.</div>`);
+        }
+
+        const confBadge = badgeHTML(confAgg);
+        const expBadge = badgeHTML(expAgg);
+
+        // Cabeçalho de cada “pasta”
+        htmlCards.push(`
+    <div class="prod-card ${cardCls}" data-pack="${anchorId}">
+        <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#${anchorId}" aria-expanded="${ariaExpanded}">
+        <div class="left">
+            <span class="badge badge-tipo-original">ORIGINAL</span>
+            <span class="sku">${esc(prod.sku_prod ?? '')}</span>
+            <span class="nome">${esc(prod.nome_prod ?? '')}</span>
+        </div>
+        <div class="right" id="${anchorId}-right">
+            <span class="pill"><span class="lbl">Qtd Agendada:</span> ${qtdAgendada}</span>
+            <span class="pill"><span class="lbl">Qtd Movida:</span> ${qtdMovida}</span>
+            <span class="pill"><span class="lbl">Conf.:</span> ${confBadge}</span>
+            <span class="pill"><span class="lbl">Exp.:</span> ${expBadge}</span>
+            <i class="chevron bi bi-chevron-down"></i>
+        </div>
+        </button>
+
+        <div id="${anchorId}" class="${collapseCls}">
+        <div class="equiv-body">
+            <div class="table-responsive">
+            <table class="table table-sm align-middle mb-2">
+                <thead class="table-light">
+                <tr>
+                    <th style="width:120px;">Tipo</th>
+                    <th style="width:120px;">SKU</th>
+                    <th>Produto</th>
+                    <th class="text-end" style="width:140px;">Qtd Movida</th>
+                    <th style="width:150px;">Conf.</th>
+                    <th style="width:150px;">Exp.</th>
+                    <th class="d-none d-md-table-cell" style="width:200px;">Lançamentos</th>
+                </tr>
+                </thead>
+                <tbody id="${anchorId}-tbody">
+                ${linhas.join('\n')}
+                </tbody>
+            </table>
+            </div>
+
+            <div class="mini-notes${(confAgg === 3 || expAgg === 3) ? ' error' : ''}" id="${anchorId}-notes">
+            ${notes.join('\n') || '<div class="text-muted"><i class="bi bi-info-circle"></i> Sem observações.</div>'}
+            </div>
+        </div>
+        </div>
+    </div>
+    `);
+    });
+
+    pastasContainer.innerHTML = htmlCards.join('\n');
+
+    // ===== Auto-refresh (2s) sem reabrir modal =====
+    if (window.__transfTimer) {
+        clearInterval(window.__transfTimer);
+        window.__transfTimer = null;
+    }
+
+    const modalEl = document.getElementById('modalTransferencias');
+
+    // função que calcula e atualiza só o necessário
+    const doRefresh = async () => {
+        try {
+            const r = await fetch(`/api/retirado/${idAgend}/produtos-detalhados`, { headers: { 'Accept': 'application/json' } });
+            if (!r.ok) return; // silencioso
+            const fresh = await r.json();
+            const packs = fresh?.produtosOriginais ?? [];
+
+            // set de classes statusbar possíveis para troca
+            const BAR_CLASSES = ['statusbar--erro', 'statusbar--exec', 'statusbar--pendente', 'statusbar--ok', 'statusbar--muted'];
+
+            packs.forEach((pack, idx) => {
+                const prod = pack.produto || {};
+                const comps = Array.isArray(pack.composicoes) ? pack.composicoes : [];
+                const equivs = Array.isArray(pack.equivalentes) ? pack.equivalentes : [];
+
+                // === mesmo cálculo de antes ===
+                const compConfList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_conf));
+                const compExpList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_exp));
+                const equivConfList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_conf));
+                const equivExpList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_exp));
+
+                const confAgg = aggStatus([...compConfList, ...equivConfList]);
+                const expAgg = aggStatus([...compExpList, ...equivExpList]);
+                const cardCls = statusbarClass(confAgg, expAgg);
+
+                // Header counts/badges
+                const qtdAgendada = asInt(prod.unidades_prod);
+                const qtdMovida = (() => {
+                    const conclComps = (comps ?? []).reduce((s, c) => s + (asInt(c.status_conf) === 2 ? asInt(c.qtd_mov_conf) : 0), 0);
+                    const conclEquivs = (equivs ?? []).reduce((s, e) => s + (asInt(e.status_conf) === 2 ? asInt(e.qtd_mov_conf) : 0), 0);
+                    const base = conclComps + conclEquivs;
+                    const bipSucesso = (confAgg === 2) ? asInt(pack?.bipagemDireta?.bipados) : 0;
+                    return base + bipSucesso;
+                })();
+
+                // Ids estáveis
+                const anchorId = `equiv-${slug(prod.sku_prod || prod.id_prod || `item-${idx}`)}`;
+
+                // Monta tbody novamente (troca só o conteúdo da tabela)
+                const linhas = [];
+                for (const c of comps) {
+                    const stConf = isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_conf);
+                    const stExp = isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_exp);
+                    const lancs = [
+                        chip('S', c.lanc_conf_s, stConf),
+                        chip('E', c.lanc_conf_e, stConf),
+                        '<br>',
+                        chip('S', c.lanc_exp_s, stExp),
+                        chip('E', c.lanc_exp_e, stExp),
+                    ].join(' ');
+                    linhas.push(`
+          <tr>
+            <td><span class="badge badge-tipo-original">ORIGINAL</span></td>
+            <td>${esc(c.sku_comp)}</td>
+            <td>${esc(c.nome_comp)}</td>
+            <td class="text-end">${asInt(c.qtd_mov_conf)}</td>
+            <td>${badgeHTML(stConf)}</td>
+            <td>${badgeHTML(stExp)}</td>
+            <td class="d-none d-md-table-cell">${lancs}</td>
+          </tr>
+        `);
+                }
+                if (equivs.length > 0) {
+                    for (const e of equivs) {
+                        const stConf = isUnusedEquiv(e) ? 4 : asInt(e.status_conf);
+                        const stExp = isUnusedEquiv(e) ? 4 : asInt(e.status_exp);
+                        const lancs = [
+                            chip('S', e.lanc_conf_s, stConf),
+                            chip('E', e.lanc_conf_e, stConf),
+                            '<br>',
+                            chip('S', e.lanc_exp_s, stExp),
+                            chip('E', e.lanc_exp_e, stExp),
+                        ].join(' ');
+                        linhas.push(`
+            <tr>
+              <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+              <td>${esc(e.sku_bipado)}</td>
+              <td>${esc(e.nome_equivalente ?? 'Equivalente')}</td>
+              <td class="text-end">${asInt(e.qtd_mov_conf)}</td>
+              <td>${badgeHTML(stConf)}</td>
+              <td>${badgeHTML(stExp)}</td>
+              <td class="d-none d-md-table-cell">${lancs}</td>
+            </tr>
+          `);
+                    }
+                } else {
+                    linhas.push(`
+          <tr class="row-informativo">
+            <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+            <td>—</td>
+            <td>Sem equivalente — movimentação feita com o ORIGINAL</td>
+            <td class="text-end">—</td>
+            <td><span class="badge badge-ignorado">Ignorado</span></td>
+            <td><span class="badge badge-ignorado">Ignorado</span></td>
+            <td class="d-none d-md-table-cell"><span class="chip-lcto muted">——</span> <span class="chip-lcto muted">——</span></td>
+          </tr>
+        `);
+                }
+
+                // Mini-notes (mesma regra rica)
+                const confEffList = [...compConfList, ...equivConfList];
+                const expEffList = [...compExpList, ...equivExpList];
+                const confErrs = confEffList.filter(s => s === 3).length;
+                const expErrs = expEffList.filter(s => s === 3).length;
+                const hasErro = (confErrs + expErrs) > 0;
+                const emExecOps = confEffList.filter(s => s === 1).length + expEffList.filter(s => s === 1).length;
+
+                const notes = [];
+                if (hasErro) notes.push(`<div class="error"><i class="bi bi-bug-fill"></i> Falhas detectadas: <strong>${confErrs}</strong> em Conferência e <strong>${expErrs}</strong> em Expedição.</div>`);
+                if (emExecOps > 0) notes.push(`<div><i class="bi bi-arrow-repeat"></i> Worker em curso para <strong>${emExecOps}</strong> operação(ões).</div>`);
+                if (!hasErro && confAgg === 2 && expAgg !== 2) notes.push(`<div><i class="bi bi-clock-history"></i> Conferência concluída; aguardando expedição.</div>`);
+                if (equivs.length > 0 && equivs.every(isUnusedEquiv)) notes.push(`<div><i class="bi bi-slash-circle"></i> Equivalentes não utilizados: marcados como <strong>Ignorados</strong>.</div>`);
+                if (comps.length > 0 && comps.every(c => isUnusedComp(c, pack, prod))) notes.push(`<div><i class="bi bi-slash-circle"></i> Originais não utilizados neste envio.</div>`);
+                if (!hasErro && qtdMovida > 0 && qtdMovida < qtdAgendada) notes.push(`<div><i class="bi bi-bar-chart"></i> Parcial: movido <strong>${qtdMovida}</strong> de <strong>${qtdAgendada}</strong>.</div>`);
+                if (!hasErro && confAgg === 2 && expAgg === 2 && qtdMovida >= qtdAgendada) notes.push(`<div><i class="bi bi-check2-circle"></i> Transferência concluída (<strong>${qtdAgendada}</strong>/<strong>${qtdAgendada}</strong>).</div>`);
+                if (pack?.bipagemDireta?.bipados) notes.push(`<div><i class="bi bi-upc-scan"></i> Bipagem direta do original: <strong>${asInt(pack.bipagemDireta.bipados)}</strong>.</div>`);
+                const noAttempts = confEffList.every(s => s === 0) && expEffList.every(s => s === 0) && qtdMovida === 0;
+                if (noAttempts && !hasErro && emExecOps === 0) notes.push(`<div><i class="bi bi-info-circle"></i> Sem tentativas registradas.</div>`);
+
+                // ===== Patch fino no DOM =====
+                const card = document.querySelector(`.prod-card[data-pack="${anchorId}"]`);
+                if (!card) {
+                    // card novo (caso apareça durante o refresh): apenda no fim
+                    const confBadge = badgeHTML(confAgg);
+                    const expBadge = badgeHTML(expAgg);
+                    const headerRight = `
+          <span class="pill"><span class="lbl">Qtd Agendada:</span> ${qtdAgendada}</span>
+          <span class="pill"><span class="lbl">Qtd Movida:</span> ${qtdMovida}</span>
+          <span class="pill"><span class="lbl">Conf.:</span> ${confBadge}</span>
+          <span class="pill"><span class="lbl">Exp.:</span> ${expBadge}</span>
+          <i class="chevron bi bi-chevron-down"></i>`;
+                    const html = `
+          <div class="prod-card ${cardCls}" data-pack="${anchorId}">
+            <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#${anchorId}" aria-expanded="false">
+              <div class="left">
+                <span class="badge badge-tipo-original">ORIGINAL</span>
+                <span class="sku">${esc(prod.sku_prod ?? '')}</span>
+                <span class="nome">${esc(prod.nome_prod ?? '')}</span>
+              </div>
+              <div class="right" id="${anchorId}-right">${headerRight}</div>
+            </button>
+            <div id="${anchorId}" class="collapse">
+              <div class="equiv-body">
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-2">
+                    <thead class="table-light">...</thead>
+                    <tbody id="${anchorId}-tbody">${linhas.join('\n')}</tbody>
+                  </table>
+                </div>
+                <div class="mini-notes${(confAgg === 3 || expAgg === 3) ? ' error' : ''}" id="${anchorId}-notes">
+                  ${notes.join('\n') || '<div class="text-muted"><i class="bi bi-info-circle"></i> Sem observações.</div>'}
+                </div>
+              </div>
+            </div>
+          </div>`;
+                    pastasContainer.insertAdjacentHTML('beforeend', html);
+                } else {
+                    // 1) faixa de status (classe do card)
+                    BAR_CLASSES.forEach(c => card.classList.remove(c));
+                    card.classList.add(cardCls);
+
+                    // 2) header right (pills + badges)
+                    const confBadge = badgeHTML(confAgg);
+                    const expBadge = badgeHTML(expAgg);
+                    const headerRight = `
+          <span class="pill"><span class="lbl">Qtd Agendada:</span> ${qtdAgendada}</span>
+          <span class="pill"><span class="lbl">Qtd Movida:</span> ${qtdMovida}</span>
+          <span class="pill"><span class="lbl">Conf.:</span> ${confBadge}</span>
+          <span class="pill"><span class="lbl">Exp.:</span> ${expBadge}</span>
+          <i class="chevron bi bi-chevron-down"></i>`;
+                    const rightEl = document.getElementById(`${anchorId}-right`);
+                    if (rightEl) rightEl.innerHTML = headerRight;
+
+                    // 3) tbody (linhas)
+                    const tbodyEl = document.getElementById(`${anchorId}-tbody`);
+                    if (tbodyEl) tbodyEl.innerHTML = linhas.join('\n');
+
+                    // 4) mini-notes (conteúdo + classe error)
+                    const notesEl = document.getElementById(`${anchorId}-notes`);
+                    if (notesEl) {
+                        notesEl.classList.toggle('error', (confAgg === 3 || expAgg === 3));
+                        notesEl.innerHTML = notes.join('\n') || '<div class="text-muted"><i class="bi bi-info-circle"></i> Sem observações.</div>';
+                    }
+                }
+            });
+        } catch (e) {
+            // silencioso
+            console.error('Deu erro, não sei aonde... Ta aí o erro ;-) =>', e);
+        }
+    };
+
+    // liga o timer
+    window.__transfTimer = setInterval(doRefresh, 2000);
+
+    // desliga ao fechar o modal
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        if (window.__transfTimer) {
+            clearInterval(window.__transfTimer);
+            window.__transfTimer = null;
+        }
+    }, { once: true });
 }
 
+async function carregarInfoEmpresaModal(idAgend){
+    const a = await fetch(`/api/agendamento/${encodeURIComponent(idAgend)}/basico`);
+    if (!a.ok) throw new Error(`HTTP ${a.status} ${a.statusText}`);
+
+    const data = await a.json();
+    
+    const numAgend = document.getElementById('ag-num');
+    const empresa = document.getElementById('ag-empresa');
+    const mktp = document.getElementById('ag-marketplace');
+
+    numAgend.innerHTML = data.numero_agendamento;
+    empresa.innerHTML = data.empresa.nome;
+    mktp.innerHTML = data.marketplace.nome;
+}
 
 // Modo dev: ?devModal=olho  | ?devModal=transf | ?devModal=olho,transf
 (function () {

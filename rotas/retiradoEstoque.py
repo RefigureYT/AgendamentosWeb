@@ -2603,3 +2603,214 @@ def api_originais_equivalentes(id_agend: int):
         resp = make_response(jsonify(ok=False, error=str(e)), 500)
         _set_cors_headers(resp)
         return resp
+    
+@bp_retirado.route('/api/retirado/<int:id_agend>/produtos-detalhados', methods=['GET'])
+def api_retirado_produtos_detalhados(id_agend: int):
+    """
+    GET /api/retirado/<id_agend>/produtos-detalhados
+
+    Resposta:
+    {
+      "ok": true,
+      "idAgend": 326,
+      "produtosOriginais": [
+        {
+          "produto": {... de produtos_agend ...},
+          "composicoes": [ {... de comp_agend (c.* com campos de movimentação)... } ],
+          "bipagemDireta": { "sku": "JP...", "bipados": 3 } | null,
+          "equivalentes": [ {... de agendamento_produto_bipagem_equivalentes (incl. movimentação)... } ],
+          "totais": {
+            "bipados_diretos": 0,
+            "bipados_equivalentes_total": 0,
+            "bipados_total": 0
+          }
+        }
+      ]
+    }
+    """
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur  = conn.cursor(dictionary=True)
+
+        # 1) Produtos originais + suas composições (trazendo TODAS colunas de comp_agend)
+        sql_prod_comp = """
+            SELECT
+                p.id_prod, p.id_agend_prod, p.id_prod_ml, p.id_prod_tiny,
+                p.sku_prod, p.gtin_prod, p.unidades_prod, p.e_kit_prod,
+                p.nome_prod, p.estoque_flag_prod, p.imagem_url_prod,
+
+                c.*  -- TUDO da comp_agend (inclui campos de movimentação)
+            FROM produtos_agend p
+            LEFT JOIN comp_agend c
+                   ON c.id_prod_comp = p.id_prod
+            WHERE p.id_agend_prod = %s
+            ORDER BY p.sku_prod ASC, c.id_comp ASC
+        """
+        cur.execute(sql_prod_comp, (id_agend,))
+        rows_prod_comp = cur.fetchall() or []
+
+        # 2) Bipagem direta (map por SKU)
+        sql_bip_dir = """
+            SELECT sku, COALESCE(bipados,0) AS bipados
+              FROM agendamento_produto_bipagem
+             WHERE id_agend_ml = %s
+        """
+        cur.execute(sql_bip_dir, (id_agend,))
+        bip_dir_rows = cur.fetchall() or []
+        bip_dir_map  = { (r.get("sku") or "").strip(): int(r.get("bipados") or 0) for r in bip_dir_rows }
+
+        # 3) Equivalentes (traz TUDO; inclui campos de movimentação se existirem)
+        sql_equiv = """
+            SELECT *
+              FROM agendamento_produto_bipagem_equivalentes
+             WHERE id_agend_ml = %s
+             ORDER BY sku_original, sku_bipado, id
+        """
+        cur.execute(sql_equiv, (id_agend,))
+        equiv_all = cur.fetchall() or []
+
+        cur.close(); conn.close()
+
+        # --- helpers de serialização (datas -> string) ---
+        from datetime import datetime, date
+        def _ser_row(row: dict) -> dict:
+            out = {}
+            for k, v in (row or {}).items():
+                if isinstance(v, (datetime, date)):
+                    out[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    out[k] = v
+            return out
+
+        # Agrupa equivalentes por SKU ORIGINAL
+        from collections import defaultdict, OrderedDict
+        equiv_by_skuorig = defaultdict(list)
+        for e in equiv_all:
+            sku_orig = (e.get("sku_original") or "").strip()
+            equiv_by_skuorig[sku_orig].append(_ser_row(e))
+
+        # Monta estrutura por produto original (chave: sku_prod)
+        produtos_map = OrderedDict()
+        for r in rows_prod_comp:
+            sku = (r.get("sku_prod") or "").strip()
+
+            # bloco do "produto" (campos de produtos_agend)
+            produto = {
+                "id_prod": r.get("id_prod"),
+                "id_agend_prod": r.get("id_agend_prod"),
+                "id_prod_ml": r.get("id_prod_ml"),
+                "id_prod_tiny": r.get("id_prod_tiny"),
+                "sku_prod": r.get("sku_prod"),
+                "gtin_prod": r.get("gtin_prod"),
+                "unidades_prod": r.get("unidades_prod"),
+                "e_kit_prod": r.get("e_kit_prod"),
+                "nome_prod": r.get("nome_prod"),
+                "estoque_flag_prod": r.get("estoque_flag_prod"),
+                "imagem_url_prod": r.get("imagem_url_prod"),
+            }
+
+            if sku not in produtos_map:
+                produtos_map[sku] = {
+                    "produto": produto,
+                    "composicoes": [],
+                    "bipagemDireta": (
+                        {"sku": sku, "bipados": bip_dir_map.get(sku, 0)}
+                        if (sku in bip_dir_map or bip_dir_map.get(sku, 0) > 0) else None
+                    ),
+                    "equivalentes": equiv_by_skuorig.get(sku, []),
+                    "totais": {  # preenchido após juntar tudo
+                        "bipados_diretos": 0,
+                        "bipados_equivalentes_total": 0,
+                        "bipados_total": 0
+                    }
+                }
+
+            # adiciona composição (se houver linha de comp_agend)
+            if r.get("id_comp") is not None:
+                # separa campos de comp_agend dinamicamente: tudo que não é da tabela p.*
+                comp = {}
+                for k, v in r.items():
+                    if k not in {
+                        "id_prod","id_agend_prod","id_prod_ml","id_prod_tiny",
+                        "sku_prod","gtin_prod","unidades_prod","e_kit_prod",
+                        "nome_prod","estoque_flag_prod","imagem_url_prod"
+                    }:
+                        comp[k] = v
+                produtos_map[sku]["composicoes"].append(_ser_row(comp))
+
+        # calcula totais por produto
+        for sku, item in produtos_map.items():
+            d = int((item.get("bipagemDireta") or {}).get("bipados") or 0)
+            eq_total = sum(int(e.get("bipados") or 0) for e in item.get("equivalentes") or [])
+            item["totais"]["bipados_diretos"] = d
+            item["totais"]["bipados_equivalentes_total"] = eq_total
+            item["totais"]["bipados_total"] = d + eq_total
+
+        payload = {
+            "ok": True,
+            "idAgend": id_agend,
+            "produtosOriginais": list(produtos_map.values())
+        }
+        resp = make_response(jsonify(payload), 200)
+        _set_cors_headers(resp)
+        return resp
+
+    except Exception as e:
+        try:
+            app.logger.exception("Erro em /api/retirado/<id>/produtos-detalhados")
+        except Exception:
+            pass
+        resp = make_response(jsonify(ok=False, error=str(e)), 500)
+        _set_cors_headers(resp)
+        return resp
+
+
+@bp_retirado.route('/api/agendamento/<int:id_agend>/basico', methods=['GET'])
+def api_agendamento_basico(id_agend: int):
+    sql = """
+        SELECT
+          id_agend          AS id_bd,
+          id_agend_ml       AS numero_agendamento,
+          id_tipo_agend     AS id_tipo,
+          empresa_agend     AS empresa_id,
+          id_mktp           AS marketplace_id,
+          colaborador_agend AS colaborador,
+          centro_distribuicao,
+          entrada_agend     AS entrada     -- <=== aqui estava 'entrada'
+        FROM agendamento
+        WHERE id_agend = %s
+        LIMIT 1
+    """
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur  = conn.cursor(dictionary=True)
+        cur.execute(sql, (id_agend,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+
+        if not row:
+            return jsonify(ok=False, error="Agendamento não encontrado"), 404
+
+        empresa_map = {1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports"}
+        marketplace_map = {1: "Mercado Livre", 2: "Magalu", 3: "Shopee", 4: "Amazon"}
+
+        payload = {
+            "ok": True,
+            "id_agend_bd": row["id_bd"],
+            "numero_agendamento": row["numero_agendamento"],
+            "empresa": {
+                "id": row["empresa_id"],
+                "nome": empresa_map.get(row["empresa_id"], "Nenhuma")
+            },
+            "marketplace": {
+                "id": row["marketplace_id"],
+                "nome": marketplace_map.get(row["marketplace_id"], "Nenhum")
+            },
+            "colaborador": row["colaborador"],
+            "centro_distribuicao": row["centro_distribuicao"],
+            "entrada": row["entrada"].strftime("%Y-%m-%d %H:%M:%S") if row["entrada"] else None
+        }
+        return jsonify(payload)
+    except Exception as e:
+        app.logger.exception("Erro em /api/agendamento/<id>/basico")
+        return jsonify(ok=False, error=str(e)), 500

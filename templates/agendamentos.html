@@ -361,8 +361,13 @@
   <div class="modal fade" id="modalOlho" tabindex="-1" aria-labelledby="modalOlhoLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="modalOlhoLabel">O que você deseja fazer?</h5>
+        <div class="modal-header align-items-baseline">
+          <h5 class="modal-title" id="modalOlhoLabel">
+            O que você deseja fazer?
+            <small class="text-muted ms-2">
+              Agendamento <strong id="olho_id_text">—</strong>
+            </small>
+          </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
         </div>
         <div class="modal-body">
@@ -380,171 +385,347 @@
   </div>
 
   <!-- MODAL: Transferências entre Depósitos -->
-  <div class="modal fade" id="modalTransferencias" tabindex="-1" aria-hidden="true">
+  <div class="modal fade custom-anim" id="modalTransferencias" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">
+      <div class="modal-content transf-modal">
+        <div class="modal-header sticky-top bg-white">
+          <h5 class="modal-title d-flex align-items-center gap-2">
+            <i class="bi bi-arrow-left-right"></i>
             Transferências entre Depósitos
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
         </div>
-        <!-- Cabeçalho do modal (resumo do pedido) -->
-        <div class="transf-header d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-          <div>
-            <div class="fw-bold">Pedido <span class="text-primary">54352814</span></div>
-            <div class="small text-muted">Empresa: <strong>L.T. Sports</strong> • Loja: <strong>Shopee</strong></div>
-          </div>
-          <div class="text-end">
-            <span class="badge status-conferencia">Conferência</span>
-          </div>
-        </div>
 
-        <!-- Legenda opcional -->
-        <div class="small text-muted mb-2">
-          <i class="bi bi-info-circle"></i> Clique no produto original para ver os equivalentes usados na transferência.
-        </div>
-
-        <!-- “Pastas” (Originais → Equivalentes) -->
-        <div class="transf-accordion">
-
-          <!-- ITEM 1 — ORIGINAL -->
-          <div class="prod-card">
-            <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#equiv-API1" aria-expanded="false">
-              <div class="left">
-                <span class="badge badge-tipo-original">ORIGINAL</span>
-                <span class="sku">API1</span>
-                <span class="nome">Teste API – 1</span>
-              </div>
-              <div class="right">
-                <span class="pill"><span class="lbl">Qtd Agendada:</span> 100</span>
-                <span class="pill"><span class="lbl">Qtd Movida:</span> 100</span>
-                <span class="pill"><span class="lbl">Conf.:</span> <span class="badge badge-ok">OK</span></span>
-                <span class="pill"><span class="lbl">Exp.:</span> <span class="badge badge-ok">OK</span></span>
-                <i class="chevron bi bi-chevron-down"></i>
-              </div>
-            </button>
-
-            <div id="equiv-API1" class="collapse">
-              <div class="equiv-body">
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead class="table-light">
-                      <tr>
-                        <th style="width: 120px;">Tipo</th>
-                        <th style="width: 120px;">SKU</th>
-                        <th>Produto</th>
-                        <th class="text-end" style="width: 160px;">Qtd Equivalente</th>
-                        <th style="width: 180px;">Status Conferência</th>
-                        <th style="width: 160px;">Status Expedição</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
-                        <td>API1-E1</td>
-                        <td>Kit Substituto – 1</td>
-                        <td class="text-end">40</td>
-                        <td><span class="badge badge-ok">OK</span></td>
-                        <td><span class="badge badge-ok">OK</span></td>
-                      </tr>
-                      <tr>
-                        <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
-                        <td>API1-E2</td>
-                        <td>Peça Compatível – 2</td>
-                        <td class="text-end">60</td>
-                        <td><span class="badge badge-pendente">Pendente</span></td>
-                        <td><span class="badge badge-ok">OK</span></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                <!-- Observações/rodapé (opcional) -->
-                <div class="small text-muted pt-2">
-                  <i class="bi bi-arrow-left-right"></i> Transferência em pares S/E realizada entre depósitos 785301556 → 822208355.
-                </div>
-              </div>
+        <div class="modal-body" id="conteudo-transferencias">
+          <!-- Cabeçalho / resumo -->
+          <div class="transf-header d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3 p-2 rounded-3 header-surface">
+            <div>
+              <div class="fw-bold">Pedido <span id="ag-num" class="text-primary">54352814</span></div>
+              <div class="small text-muted">Empresa: <strong id="ag-empresa">L.T. Sports</strong> • Loja: <strong id="ag-marketplace">Shopee</strong></div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <span class="pill-ghost">Depósito Origem: <strong>785301556</strong></span>
+              <span class="pill-ghost">Depósito Destino: <strong>822208355</strong></span>
             </div>
           </div>
 
-          <!-- ITEM 2 — ORIGINAL (sem equivalentes) -->
-          <div class="prod-card">
-            <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#equiv-API2" aria-expanded="false">
-              <div class="left">
-                <span class="badge badge-tipo-original">ORIGINAL</span>
-                <span class="sku">API2</span>
-                <span class="nome">Produto X – 2</span>
-              </div>
-              <div class="right">
-                <span class="pill"><span class="lbl">Qtd Agendada:</span> 300</span>
-                <span class="pill"><span class="lbl">Qtd Movida:</span> 300</span>
-                <span class="pill"><span class="lbl">Conf.:</span> <span class="badge badge-ok">OK</span></span>
-                <span class="pill"><span class="lbl">Exp.:</span> <span class="badge badge-ok">OK</span></span>
-                <i class="chevron bi bi-chevron-down"></i>
-              </div>
-            </button>
+          <!-- Legenda de status 0..4 -->
+          <div class="legend-status mb-3">
+            <div class="legend-item"><span class="badge badge-pendente">0 • Pendente</span><span class="legend-d">Sem tentativa</span></div>
+            <div class="legend-item"><span class="badge badge-execucao"><i class="bi bi-arrow-repeat spin"></i> 1 • Em execução</span><span class="legend-d">Worker em curso</span></div>
+            <div class="legend-item"><span class="badge badge-ok">2 • Concluído</span><span class="legend-d">Transferência OK</span></div>
+            <div class="legend-item"><span class="badge badge-erro"><i class="bi bi-exclamation-triangle-fill"></i> 3 • Erro</span><span class="legend-d">Falha</span></div>
+            <div class="legend-item"><span class="badge badge-ignorado">4 • Ignorado</span><span class="legend-d">Não aplicável</span></div>
+          </div>
 
-            <div id="equiv-API2" class="collapse">
-              <div class="equiv-body">
-                <div class="alert alert-secondary mb-0">
-                  Nenhum equivalente utilizado para este item.
+          <div class="small text-muted mb-2">
+            <i class="bi bi-info-circle"></i> Selecione um item para ver status e histórico da transferência.
+          </div>
+
+          <!-- “Pastas” (Originais → Equivalentes) -->
+          <div class="transf-accordion">
+
+            <!-- ITEM 1 — Execução (1) + pendências -->
+            <div class="prod-card statusbar--exec">
+              <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#equiv-API1" aria-expanded="true">
+                <div class="left">
+                  <span class="badge badge-tipo-original">ORIGINAL</span>
+                  <span class="sku">API1</span>
+                  <span class="nome">Teste API – 1</span>
+                </div>
+                <div class="right">
+                  <span class="pill"><span class="lbl">Qtd Agendada:</span> 100</span>
+                  <span class="pill"><span class="lbl">Qtd Movida:</span> 100</span>
+                  <span class="pill"><span class="lbl">Conf.:</span> <span class="badge badge-pendente">Pendente</span></span>
+                  <span class="pill"><span class="lbl">Exp.:</span> <span class="badge badge-execucao"><i class="bi bi-arrow-repeat spin"></i> Em execução</span></span>
+                  <i class="chevron bi bi-chevron-down"></i>
+                </div>
+              </button>
+
+              <div id="equiv-API1" class="collapse show">
+                <div class="equiv-body">
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2">
+                      <thead class="table-light">
+                        <tr>
+                          <th style="width:120px;">Tipo</th>
+                          <th style="width:120px;">SKU</th>
+                          <th>Produto</th>
+                          <th class="text-end" style="width:140px;">Qtd Movida</th>
+                          <th style="width:150px;">Conf.</th>
+                          <th style="width:150px;">Exp.</th>
+                          <th class="d-none d-md-table-cell" style="width:200px;">Lançamentos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <!-- Linha ORIGINAL sempre aparece -->
+                        <tr>
+                          <td><span class="badge badge-tipo-original">ORIGINAL</span></td>
+                          <td>API1</td>
+                          <td>Teste API – 1</td>
+                          <td class="text-end">0</td>
+                          <td><span class="badge badge-pendente">Pendente</span></td>
+                          <td><span class="badge badge-execucao"><i class="bi bi-arrow-repeat spin"></i> Execução</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto">S: —</span>
+                            <span class="chip-lcto muted">E: (aguard.)</span>
+                          </td>
+                        </tr>
+
+                        <!-- Equivalentes usados (ex.: dividiu em 40 + 60) -->
+                        <tr>
+                          <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+                          <td>API1-E1</td>
+                          <td>Kit Substituto – 1</td>
+                          <td class="text-end">40</td>
+                          <td><span class="badge badge-pendente">Pendente</span></td>
+                          <td><span class="badge badge-execucao"><i class="bi bi-arrow-repeat spin"></i> Execução</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto">S: —</span>
+                            <span class="chip-lcto muted">E: (aguard.)</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+                          <td>API1-E2</td>
+                          <td>Peça Compatível – 2</td>
+                          <td class="text-end">60</td>
+                          <td><span class="badge badge-pendente">Pendente</span></td>
+                          <td><span class="badge badge-execucao"><i class="bi bi-arrow-repeat spin"></i> Execução</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto">S: —</span>
+                            <span class="chip-lcto muted">E: (aguard.)</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div class="mini-notes">
+                    <div><i class="bi bi-arrow-left-right"></i> Par S/E programado: <strong>785301556 → 822208355</strong>.</div>
+                    <div><i class="bi bi-clock-history"></i> Aguardando conclusão da expedição.</div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- ITEM 3 — ORIGINAL -->
-          <div class="prod-card">
-            <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#equiv-API3" aria-expanded="false">
-              <div class="left">
-                <span class="badge badge-tipo-original">ORIGINAL</span>
-                <span class="sku">API3</span>
-                <span class="nome">Produto Y – 3</span>
-              </div>
-              <div class="right">
-                <span class="pill"><span class="lbl">Qtd Agendada:</span> 98</span>
-                <span class="pill"><span class="lbl">Qtd Movida:</span> 98</span>
-                <span class="pill"><span class="lbl">Conf.:</span> <span class="badge badge-ok">OK</span></span>
-                <span class="pill"><span class="lbl">Exp.:</span> <span class="badge badge-erro">Erro</span></span>
-                <i class="chevron bi bi-chevron-down"></i>
-              </div>
-            </button>
-
-            <div id="equiv-API3" class="collapse">
-              <div class="equiv-body">
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead class="table-light">
-                      <tr>
-                        <th style="width: 120px;">Tipo</th>
-                        <th style="width: 120px;">SKU</th>
-                        <th>Produto</th>
-                        <th class="text-end" style="width: 160px;">Qtd Equivalente</th>
-                        <th style="width: 180px;">Status Conferência</th>
-                        <th style="width: 160px;">Status Expedição</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
-                        <td>API3-E1</td>
-                        <td>Alternativo – 3</td>
-                        <td class="text-end">98</td>
-                        <td><span class="badge badge-ok">OK</span></td>
-                        <td><span class="badge badge-erro">Erro</span></td>
-                      </tr>
-                    </tbody>
-                  </table>
+            <!-- ITEM 2 — OK (2) + Ignorado (4), sem equivalente “real”
+                -> ainda assim mostramos uma linha "equivalente" informativa -->
+            <div class="prod-card statusbar--ok">
+              <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#equiv-API2" aria-expanded="false">
+                <div class="left">
+                  <span class="badge badge-tipo-original">ORIGINAL</span>
+                  <span class="sku">API2</span>
+                  <span class="nome">Produto X – 2</span>
                 </div>
-                <div class="small text-muted pt-2">
-                  <i class="bi bi-exclamation-triangle"></i> Falha na expedição do equivalente. Verificar idLancamento.
+                <div class="right">
+                  <span class="pill"><span class="lbl">Qtd Agendada:</span> 300</span>
+                  <span class="pill"><span class="lbl">Qtd Movida:</span> 300</span>
+                  <span class="pill"><span class="lbl">Conf.:</span> <span class="badge badge-ok">OK</span></span>
+                  <span class="pill"><span class="lbl">Exp.:</span> <span class="badge badge-ignorado">Ignorado</span></span>
+                  <i class="chevron bi bi-chevron-down"></i>
+                </div>
+              </button>
+
+              <div id="equiv-API2" class="collapse">
+                <div class="equiv-body">
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2">
+                      <thead class="table-light">
+                        <tr>
+                          <th style="width:120px;">Tipo</th>
+                          <th style="width:120px;">SKU</th>
+                          <th>Produto</th>
+                          <th class="text-end" style="width:140px;">Qtd Movida</th>
+                          <th style="width:150px;">Conf.</th>
+                          <th style="width:150px;">Exp.</th>
+                          <th class="d-none d-md-table-cell" style="width:200px;">Lançamentos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <!-- ORIGINAL -->
+                        <tr>
+                          <td><span class="badge badge-tipo-original">ORIGINAL</span></td>
+                          <td>API2</td>
+                          <td>Produto X – 2</td>
+                          <td class="text-end">300</td>
+                          <td><span class="badge badge-ok">OK</span></td>
+                          <td><span class="badge badge-ignorado">Ignorado</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto">S: 903511287</span>
+                            <span class="chip-lcto muted">E: —</span>
+                          </td>
+                        </tr>
+
+                        <!-- “Equivalente informativo” quando não houve equivalente -->
+                        <tr class="row-informativo">
+                          <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+                          <td>—</td>
+                          <td>Sem equivalente — movimentação feita com o ORIGINAL</td>
+                          <td class="text-end">—</td>
+                          <td><span class="badge badge-ignorado">Ignorado</span></td>
+                          <td><span class="badge badge-ignorado">Ignorado</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto muted">——</span>
+                            <span class="chip-lcto muted">——</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div class="mini-notes">
+                    <i class="bi bi-check2-circle"></i> Conferência concluída; expedição marcada como não aplicável.
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
+            <!-- ITEM 3 — Erro (3) na expedição -->
+            <div class="prod-card statusbar--erro">
+              <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#equiv-API3" aria-expanded="false">
+                <div class="left">
+                  <span class="badge badge-tipo-original">ORIGINAL</span>
+                  <span class="sku">API3</span>
+                  <span class="nome">Produto Y – 3</span>
+                </div>
+                <div class="right">
+                  <span class="pill"><span class="lbl">Qtd Agendada:</span> 98</span>
+                  <span class="pill"><span class="lbl">Qtd Movida:</span> 98</span>
+                  <span class="pill"><span class="lbl">Conf.:</span> <span class="badge badge-ok">OK</span></span>
+                  <span class="pill"><span class="lbl">Exp.:</span> <span class="badge badge-erro"><i class="bi bi-exclamation-triangle-fill"></i> Erro</span></span>
+                  <i class="chevron bi bi-chevron-down"></i>
+                </div>
+              </button>
+
+              <div id="equiv-API3" class="collapse">
+                <div class="equiv-body">
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2">
+                      <thead class="table-light">
+                        <tr>
+                          <th style="width:120px;">Tipo</th>
+                          <th style="width:120px;">SKU</th>
+                          <th>Produto</th>
+                          <th class="text-end" style="width:140px;">Qtd Movida</th>
+                          <th style="width:150px;">Conf.</th>
+                          <th style="width:150px;">Exp.</th>
+                          <th class="d-none d-md-table-cell" style="width:200px;">Lançamentos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <!-- ORIGINAL -->
+                        <tr>
+                          <td><span class="badge badge-tipo-original">ORIGINAL</span></td>
+                          <td>API3</td>
+                          <td>Produto Y – 3</td>
+                          <td class="text-end">98</td>
+                          <td><span class="badge badge-ok">OK</span></td>
+                          <td><span class="badge badge-erro"><i class="bi bi-exclamation-triangle-fill"></i> Erro</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto">S: 903511285</span>
+                            <span class="chip-lcto error">E: (falhou)</span>
+                          </td>
+                        </tr>
+
+                        <!-- Equivalente utilizado -->
+                        <tr>
+                          <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+                          <td>API3-E1</td>
+                          <td>Alternativo – 3</td>
+                          <td class="text-end">98</td>
+                          <td><span class="badge badge-ok">OK</span></td>
+                          <td><span class="badge badge-erro"><i class="bi bi-exclamation-triangle-fill"></i> Erro</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto">S: —</span>
+                            <span class="chip-lcto error">E: (falhou)</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div class="mini-notes error">
+                    <i class="bi bi-bug-fill"></i> Falha na expedição. Verificar <code>idLancamento</code> de Entrada.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ITEM 4 — Ignorado (4) + Pendente (0) -->
+            <div class="prod-card statusbar--muted">
+              <button class="prod-header" data-bs-toggle="collapse" data-bs-target="#equiv-API4" aria-expanded="false">
+                <div class="left">
+                  <span class="badge badge-tipo-original">ORIGINAL</span>
+                  <span class="sku">API4</span>
+                  <span class="nome">Produto Z – 4</span>
+                </div>
+                <div class="right">
+                  <span class="pill"><span class="lbl">Qtd Agendada:</span> 50</span>
+                  <span class="pill"><span class="lbl">Qtd Movida:</span> 0</span>
+                  <span class="pill"><span class="lbl">Conf.:</span> <span class="badge badge-ignorado">Ignorado</span></span>
+                  <span class="pill"><span class="lbl">Exp.:</span> <span class="badge badge-pendente">Pendente</span></span>
+                  <i class="chevron bi bi-chevron-down"></i>
+                </div>
+              </button>
+
+              <div id="equiv-API4" class="collapse">
+                <div class="equiv-body">
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2">
+                      <thead class="table-light">
+                        <tr>
+                          <th style="width:120px;">Tipo</th>
+                          <th style="width:120px;">SKU</th>
+                          <th>Produto</th>
+                          <th class="text-end" style="width:140px;">Qtd Movida</th>
+                          <th style="width:150px;">Conf.</th>
+                          <th style="width:150px;">Exp.</th>
+                          <th class="d-none d-md-table-cell" style="width:200px;">Lançamentos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <!-- ORIGINAL -->
+                        <tr>
+                          <td><span class="badge badge-tipo-original">ORIGINAL</span></td>
+                          <td>API4</td>
+                          <td>Produto Z – 4</td>
+                          <td class="text-end">0</td>
+                          <td><span class="badge badge-ignorado">Ignorado</span></td>
+                          <td><span class="badge badge-pendente">Pendente</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto muted">S: —</span>
+                            <span class="chip-lcto muted">E: —</span>
+                          </td>
+                        </tr>
+
+                        <!-- Equivalente “informativo” (não usado) -->
+                        <tr class="row-informativo">
+                          <td><span class="badge badge-tipo-equivalente">EQUIVALENTE</span></td>
+                          <td>—</td>
+                          <td>Sem equivalente definido</td>
+                          <td class="text-end">—</td>
+                          <td><span class="badge badge-ignorado">Ignorado</span></td>
+                          <td><span class="badge badge-pendente">Pendente</span></td>
+                          <td class="d-none d-md-table-cell">
+                            <span class="chip-lcto muted">——</span>
+                            <span class="chip-lcto muted">——</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div class="mini-notes">
+                    <i class="bi bi-info-circle"></i> Este item pode ser reavaliado antes da expedição.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div> <!-- /.transf-accordion -->
         </div>
+
         <div class="modal-footer">
           <button class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
         </div>
