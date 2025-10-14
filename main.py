@@ -98,7 +98,7 @@ from rotas import *
 
 if __name__ == "__main__":
     # debug opcional; ajuste a gosto
-    app.run(host='0.0.0.0', port=8345, debug=True)
+    app.run(host='0.0.0.0', port=8345, debug=False)
     
 # -----------------------------------------------------------------------------
 # SOBRE O USO DE SocketIO (opcional)
