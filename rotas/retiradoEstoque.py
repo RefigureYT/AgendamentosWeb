@@ -1,22 +1,107 @@
-import json
-import mysql.connector
-from flask import session, render_template, Blueprint, request, jsonify, current_app as app, redirect, url_for, make_response
-from datetime import datetime
-from classes.models import Agendamento
-import requests
-from datetime import datetime, date
+# >>> PATCH: imports
+import os
 import re
-import threading
-import queue
 import uuid
-from typing import Literal, Optional, Tuple
-from datetime import datetime
+import time
+import json
+import queue
 import pytz
+import threading
+import functools
+import hmac
+import secrets
+from urllib.parse import unquote
+import requests
+import mysql.connector
+from typing import Literal, Optional
+from datetime import datetime, date, timedelta
+from flask import (
+    session, render_template, Blueprint, request, jsonify,
+    current_app as app, redirect, url_for, make_response
+)
+from classes.models import Agendamento
 
 tz = pytz.timezone("America/Sao_Paulo")
 data_str = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
 
 bp_retirado = Blueprint('retirado', __name__)
+
+# === Novo trecho completo (inserção) ===
+def _get_or_set_csrf_token() -> str:
+    tok = session.get('csrf_token')
+    if not tok:
+        tok = secrets.token_urlsafe(32)
+        session['csrf_token'] = tok
+    return tok
+
+@bp_retirado.route('/api/csrf-token', methods=['GET'])
+def api_csrf_token():
+    # Cliente pega e envia no header X-CSRF-Token em POST/DELETE/PUT/PATCH
+    return jsonify(ok=True, csrf=_get_or_set_csrf_token())
+
+@bp_retirado.before_request
+def _csrf_protect():
+    """
+    CSRF "smart":
+      - Só avalia métodos de escrita.
+      - Se NÃO há cookies, não há risco de CSRF por sessão -> libera.
+      - Se a origem é same-site (Origin/Referer confere), libera.
+      - Se endpoint for marcado como "strict" OU origem for cross-site,
+        exige X-CSRF-Token (ou _csrf no JSON) igual ao salvo na sessão.
+    Override por env:
+      CSRF_MODE = off | smart | strict
+    """
+    mode = (os.getenv("CSRF_MODE") or "smart").lower().strip()
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+
+    # Sem cookie (sem sessão), não tem como o browser "vazar" credenciais automáticas
+    if not request.cookies:
+        return None
+
+    if mode == "off":
+        return None
+
+    same_site = _is_same_site_request()
+    strict_ep = _is_csrf_strict_endpoint()
+    require_token = (mode == "strict") or strict_ep or (not same_site)
+
+    if not require_token:
+        return None
+
+    expected = session.get('csrf_token') or _get_or_set_csrf_token()
+    sent = (
+        request.headers.get('X-CSRF-Token')
+        or (request.get_json(silent=True) or {}).get('_csrf')
+        or request.form.get('_csrf')
+    )
+    if not (expected and sent) or not hmac.compare_digest(str(sent), str(expected)):
+        return _cors_error('CSRF token inválido', 403)
+
+# === Novo trecho completo (inserção) ===
+_rate_store: dict[str, tuple[float, int]] = {}
+
+def rate_limit(limit: int, window_seconds: int):
+    """
+    Limita por IP e endpoint. Ex.: @rate_limit(20, 60) = 20 req/min.
+    (In-memory; para produção pesada prefira Redis/Flask-Limiter)
+    """
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            now = time.time()
+            ip = (request.headers.get('X-Forwarded-For') or request.remote_addr or 'unknown').split(',')[0].strip()
+            key = f"{fn.__name__}:{ip}"
+            start, count = _rate_store.get(key, (now, 0))
+            if now - start > window_seconds:
+                start, count = now, 0
+            count += 1
+            _rate_store[key] = (start, count)
+            if count > limit:
+                return _cors_error("Too Many Requests", 429)
+            return fn(*args, **kwargs)
+        return wrapper
+    return deco
 
 _TINY_BASE = "https://api.tiny.com.br/public-api/v3"  # segue seu padrão
 
@@ -25,6 +110,34 @@ _mov_queue: "queue.Queue[dict]" = queue.Queue()
 _mov_status: dict[str, dict] = {}
 _mov_worker_started = False
 _status_lock = threading.Lock()
+
+def _status_update(task_id: str, **fields):
+    with _status_lock:
+        st = _mov_status.get(task_id) or {}
+        st.update(fields)
+        _mov_status[task_id] = st
+
+def status_fail(task_id: str, detail=None, status_code=None, exception=None, response=None):
+    payload = {"status": "falhou", "error": {}}
+    if detail is not None:      payload["error"]["detail"] = detail
+    if status_code is not None: payload["error"]["status_code"] = status_code
+    if exception is not None:   payload["error"]["exception"] = exception
+    if response is not None:    payload["error"]["response"] = response
+    _status_update(task_id, **payload)
+
+def status_timeout(task_id: str, mark_maybe_committed=False):
+    st = {"status": "timeout", "error": {"exception": "read_timeout"}}
+    if mark_maybe_committed:
+        st["maybe_committed"] = True
+    _status_update(task_id, **st)
+
+# ====== CONTROLES DE CONCORRÊNCIA ======
+WORKER_POOL_SIZE = int(os.getenv("ESTOQUE_WORKERS", "4"))   # quantas threads consumidoras da fila
+TINY_MAX_PAR     = int(os.getenv("TINY_MAX_PAR",   "2"))   # quantas chamadas simultâneas ao Tiny
+
+_TINY_GATE = threading.BoundedSemaphore(TINY_MAX_PAR)      # antes era 1
+
+_worker_threads: list[threading.Thread] = []
 
 # Configuração de acesso ao MySQL
 _db_config = {
@@ -37,27 +150,31 @@ _db_config = {
 }
 
 # ===================== WORKER (com retries) =====================
-
+_worker_lock = threading.Lock()
 def _start_estoque_worker_once():
-    """Inicia uma única thread daemon que consome _mov_queue e lança no Tiny (com logs detalhados)."""
+    """Sobe um POOL (WORKER_POOL_SIZE) de threads consumidoras de _mov_queue; 
+    as chamadas ao Tiny são limitadas por _TINY_GATE (TINY_MAX_PAR)."""
     global _mov_worker_started
-    if _mov_worker_started:
-        print("[estoque-worker] já iniciado.")
-        return
+    with _worker_lock:
+        if _mov_worker_started:
+            print("[estoque-worker] já iniciado.")
+            return
 
     def _estoque_worker():
         import time
 
-        print("[estoque-worker] thread iniciada.")
+        print(f"[{threading.current_thread().name}] thread iniciada.")
         while True:
             task = _mov_queue.get()  # bloqueia até ter tarefa
             task_id = task["task_id"]
             print("\n[estoque-worker] >>> Nova task recebida:", task_id)
-            print("[estoque-worker] Task bruta:", task)
+            _task_dbg = dict(task)
+            if "token" in _task_dbg:
+                _task_dbg["token"] = "(omitido)"
+            print("[estoque-worker] Task bruta:", _task_dbg)
 
             try:
-                with _status_lock:
-                    _mov_status[task_id]["status"] = "processando"
+                _status_update(task_id, status="processando")
 
                 # NOVO: marca status={etapa}=1 e,
                 # se for SAÍDA ('S'), incrementa qtd_mov_{etapa} com a quantidade desta task.
@@ -75,6 +192,35 @@ def _start_estoque_worker_once():
                 token: str = task["token"]
                 observacoes: Optional[str] = task.get("observacoes")
                 preco_unitario: Optional[float] = task.get("preco_unitario")
+
+                # 🔐 Bloqueia ENTRADA até a SAÍDA estar confirmada no BD (apenas quando meta válido)
+                if tipo_api == 'E':
+                    skip_wait = False
+                    peer_id = (task.get("meta") or {}).get("pair_task_id")
+                    if peer_id:
+                        with _status_lock:
+                            peer = dict(_mov_status.get(peer_id) or {})
+                        # Se a SAÍDA teve timeout de leitura, é bem provável que o Tiny tenha gravado.
+                        if peer.get("status") == "timeout" and peer.get("error", {}).get("exception") == "read_timeout":
+                            skip_wait = True
+
+                    if not skip_wait:
+                        _r = _table_and_cols(meta)
+                        if _r:
+                            ok_wait = _aguardar_saida_confirmada(meta)
+                            if not ok_wait:
+                                # mantém seu tratamento atual:
+                                print(f"[estoque-worker:{task_id}] ⚠️ Entrada bloqueada: saída não confirmada no prazo.")
+                                try:
+                                    db_on_entrada_fail(meta, "Saída não confirmada no prazo")
+                                except Exception as e:
+                                    print(f"[estoque-worker:{task_id}] db_on_entrada_fail ERRO: {e}")
+                                with _status_lock:
+                                    _mov_status[task_id]["status"] = "falhou"
+                                    _mov_status[task_id]["error"]  = {"detail": "Saída não confirmada"}
+                                continue
+                        else:
+                            print(f"[estoque-worker:{task_id}] meta ausente/inválido; ENTRADA não aguardará SAÍDA.")
 
                 try:
                     tz = pytz.timezone("America/Sao_Paulo")
@@ -115,9 +261,23 @@ def _start_estoque_worker_once():
 
                     print(f"[estoque-worker:{task_id}] POST -> Tiny (tentativa 429={attempt_429}, token_trocado={did_swap_token})")
                     try:
-                        r = requests.post(url, headers=headers, json=body, timeout=30)
+                        with _TINY_GATE:
+                            # Aumente o timeout de 30 -> 90 (o Tiny costuma demorar para responder)
+                            r = requests.post(url, headers=headers, json=body, timeout=90)
+                    except requests.Timeout as req_to:
+                        # Tratamento especial: o Tiny pode ter gravado mesmo com timeout de leitura.
+                        with _status_lock:
+                            st = _mov_status.get(task_id) or {}
+                            st["status"] = "timeout"
+                            st["error"]  = {"exception": "read_timeout"}
+                            if tipo_api == 'S':
+                                # sinal para a ENTRADA não ficar aguardando indefinidamente
+                                st["maybe_committed"] = True
+                            _mov_status[task_id] = st
+                        break
+
                     except requests.RequestException as req_err:
-                        print(f"[estoque-worker:{task_id}] EXCEPTION requests: {req_err}")
+                        # falha real de rede (DNS/SSL/conexão)
                         _mov_status[task_id]["status"] = "falhou"
                         _mov_status[task_id]["error"] = {"exception": str(req_err)}
                         break
@@ -250,10 +410,23 @@ def _start_estoque_worker_once():
                 print(f"[estoque-worker] <<< Task finalizada: {task_id} (status={_mov_status[task_id]['status']})\n")
                 _mov_queue.task_done()
 
-    t = threading.Thread(target=_estoque_worker, daemon=True, name="estoque-worker")
-    t.start()
+    # Sobe um pool de workers em vez de 1 só
+    threads = []
+    for i in range(WORKER_POOL_SIZE):
+        t = threading.Thread(
+            target=_estoque_worker,
+            daemon=True,
+            name=f"estoque-worker-{i+1}"
+        )
+        t.start()
+        threads.append(t)
+
+    # guarda referência (evita coleta e facilita debug)
+    _worker_threads[:] = threads
+
     _mov_worker_started = True
-    print("[estoque-worker] thread disparada.")
+    print(f"[estoque-worker] pool disparado com {len(threads)} threads; TINY_MAX_PAR={TINY_MAX_PAR}.")
+
     
 @bp_retirado.route('/api/bipagem/detalhe', methods=['GET'])
 def api_bipagem_detalhe():
@@ -390,6 +563,7 @@ def api_bipagem_detalhe():
         return resp
 
 @bp_retirado.route('/api/bipar', methods=['POST'])
+@rate_limit(300, 60)  # limita a 300 req/min por IP
 def api_bipar():
     """
     Faz upsert em agendamento_produto_bipagem (bipe direto) e
@@ -473,6 +647,7 @@ def to_int_or_none(v):
         return None
 
 @bp_retirado.route('/api/equiv/bipar', methods=['POST'])
+@rate_limit(300, 60)  # limita a 300 req/min por IP
 def api_equiv_bipar():
     data = request.get_json() or {}
 
@@ -554,6 +729,7 @@ def api_equiv_bipar():
         return jsonify(error=str(e)), 500
     
 @bp_retirado.route('/api/equiv/add-unidades', methods=['POST'])
+@rate_limit(300, 60)  # limita a 300 req/min por IP
 def api_equiv_add_unidades():
     data         = request.get_json() or {}
     id_agend     = data.get('id_agend')
@@ -733,6 +909,7 @@ def api_equiv_listar(id_agend):
         return jsonify(error=str(e)), 500
 
 @bp_retirado.route('/api/equiv/delete', methods=['DELETE'])
+@rate_limit(60, 60)  # limita a 60 req/min por IP
 def api_equiv_delete():
     """
     DELETE /api/equiv/delete
@@ -1010,6 +1187,7 @@ def finalizar_conferencia(id_agend):
 #    Query string do request é repassada (ex.: ?codigo=JP123)
 # ---------------------------------------------------------------
 @bp_retirado.route('/api/tiny-proxy', methods=['GET', 'OPTIONS'])
+@rate_limit(60, 60) # máx 60 req/min por IP
 def tiny_proxy():
     # Preflight CORS
     if request.method == 'OPTIONS':
@@ -1062,6 +1240,7 @@ def tiny_proxy():
 #    Body: { "sku": "JP123", "token": "Bearer xyz..." }  (ou mande o token no header Authorization)
 # ---------------------------------------------------------------
 @bp_retirado.route('/api/tiny/produto-por-sku', methods=['POST', 'OPTIONS'])
+@rate_limit(60, 60)  # máx 60 req/min por IP
 def tiny_produto_por_sku():
     if request.method == 'OPTIONS':
         resp = make_response('', 204)
@@ -1098,22 +1277,67 @@ def tiny_produto_por_sku():
 # ---------------------------------------------------------------
 # Helpers CORS
 # ---------------------------------------------------------------
+# === Novo trecho completo ===
 def _set_cors_headers(resp):
+    # Allowlist via ENV: ALLOWED_ORIGINS="https://app.exemplo.com,https://admin.exemplo.com"
+    allowlist = [o.strip() for o in (os.getenv('ALLOWED_ORIGINS', '') or '').split(',') if o.strip()]
     origin = request.headers.get('Origin')
-    if origin:
+
+    if origin and origin in allowlist:
         resp.headers['Access-Control-Allow-Origin'] = origin
         resp.headers['Vary'] = 'Origin'
         resp.headers['Access-Control-Allow-Credentials'] = 'true'
     else:
+        # Sem allowlist/fora da lista -> sem credenciais
         resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers.pop('Access-Control-Allow-Credentials', None)
+
     resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
-    resp.headers['Access-Control-Allow-Headers'] = 'Authorization, Path, Content-Type'
+    resp.headers['Access-Control-Allow-Headers'] = 'Authorization, Path, Content-Type, X-CSRF-Token'
     resp.headers['Access-Control-Max-Age'] = '600'
     return resp
 
+def _origin_self() -> str:
+    # ex.: https://app.suaempresa.com
+    return f"{request.scheme}://{request.host}"
+
+def _allowlist_origins() -> set[str]:
+    # Reusa a env ALLOWED_ORIGINS e sempre inclui o próprio host
+    env_list = [o.strip() for o in (os.getenv('ALLOWED_ORIGINS', '') or '').split(',') if o.strip()]
+    return set(env_list + [_origin_self()])
+
+def _is_same_site_request() -> bool:
+    # Preferimos Origin; fallback para Referer
+    origin = request.headers.get('Origin')
+    if origin:
+        return origin in _allowlist_origins()
+    ref = request.headers.get('Referer', '')
+    return bool(ref and ref.startswith(_origin_self()))
+
+def csrf_strict(fn):
+    setattr(fn, '_csrf_strict', True)
+    return fn
+
+def _is_csrf_strict_endpoint() -> bool:
+    try:
+        view = app.view_functions.get(request.endpoint)
+        return bool(getattr(view, '_csrf_strict', False))
+    except Exception:
+        return False
+
+# === Novo trecho completo ===
 @bp_retirado.after_request
 def _retirado_after(resp):
-    return _set_cors_headers(resp)
+    resp = _set_cors_headers(resp)
+    # Segurança básica
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    resp.headers['Cache-Control'] = 'no-store'
+    # HSTS apenas se atrás de HTTPS (via proxy)
+    if (request.headers.get('X-Forwarded-Proto') or request.scheme) == 'https':
+        resp.headers['Strict-Transport-Security'] = 'max-age=15552000; includeSubDomains'
+    return resp
 
 def _cors_error(msg, code):
     resp = make_response(jsonify(error=msg), code)
@@ -1137,6 +1361,7 @@ def _to_opt_str_first(v):
     return s if s else None
 
 @bp_retirado.route('/transf-estoque', methods=['POST', 'OPTIONS'])
+@rate_limit(20, 60)  # máx 20 req/min por IP
 def transf_estoque():
     """
     Enfileira um lançamento de estoque no Tiny (S/E/B) para processamento em background.
@@ -1269,6 +1494,7 @@ def transf_estoque_status(task_id):
     return resp
 
 @bp_retirado.route('/estoque/mover', methods=['POST', 'OPTIONS'])
+@rate_limit(20, 60)
 def estoque_mover():
     """
     POST /estoque/mover
@@ -1282,17 +1508,16 @@ def estoque_mover():
       "movimentos": [
         {
           "sku": "JP123",                   # opcional (só para log)
-          "id_produto": 123456,             # obrigatório
+          "id_produto": 123456,             # obrigatório (ID Tiny do item que vai movimentar)
           "de": 785301556,                  # depósito origem (Saída)
           "para": 822208355,                # depósito destino (Entrada)
-          "unidades": 5,                    # > 0
-          "preco_unitario": 0,              # opcional (sobrepõe o geral)
+          "unidades": 40,                   # > 0 (total do grupo)
+          "preco_unitario": 0,              # opcional (sobrepõe o global)
 
-          # ---- META opcional (usado pelo worker para marcar BD) ----
-          "equivalente": false,             # bool -> True = tabela de equivalentes; False = comp_agend
+          # ---- META p/ marcar BD (mesmo lançamento para todas as PKs) ----
+          "equivalente": false,             # false = comp_agend ; true = equivalentes
           "etapa": "conf",                  # "conf" | "exp"
-          "pk": 987,                        # id da linha-alvo no BD
-          "qtd_mov": 5                      # quantidade que será gravada em qtd_mov_<etapa>
+          "pk_list": [18101, 18102]         # lista de PKs (id_comp para originais; id da tabela de equivalentes p/ equivalentes)
         }
       ]
     }
@@ -1306,12 +1531,12 @@ def estoque_mover():
           "id_produto": 123456,
           "de": 785301556,
           "para": 822208355,
-          "unidades": 5,
+          "unidades": 40,
           "task_saida": "<id>",
           "task_entrada": "<id>",
           "equivalente": false,
           "etapa": "conf",
-          "pk": 987,
+          "pk_list": [18101,18102],
           "db_update_planned": true
         }
       ]
@@ -1347,63 +1572,115 @@ def estoque_mover():
         if not token:
             return _cors_error("Não foi possível obter token do Tiny para o usuário atual", 503)
 
-        out = []
+        # Validação rápida de cada item antes de consolidar
         for mv in movs:
             try:
-                sku = _to_opt_str_first(mv.get('sku'))
-                id_produto = int(mv.get('id_produto'))
-                dep_de = int(mv.get('de'))
-                dep_para = int(mv.get('para'))
-                unidades = float(mv.get('unidades'))
+                int(mv.get('id_produto'))
+                int(mv.get('de'))
+                int(mv.get('para'))
+                u = float(mv.get('unidades'))
             except (TypeError, ValueError):
                 return _cors_error("Campos do movimento inválidos (id_produto/de/para inteiros; unidades numérico)", 400)
-
-            if unidades <= 0:
+            if u <= 0:
                 return _cors_error("Cada movimento deve ter 'unidades' > 0", 400)
-
-            if dep_de == dep_para:
+            if int(mv.get('de')) == int(mv.get('para')):
                 return _cors_error(
-                    f"Depósitos de origem e destino são iguais (#{dep_de}). Operação inválida.",
+                    f"Depósitos de origem e destino são iguais (#{mv.get('de')}). Operação inválida.",
                     400
                 )
+            if mv.get('preco_unitario') is not None:
+                try:
+                    float(mv.get('preco_unitario'))
+                except (TypeError, ValueError):
+                    return _cors_error("preco_unitario (do item) deve ser numérico", 400)
 
-            # preço unitário do item (sobrepõe o global, se presente)
+        # --- CONSOLIDA por (produto, de, para, etapa, equivalente) ---
+        grupos: dict[tuple, dict] = {}
+        for mv in movs:
             try:
-                if mv.get('preco_unitario') is not None:
-                    preco_unit = float(mv.get('preco_unitario'))
-                else:
-                    preco_unit = float(preco_unitario_default)
+                id_produto = int(mv.get('id_produto'))
+                dep_de     = int(mv.get('de'))
+                dep_para   = int(mv.get('para'))
+                unidades   = float(mv.get('unidades') or 0)
             except (TypeError, ValueError):
-                return _cors_error("preco_unitario (do item) deve ser numérico", 400)
+                continue  # ignora item quebrado
 
-            # -------- META opcional para o worker marcar BD ----------
+            etapa       = (_to_opt_str_first(mv.get('etapa')) or '').lower()   # 'conf'|'exp'
             equivalente = bool(mv.get('equivalente', False))
-            etapa = _to_opt_str_first(mv.get('etapa'))  # 'conf' | 'exp'
-            pk_raw = mv.get('pk')
-            try:
-                pk = int(pk_raw) if pk_raw is not None else None
-            except (TypeError, ValueError):
-                pk = None
-            qtd_mov = mv.get('qtd_mov')
+            sku         = _to_opt_str_first(mv.get('sku'))
 
-            meta_ok = etapa in ('conf', 'exp') and isinstance(pk, int)
-            meta = {
+            # preço por item (opcional)
+            preco_item = mv.get('preco_unitario')
+            try:
+                preco_item = float(preco_item)
+            except (TypeError, ValueError):
+                preco_item = None
+
+            key = (id_produto, dep_de, dep_para, etapa, equivalente)
+            g = grupos.setdefault(key, {
+                "unidades": 0.0,
+                "skus": set(),
+                "pks": [],
+                "preco_unit": None,
+            })
+
+            g["unidades"] += max(0.0, unidades)
+            if sku:
+                g["skus"].add(sku)
+            if g["preco_unit"] is None and preco_item is not None:
+                g["preco_unit"] = preco_item
+                
+            # aceita pk_list unitária ou múltipla
+            pk_list = mv.get('pk_list')
+            if isinstance(pk_list, (list, tuple, set)):
+                for x in pk_list:
+                    try:
+                        g["pks"].append(int(x))
+                    except (TypeError, ValueError):
+                        pass
+
+            # também aceita 'pk' único
+            pk = mv.get('pk')
+            if pk is not None:
+                try:
+                    g["pks"].append(int(pk))
+                except (TypeError, ValueError):
+                    pass
+
+                    
+        # --- Para cada grupo, enfileira 1x SAÍDA + 1x ENTRADA com meta.pk_list ---
+        out = []
+        for (id_produto, dep_de, dep_para, etapa, equivalente), g in grupos.items():
+            unidades = g["unidades"]
+            if unidades <= 0:
+                continue
+
+            sku             = next(iter(g["skus"]), None)
+            pk_list         = sorted({p for p in g["pks"]})  # únicos
+            preco_do_grupo  = g["preco_unit"] if g["preco_unit"] is not None else float(preco_unitario_default)
+
+            # META comum (com pk_list) — sem qtd_mov_map / sem qtd_mov
+            meta_common = {
                 "equivalente": equivalente,
                 "etapa": etapa,
-                "pk": pk,
-                "qtd_mov": qtd_mov,
-                "sku": sku
+                "pk_list": pk_list,
+                "sku": sku,
             }
-            # ----------------------------------------------------------
+            meta_ok = etapa in ('conf', 'exp') and len(pk_list) > 0
 
-            # 1) SAÍDA (de)
+            # ids pareados
             task_id_s = uuid.uuid4().hex
+            task_id_e = uuid.uuid4().hex
+            meta_s = {**meta_common, "pair_task_id": task_id_e}
+            meta_e = {**meta_common, "pair_task_id": task_id_s}
+
+            # 1) SAÍDA (depósito origem)
             with _status_lock:
                 _mov_status[task_id_s] = {
                     "status": "enfileirado",
                     "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "params": {"id_produto": id_produto, "id_deposito": dep_de, "unidades": unidades, "tipo": "S"},
-                    "meta": meta
+                    "meta": meta_s
                 }
             _mov_queue.put({
                 "task_id": task_id_s,
@@ -1413,18 +1690,17 @@ def estoque_mover():
                 "tipo_api": 'S',
                 "token": token,
                 "observacoes": observacoes_base,
-                "preco_unitario": preco_unit,
-                "meta": meta
+                "preco_unitario": preco_do_grupo,
+                "meta": meta_s
             })
 
-            # 2) ENTRADA (para)
-            task_id_e = uuid.uuid4().hex
+            # 2) ENTRADA (depósito destino)
             with _status_lock:
                 _mov_status[task_id_e] = {
                     "status": "enfileirado",
                     "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "params": {"id_produto": id_produto, "id_deposito": dep_para, "unidades": unidades, "tipo": "E"},
-                    "meta": meta
+                    "meta": meta_e
                 }
             _mov_queue.put({
                 "task_id": task_id_e,
@@ -1434,8 +1710,8 @@ def estoque_mover():
                 "tipo_api": 'E',
                 "token": token,
                 "observacoes": observacoes_base,
-                "preco_unitario": preco_unit,
-                "meta": meta
+                "preco_unitario": preco_do_grupo,
+                "meta": meta_e
             })
 
             out.append({
@@ -1448,7 +1724,7 @@ def estoque_mover():
                 "task_entrada": task_id_e,
                 "equivalente": equivalente,
                 "etapa": etapa,
-                "pk": pk,
+                "pk_list": pk_list,
                 "db_update_planned": bool(meta_ok)
             })
 
@@ -1464,7 +1740,7 @@ def estoque_mover():
         resp = make_response(jsonify(ok=False, error=str(e)), 500)
         _set_cors_headers(resp)
         return resp
-    
+
 # ===================== HELPERS NOVOS =====================
 
 def _tiny_auth_header(tok: str) -> dict:
@@ -1539,18 +1815,12 @@ def _wait_backoff_429(attempt_idx: int) -> int:
 
 def _get_fallback_token_from_db() -> Optional[str]:
     """
-    Busca um access_token no MySQL:
-      - Tenta pegar o MAIS RECENTE (quando houver carimbo de tempo/auto-inc).
-      - Limpa aspas e espaços.
-    Retorna a string do token (sem 'Bearer ') ou None.
+    Busca um access_token no MySQL (id_api_valor=13), higieniza e retorna.
+    Não loga o token (nem trechos), apenas o tamanho.
     """
     try:
-        print("[token-db] consultando DB por access_token (id_api_valor=13)")
         conn = mysql.connector.connect(**_db_config)
         cur  = conn.cursor()
-
-        # Se houver coluna de timestamp/auto-inc, isso pega o mais recente.
-        # Caso não exista, ORDER BY id_api_valor DESC mantém compatível.
         cur.execute("""
             SELECT access_token
               FROM apis_valores
@@ -1570,15 +1840,12 @@ def _get_fallback_token_from_db() -> Optional[str]:
             print("[token-db] access_token NULL no DB.")
             return None
 
-        tok = str(raw).strip().strip('"').strip("'")
-        # Token “limpo”:
-        tok = tok.replace("\r", "").replace("\n", "").strip()
-
+        tok = str(raw).replace("\r","").replace("\n","").strip().strip('"').strip("'")
         if not tok:
             print("[token-db] access_token vazio após limpeza.")
             return None
 
-        print(f"[token-db] token encontrado: {tok[:5]}...{tok[-5:] if len(tok)>5 else tok} (len={len(tok)})")
+        print(f"[token-db] token encontrado (len={len(tok)})")
         return tok
     except Exception as e:
         print("[token-db] EXCEPTION ao buscar token no DB:", e)
@@ -1587,6 +1854,43 @@ def _get_fallback_token_from_db() -> Optional[str]:
         except Exception:
             pass
         return None
+    
+# === Novo trecho completo ===
+def _db_has_saida(meta: dict) -> bool:
+    """
+    Retorna True se ALGUMA das PKs do grupo já possui lanc_{etapa}_s preenchido.
+    (É suficiente para destravar a ENTRADA do grupo.)
+    """
+    r = _table_and_cols(meta)
+    if not r:
+        return False
+    table, id_col, col_lanc_s, _, _, _ = r
+    pks = _meta_pks(meta)
+    if not pks:
+        return False
+    try:
+        conn = _db_conn()
+        c = conn.cursor()
+        placeholders = ",".join(["%s"] * len(pks))
+        c.execute(
+            f"SELECT 1 FROM {table} WHERE {id_col} IN ({placeholders}) AND {col_lanc_s} IS NOT NULL LIMIT 1",
+            tuple(pks)
+        )
+        ok = bool(c.fetchone())
+        c.close(); conn.close()
+        return ok
+    except Exception:
+        return False
+
+def _aguardar_saida_confirmada(meta: dict, timeout_s: int = 60, poll_s: int = 2) -> bool:
+    """Espera até que lanc_*_s esteja preenchido no BD (máx timeout_s)."""
+    import time
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if _db_has_saida(meta):
+            return True
+        time.sleep(poll_s)
+    return False
 
 def _normalize_bearer(token: str) -> str:
     return token if token.lower().startswith("bearer ") else f"Bearer {token}"
@@ -1960,6 +2264,7 @@ def api_resolve_referencia():
     return jsonify(acao='sugerir_equivalente', ref=ref_raw)
 
 @bp_retirado.route('/api/tiny/buscar-produto', methods=['GET'])
+@rate_limit(90, 60) # máx 90 reqs por minuto por IP
 def tiny_buscar_produto():
     """
     GET /api/tiny/buscar-produto?valor=<EAN_ou_SKU>
@@ -2079,6 +2384,7 @@ def tiny_buscar_produto():
     return _cors_error("produto não encontrado", 400)
 
 @bp_retirado.route('/api/tiny/kit-item', methods=['GET'])
+@rate_limit(60, 60) # máx 60 reqs por minuto por IP
 def tiny_kit_item():
     """
     GET /api/tiny/kit-item?valor=<id|ean|sku>
@@ -2222,124 +2528,210 @@ def tiny_kit_item():
 
 # --- FIX 1: coluna PK correta para comp_agend --------------------------
 def _table_and_cols(meta: dict):
-    etapa = (meta or {}).get('etapa')
-    pk = (meta or {}).get('pk')
-    equivalente = bool((meta or {}).get('equivalente'))
-    if etapa not in ('conf', 'exp') or not isinstance(pk, int):
+    """
+    Resolve a tabela/colunas conforme etapa ('conf'|'exp') e se é equivalente.
+    Retorna tupla (table, id_col, col_lanc_s, col_lanc_e, col_status, col_qtd)
+    ou None se meta/etapa inválidos.
+    """
+    if not isinstance(meta, dict):
         return None
 
-    if equivalente:
-        table = 'agendamento_produto_bipagem_equivalentes'
-        id_col = 'id'                      # ok
-    else:
-        table = 'comp_agend'
-        id_col = 'id_prod_comp'            # <-- era 'id_comp'
+    etapa = (_to_opt_str_first(meta.get('etapa')) or '').lower()
+    if etapa not in ('conf', 'exp'):
+        return None  # não devolve Response aqui (helper é usado no worker)
+
+    equivalente = bool(meta.get('equivalente', False))
+
+    table  = 'agendamento_produto_bipagem_equivalentes' if equivalente else 'comp_agend'
+    id_col = 'id' if equivalente else 'id_comp'
 
     col_lanc_s = f"lanc_{etapa}_s"
     col_lanc_e = f"lanc_{etapa}_e"
     col_status = f"status_{etapa}"
     col_qtd    = f"qtd_mov_{etapa}"
-    return table, id_col, pk, col_lanc_s, col_lanc_e, col_status, col_qtd
+    return table, id_col, col_lanc_s, col_lanc_e, col_status, col_qtd
+
+def _meta_pks(meta: dict) -> list[int]:
+    """
+    Extrai uma lista de PKs a partir de 'pk_list' (preferencial) ou 'pk'.
+    Retorna [] quando nada válido for encontrado.
+    """
+    pks = []
+    if isinstance(meta.get('pk_list'), (list, tuple)):
+        for x in meta['pk_list']:
+            try:
+                pks.append(int(x))
+            except (TypeError, ValueError):
+                pass
+    elif meta.get('pk') is not None:
+        try:
+            pks.append(int(meta['pk']))
+        except (TypeError, ValueError):
+            pass
+    return pks
 
 def _db_conn():
     return mysql.connector.connect(**_db_config)
 
-def db_set_status_run(meta: dict):
+# === Novo trecho completo ===
+def db_set_status_run(meta: dict) -> int:
     r = _table_and_cols(meta)
     if not r:
         print(f"[db] db_set_status_run: meta inválido: {meta}")
         return 0
-    table, id_col, pk, _, _, col_status, _ = r
-    sql = f"UPDATE {table} SET {col_status}=%s WHERE {id_col}=%s"
+    table, id_col, _, _, col_status, _ = r
+    pks = _meta_pks(meta)
+    if not pks:
+        print(f"[db] db_set_status_run: sem PKs em meta={meta}")
+        return 0
+
     conn = _db_conn()
     try:
         c = conn.cursor()
-        c.execute(sql, (1, pk))
+        placeholders = ",".join(["%s"] * len(pks))
+        sql = f"UPDATE {table} SET {col_status}=%s WHERE {id_col} IN ({placeholders})"
+        params = (1, *pks)
+        c.execute(sql, params)
         rows = c.rowcount
         conn.commit()
         c.close()
-        print(f"[db] {sql} -> rows={rows} (pk={pk})")
+        print(f"[db] {sql} -> rows={rows} (pks={pks})")
         return rows
     except Exception as e:
-        print(f"[db] ERRO em db_set_status_run: {e} | sql={sql} | pk={pk}")
+        print(f"[db] ERRO em db_set_status_run: {e}")
         raise
     finally:
         conn.close()
+
 
 def db_on_saida_ok(meta: dict, lanc_id: str) -> int:
     r = _table_and_cols(meta)
     if not r:
         print(f"[db] db_on_saida_ok: meta inválido: {meta}")
         return 0
-    table, id_col, pk, col_lanc_s, _, _, _ = r
+    table, id_col, col_lanc_s, _, _, _ = r
+    pks = _meta_pks(meta)
+    if not pks:
+        print(f"[db] db_on_saida_ok: sem PKs em meta={meta}")
+        return 0
+
     conn = _db_conn()
     try:
         c = conn.cursor()
-        c.execute(f"UPDATE {table} SET {col_lanc_s}=%s WHERE {id_col}=%s", (str(lanc_id), pk))
+        placeholders = ",".join(["%s"] * len(pks))
+        sql = f"UPDATE {table} SET {col_lanc_s}=%s WHERE {id_col} IN ({placeholders})"
+        params = (str(lanc_id), *pks)
+        c.execute(sql, params)
         rows = c.rowcount
         conn.commit()
         c.close()
-        print(f"[db] {table}.{col_lanc_s} <- {lanc_id} (pk={pk}) rows={rows}")
+        print(f"[db] {table}.{col_lanc_s} <- {lanc_id} (pks={pks}) rows={rows}")
         return rows
     finally:
         conn.close()
 
+
 def db_on_entrada_ok(meta: dict, lanc_id: str, unidades: float) -> int:
+    """
+    Atualiza o mesmo id de lançamento de ENTRADA para TODAS as PKs.
+    Regras para quantidade:
+      - Se meta.qtd_mov_map (dict pk->qtd) existir, aplica por PK.
+      - Senão, se meta.qtd_mov (número) existir, aplica o MESMO valor a todas.
+      - Caso contrário, NÃO altera {col_qtd} para evitar dupla contagem.
+    """
     r = _table_and_cols(meta)
     if not r:
         print(f"[db] db_on_entrada_ok: meta inválido: {meta}")
         return 0
-    table, id_col, pk, _, col_lanc_e, col_status, col_qtd = r
-    try:
-        qtd = float(unidades)
-    except (TypeError, ValueError):
-        qtd = 0.0
+    table, id_col, _, col_lanc_e, col_status, col_qtd = r
+    pks = _meta_pks(meta)
+    if not pks:
+        print(f"[db] db_on_entrada_ok: sem PKs em meta={meta}")
+        return 0
+
+    # Prepara mapas de quantidade
+    qmap = {}
+    if isinstance(meta.get('qtd_mov_map'), dict):
+        for k, v in meta['qtd_mov_map'].items():
+            try:
+                qmap[int(k)] = float(v)
+            except (TypeError, ValueError):
+                pass
+    elif meta.get('qtd_mov') is not None:
+        try:
+            val = float(meta['qtd_mov'])
+            qmap = {int(pk): val for pk in pks}
+        except (TypeError, ValueError):
+            qmap = {}
+
     conn = _db_conn()
     try:
         c = conn.cursor()
-        c.execute(
-            f"UPDATE {table} "
-            f"SET {col_lanc_e}=%s, {col_status}=%s, {col_qtd}=COALESCE({col_qtd},0)+%s "
-            f"WHERE {id_col}=%s",
-            (str(lanc_id), 2, qtd, pk)
-        )
-        rows = c.rowcount
+
+        # 1) sempre aplica lanc_e e status=2 para todas as linhas
+        placeholders = ",".join(["%s"] * len(pks))
+        sql_common = f"UPDATE {table} SET {col_lanc_e}=%s, {col_status}=%s WHERE {id_col} IN ({placeholders})"
+        c.execute(sql_common, (str(lanc_id), 2, *pks))
+
+        # 2) se houver quantidades por PK, atualiza {col_qtd} por linha (evita somar 2x)
+        rows_qtd = 0
+        if qmap:
+            for pk, qtd in qmap.items():
+                c.execute(
+                    f"UPDATE {table} SET {col_qtd}=COALESCE({col_qtd},0)+%s WHERE {id_col}=%s",
+                    (qtd, pk)
+                )
+                rows_qtd += c.rowcount
+
         conn.commit()
         c.close()
-        print(f"[db] {table}.{col_lanc_e} <- {lanc_id}, {col_status}=2, {col_qtd}+={qtd} (pk={pk}) rows={rows}")
-        return rows
+        print(f"[db] {table}.{col_lanc_e} <- {lanc_id} (pks={pks}); qtd_rows_aplicadas={rows_qtd}")
+        # rows retornado aqui é informativo
+        return len(pks)
     finally:
         conn.close()
 
+# === Novo trecho completo (db_on_saida_fail) ===
 def db_on_saida_fail(meta: dict, err: Optional[str] = None):
     r = _table_and_cols(meta)
     if not r:
         return
-    table, id_col, pk, _, _, col_status, _ = r
+    table, id_col, _, _, col_status, _ = r
+    pks = _meta_pks(meta)
+    if not pks:
+        return
     conn = _db_conn()
     try:
-        with conn.cursor() as c:
-            c.execute(
-                f"UPDATE {table} SET {col_status}=%s WHERE {id_col}=%s",
-                (4, pk)  # 4 = ERR (falha na saída)
-            )
+        c = conn.cursor()
+        placeholders = ",".join(["%s"] * len(pks))
+        c.execute(
+            f"UPDATE {table} SET {col_status}=%s WHERE {id_col} IN ({placeholders})",
+            (4, *pks)  # 4 = ERR (falha na saída)
+        )
         conn.commit()
+        c.close()
     finally:
         conn.close()
-
+        
+# === Novo trecho completo (db_on_entrada_fail) ===
 def db_on_entrada_fail(meta: dict, err: Optional[str] = None):
     r = _table_and_cols(meta)
     if not r:
         return
-    table, id_col, pk, _, _, col_status, _ = r
+    table, id_col, _, _, col_status, _ = r
+    pks = _meta_pks(meta)
+    if not pks:
+        return
     conn = _db_conn()
     try:
-        with conn.cursor() as c:
-            c.execute(
-                f"UPDATE {table} SET {col_status}=%s WHERE {id_col}=%s",
-                (3, pk)  # 3 = PARC (falha na entrada)
-            )
+        c = conn.cursor()
+        placeholders = ",".join(["%s"] * len(pks))
+        c.execute(
+            f"UPDATE {table} SET {col_status}=%s WHERE {id_col} IN ({placeholders})",
+            (3, *pks)  # 3 = PARC (falha na entrada)
+        )
         conn.commit()
+        c.close()
     finally:
         conn.close()
 
@@ -2347,99 +2739,152 @@ def db_on_entrada_fail(meta: dict, err: Optional[str] = None):
 def api_agendamento_completo(id_agend_ml: int):
     """
     GET /api/agendamento/<id>/completo
-    Retorna TODOS os produtos originais do agendamento + bipados diretos + equivalentes (completo) + totais.
-    Estrutura:
-    {
-      ok: true,
-      id_agend_ml: 326,
-      produtos: [
-        {
-          produto_original: { ... (todas colunas de produtos_agend) ... },
-          bipagem: { id_agend_ml, sku, bipados } | null,
-          equivalentes: [ ... linhas completas de agendamento_produto_bipagem_equivalentes ... ],
-          totais: { bipados_diretos, bipados_equivalentes_total, bipados_total }
-        },
-        ...
-      ],
-      totais_gerais: { diretos, equivalentes, total }
-    }
+
+    Regras (SEM KITS):
+      - A lista vem da composição (comp_agend) para os anúncios do agendamento.
+      - 'produto_original' descreve o item da COMPOSIÇÃO (não o anúncio/kit).
+      - 'bipagem' NUNCA é null: { id_agend_ml, sku, bipados } (direto por SKU).
+      - 'equivalentes' = linhas de agendamento_produto_bipagem_equivalentes
+        que casam com o item da composição por SKU, id_tiny ou GTIN.
+      - 'totais' = diretos + equivalentes (por item e no geral).
+      - Campo 'e_kit_prod' NÃO é retornado.
+      - PK SEMPRE = id_comp.
     """
     try:
         conn = mysql.connector.connect(**_db_config)
         cur  = conn.cursor(dictionary=True)
 
-        # 1) Todos os produtos originais do agendamento
-        sql_prod = """
+        # 1) COMPOSIÇÕES dos anúncios deste agendamento
+        #    Observação: não enviamos e_kit_prod.
+        sql_comp = """
             SELECT
-              id_prod, id_agend_prod, id_prod_ml, id_prod_tiny, sku_prod, gtin_prod,
-              unidades_prod, e_kit_prod, nome_prod, estoque_flag_prod, imagem_url_prod
-            FROM produtos_agend
-            WHERE id_agend_prod = %s
-            ORDER BY sku_prod ASC
-        """
-        cur.execute(sql_prod, (id_agend_ml,))
-        produtos = cur.fetchall() or []
+                c.id_comp                           AS id_comp,          -- PK da composição (use este como pk)
+                p.id_agend_prod                     AS id_agend_prod,    -- id do agendamento no registro do anúncio
+                NULL                                AS id_prod_ml,       -- não faz sentido na composição
+                c.id_comp_tiny                      AS id_prod_tiny,     -- id tiny do item de composição
+                c.sku_comp                          AS sku_prod,         -- sku do item de composição
+                c.gtin_comp                         AS gtin_prod,        -- gtin do item de composição
+                c.unidades_totais_comp              AS unidades_prod,    -- unidades por agendamento (ex.: 160)
+                c.nome_comp                         AS nome_prod,        -- nome do item
+                NULL                                AS estoque_flag_prod,
+                COALESCE(c.imagem_url_comp, p.imagem_url_prod) AS imagem_url_prod,
 
-        # 2) Bipados diretos (mapa por SKU)
+                -- Extras úteis:
+                p.sku_prod                          AS sku_anuncio,      -- sku do anúncio (somente info)
+                c.unidades_por_kit_comp,
+                c.id_prod_comp                      AS id_anuncio_prod   -- FK para produtos_agend.id_prod
+            FROM comp_agend c
+            JOIN produtos_agend p
+              ON p.id_prod = c.id_prod_comp
+            WHERE p.id_agend_prod = %s
+            ORDER BY p.sku_prod ASC, c.id_comp ASC
+        """
+        cur.execute(sql_comp, (id_agend_ml,))
+        composicoes = cur.fetchall() or []
+
+        # 2) Bipagem "direta" por SKU (baseada no item de COMPOSIÇÃO)
+        #    Somamos por segurança caso haja mais de um registro do mesmo SKU.
         sql_dir = """
-            SELECT sku, COALESCE(bipados,0) AS bipados
-            FROM agendamento_produto_bipagem
-            WHERE id_agend_ml = %s
+            SELECT sku, SUM(COALESCE(bipados,0)) AS bipados
+              FROM agendamento_produto_bipagem
+             WHERE id_agend_ml = %s
+             GROUP BY sku
         """
         cur.execute(sql_dir, (id_agend_ml,))
         diretos_rows = cur.fetchall() or []
-        diretos_map = { (r.get("sku") or "").strip(): int(r.get("bipados") or 0) for r in diretos_rows }
+        diretos_map = { (r.get("sku") or "").strip().lower(): int(r.get("bipados") or 0)
+                        for r in diretos_rows }
 
-        # 3) Todos equivalentes do agendamento (e já agrupamos por sku_original)
+        # 3) Equivalentes deste agendamento (vamos indexar por sku/id_tiny/gtin do "original")
         sql_eq = """
             SELECT
-                id, id_agend_ml, sku_original, gtin_original, id_tiny_original,
+                id, id_agend_ml,
+                sku_original, gtin_original, id_tiny_original,
                 nome_equivalente,
                 sku_bipado, gtin_bipado, id_tiny_equivalente,
-                bipados, criado_por, criado_em, atualizado_em, observacao
+                COALESCE(bipados,0) AS bipados,
+                criado_por, criado_em, atualizado_em, observacao
             FROM agendamento_produto_bipagem_equivalentes
             WHERE id_agend_ml = %s
-            ORDER BY sku_original, sku_bipado
         """
         cur.execute(sql_eq, (id_agend_ml,))
         equivalentes_all = cur.fetchall() or []
 
-        # Agrupa equivalentes por sku_original e soma totais
+        cur.close()
+        conn.close()
+
+        # ---- Helpers ----
         from collections import defaultdict
-        equiv_by_orig = defaultdict(list)
-        equiv_tot_map = defaultdict(int)
+        from datetime import datetime, date
+
+        def _norm(v):   # normaliza p/ comparação
+            return (str(v or '')).strip().lower()
+
+        def _ser(row: dict) -> dict:  # serializa datas -> string
+            out = {}
+            for k, v in (row or {}).items():
+                if isinstance(v, (datetime, date)):
+                    out[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    out[k] = v
+            return out
+
+        # Indexa equivalentes por chaves do "original"
+        eq_by_sku   = defaultdict(list)
+        eq_by_tiny  = defaultdict(list)
+        eq_by_gtin  = defaultdict(list)
         for e in equivalentes_all:
-            so = (e.get("sku_original") or "").strip()
-            equiv_by_orig[so].append(e)
-            equiv_tot_map[so] += int(e.get("bipados") or 0)
+            if e.get("sku_original"):
+                eq_by_sku[_norm(e["sku_original"])].append(e)
+            if e.get("id_tiny_original"):
+                eq_by_tiny[str(e["id_tiny_original"]).strip()].append(e)
+            if e.get("gtin_original"):
+                eq_by_gtin[str(e["gtin_original"]).strip()].append(e)
 
-        cur.close(); conn.close()
-
-        # 4) Monta payload por produto
         itens = []
-        total_diretos = 0
-        total_equivs  = 0
+        total_diretos_geral = 0
+        total_equivs_geral  = 0
 
-        for p in produtos:
-            sku = (p.get("sku_prod") or "").strip()
-            d   = int(diretos_map.get(sku, 0))
-            eqs = equiv_by_orig.get(sku, [])
-            eqt = int(equiv_tot_map.get(sku, 0))
+        for c in composicoes:
+            # chaves do item de composição
+            sku_comp  = (c.get("sku_prod") or "").strip()
+            tiny_comp = str(c.get("id_prod_tiny") or "").strip()
+            gtin_comp = str(c.get("gtin_prod") or "").strip()
 
-            total_diretos += d
-            total_equivs  += eqt
+            # Diretos por SKU da composição
+            bipados_diretos = int(diretos_map.get(_norm(sku_comp), 0))
 
-            # bipagem “direta” no mesmo formato do /api/bipagem/detalhe
-            bipagem = {"id_agend_ml": id_agend_ml, "sku": sku, "bipados": d} if d or (sku in diretos_map) else None
+            # Equivalentes que casam por (sku OR id_tiny OR gtin) do ORIGINAL
+            # Dedupe por 'id' do equivalente.
+            eq_pool = {}
+            for e in eq_by_sku.get(_norm(sku_comp), []):
+                eq_pool[e["id"]] = e
+            if tiny_comp:
+                for e in eq_by_tiny.get(tiny_comp, []):
+                    eq_pool[e["id"]] = e
+            if gtin_comp:
+                for e in eq_by_gtin.get(gtin_comp, []):
+                    eq_pool[e["id"]] = e
+
+            eqs_match = [_ser(e) for e in eq_pool.values()]
+            bipados_equivalentes_total = sum(int(e.get("bipados") or 0) for e in eq_pool.values())
+
+            bipados_total = bipados_diretos + bipados_equivalentes_total
+            total_diretos_geral += bipados_diretos
+            total_equivs_geral  += bipados_equivalentes_total
 
             itens.append({
-                "produto_original": p,   # TODAS as colunas de produtos_agend
-                "bipagem": bipagem,
-                "equivalentes": eqs,     # linhas completas
+                "produto_original": c,                # contém id_comp (PK) e info da composição
+                "bipagem": {                          # nunca null
+                    "id_agend_ml": id_agend_ml,
+                    "sku": sku_comp,
+                    "bipados": bipados_diretos
+                },
+                "equivalentes": eqs_match,            # somente equivalentes que pertencem ao item
                 "totais": {
-                    "bipados_diretos": d,
-                    "bipados_equivalentes_total": eqt,
-                    "bipados_total": d + eqt
+                    "bipados_diretos": bipados_diretos,
+                    "bipados_equivalentes_total": bipados_equivalentes_total,
+                    "bipados_total": bipados_total
                 }
             })
 
@@ -2448,9 +2893,9 @@ def api_agendamento_completo(id_agend_ml: int):
             "id_agend_ml": id_agend_ml,
             "produtos": itens,
             "totais_gerais": {
-                "bipados_diretos": total_diretos,
-                "bipados_equivalentes_total": total_equivs,
-                "bipados_total": total_diretos + total_equivs
+                "bipados_diretos": total_diretos_geral,
+                "bipados_equivalentes_total": total_equivs_geral,
+                "bipados_total": total_diretos_geral + total_equivs_geral
             }
         }), 200)
         _set_cors_headers(resp)
@@ -2606,40 +3051,17 @@ def api_originais_equivalentes(id_agend: int):
     
 @bp_retirado.route('/api/retirado/<int:id_agend>/produtos-detalhados', methods=['GET'])
 def api_retirado_produtos_detalhados(id_agend: int):
-    """
-    GET /api/retirado/<id_agend>/produtos-detalhados
-
-    Resposta:
-    {
-      "ok": true,
-      "idAgend": 326,
-      "produtosOriginais": [
-        {
-          "produto": {... de produtos_agend ...},
-          "composicoes": [ {... de comp_agend (c.* com campos de movimentação)... } ],
-          "bipagemDireta": { "sku": "JP...", "bipados": 3 } | null,
-          "equivalentes": [ {... de agendamento_produto_bipagem_equivalentes (incl. movimentação)... } ],
-          "totais": {
-            "bipados_diretos": 0,
-            "bipados_equivalentes_total": 0,
-            "bipados_total": 0
-          }
-        }
-      ]
-    }
-    """
     try:
         conn = mysql.connector.connect(**_db_config)
         cur  = conn.cursor(dictionary=True)
 
-        # 1) Produtos originais + suas composições (trazendo TODAS colunas de comp_agend)
+        # 1) Produtos originais + composições
         sql_prod_comp = """
             SELECT
                 p.id_prod, p.id_agend_prod, p.id_prod_ml, p.id_prod_tiny,
                 p.sku_prod, p.gtin_prod, p.unidades_prod, p.e_kit_prod,
                 p.nome_prod, p.estoque_flag_prod, p.imagem_url_prod,
-
-                c.*  -- TUDO da comp_agend (inclui campos de movimentação)
+                c.*  -- todas as colunas de comp_agend
             FROM produtos_agend p
             LEFT JOIN comp_agend c
                    ON c.id_prod_comp = p.id_prod
@@ -2649,7 +3071,7 @@ def api_retirado_produtos_detalhados(id_agend: int):
         cur.execute(sql_prod_comp, (id_agend,))
         rows_prod_comp = cur.fetchall() or []
 
-        # 2) Bipagem direta (map por SKU)
+        # 2) Bipagem direta por SKU (normalizada)
         sql_bip_dir = """
             SELECT sku, COALESCE(bipados,0) AS bipados
               FROM agendamento_produto_bipagem
@@ -2657,9 +3079,14 @@ def api_retirado_produtos_detalhados(id_agend: int):
         """
         cur.execute(sql_bip_dir, (id_agend,))
         bip_dir_rows = cur.fetchall() or []
-        bip_dir_map  = { (r.get("sku") or "").strip(): int(r.get("bipados") or 0) for r in bip_dir_rows }
 
-        # 3) Equivalentes (traz TUDO; inclui campos de movimentação se existirem)
+        def _norm(v):
+            return (str(v or '')).strip().lower()
+
+        # -> mapa case-insensitive
+        bip_dir_map = { _norm(r.get("sku")): int(r.get("bipados") or 0) for r in bip_dir_rows }
+
+        # 3) Equivalentes (agrupados por SKU ORIGINAL normalizado)
         sql_equiv = """
             SELECT *
               FROM agendamento_produto_bipagem_equivalentes
@@ -2671,7 +3098,6 @@ def api_retirado_produtos_detalhados(id_agend: int):
 
         cur.close(); conn.close()
 
-        # --- helpers de serialização (datas -> string) ---
         from datetime import datetime, date
         def _ser_row(row: dict) -> dict:
             out = {}
@@ -2682,25 +3108,25 @@ def api_retirado_produtos_detalhados(id_agend: int):
                     out[k] = v
             return out
 
-        # Agrupa equivalentes por SKU ORIGINAL
         from collections import defaultdict, OrderedDict
         equiv_by_skuorig = defaultdict(list)
         for e in equiv_all:
-            sku_orig = (e.get("sku_original") or "").strip()
+            sku_orig = _norm(e.get("sku_original"))
             equiv_by_skuorig[sku_orig].append(_ser_row(e))
 
-        # Monta estrutura por produto original (chave: sku_prod)
         produtos_map = OrderedDict()
-        for r in rows_prod_comp:
-            sku = (r.get("sku_prod") or "").strip()
 
-            # bloco do "produto" (campos de produtos_agend)
+        # Monta estrutura básica + composições
+        for r in rows_prod_comp:
+            sku_prod_raw = r.get("sku_prod")
+            sku_norm     = _norm(sku_prod_raw)
+
             produto = {
                 "id_prod": r.get("id_prod"),
                 "id_agend_prod": r.get("id_agend_prod"),
                 "id_prod_ml": r.get("id_prod_ml"),
                 "id_prod_tiny": r.get("id_prod_tiny"),
-                "sku_prod": r.get("sku_prod"),
+                "sku_prod": sku_prod_raw,
                 "gtin_prod": r.get("gtin_prod"),
                 "unidades_prod": r.get("unidades_prod"),
                 "e_kit_prod": r.get("e_kit_prod"),
@@ -2709,25 +3135,22 @@ def api_retirado_produtos_detalhados(id_agend: int):
                 "imagem_url_prod": r.get("imagem_url_prod"),
             }
 
-            if sku not in produtos_map:
-                produtos_map[sku] = {
+            if sku_norm not in produtos_map:
+                produtos_map[sku_norm] = {
                     "produto": produto,
                     "composicoes": [],
-                    "bipagemDireta": (
-                        {"sku": sku, "bipados": bip_dir_map.get(sku, 0)}
-                        if (sku in bip_dir_map or bip_dir_map.get(sku, 0) > 0) else None
-                    ),
-                    "equivalentes": equiv_by_skuorig.get(sku, []),
-                    "totais": {  # preenchido após juntar tudo
+                    # será preenchido depois (sempre objeto; bipados pode ser 0)
+                    "bipagemDireta": {"sku": sku_prod_raw, "bipados": 0},
+                    "equivalentes": equiv_by_skuorig.get(sku_norm, []),
+                    "totais": {
                         "bipados_diretos": 0,
                         "bipados_equivalentes_total": 0,
                         "bipados_total": 0
                     }
                 }
 
-            # adiciona composição (se houver linha de comp_agend)
+            # adiciona composição (se houver)
             if r.get("id_comp") is not None:
-                # separa campos de comp_agend dinamicamente: tudo que não é da tabela p.*
                 comp = {}
                 for k, v in r.items():
                     if k not in {
@@ -2736,12 +3159,29 @@ def api_retirado_produtos_detalhados(id_agend: int):
                         "nome_prod","estoque_flag_prod","imagem_url_prod"
                     }:
                         comp[k] = v
-                produtos_map[sku]["composicoes"].append(_ser_row(comp))
 
-        # calcula totais por produto
-        for sku, item in produtos_map.items():
-            d = int((item.get("bipagemDireta") or {}).get("bipados") or 0)
-            eq_total = sum(int(e.get("bipados") or 0) for e in item.get("equivalentes") or [])
+                # FIX: bipados diretos por SKU da composição (case-insensitive)
+                sku_comp_norm = _norm(comp.get("sku_comp"))
+                comp["bipados_diretos_comp"] = int(bip_dir_map.get(sku_comp_norm, 0))
+
+                produtos_map[sku_norm]["composicoes"].append(_ser_row(comp))
+
+        # Pós-processo: bipagemDireta e totais por produto (kit vs simples)
+        for sku_norm, item in produtos_map.items():
+            prod = item["produto"]
+            is_kit = str(prod.get("e_kit_prod") or "0") in ("1", "true", "True")
+
+            # equivalentes (somatório)
+            eq_total = sum(int(e.get("bipados") or 0) for e in (item.get("equivalentes") or []))
+
+            if is_kit:
+                # FIX: somar bipados dos SKUs das composições
+                d = sum(int(c.get("bipados_diretos_comp") or 0) for c in (item["composicoes"] or []))
+            else:
+                # simples: bipagem direta no próprio SKU do anúncio
+                d = int(bip_dir_map.get(_norm(prod.get("sku_prod")), 0))
+
+            item["bipagemDireta"]["bipados"] = d
             item["totais"]["bipados_diretos"] = d
             item["totais"]["bipados_equivalentes_total"] = eq_total
             item["totais"]["bipados_total"] = d + eq_total

@@ -32,7 +32,7 @@ async function _fetchImageForComp(comp) {
     let url = PLACEHOLDER_IMG;
 
     if (comp.id_comp) {
-      const r = await fetch(`/api/retirado/composicao/${comp.id_comp}/imagem`);
+      const r = await fetch(`/api/retirado/composicao/${comp.id_comp}/imagem`, { credentials: 'include' });
       const j = await r.json().catch(() => ({}));
       url = j.url || PLACEHOLDER_IMG;
     } else if (comp.fk_id_prod) {
@@ -41,7 +41,7 @@ async function _fetchImageForComp(comp) {
         sku: comp.sku || "",
         id_tiny: comp.id_tiny ? String(comp.id_tiny) : ""
       });
-      const r = await fetch(`/api/retirado/composicao/imagem?${qs}`);
+      const r = await fetch(`/api/retirado/composicao/imagem?${qs}`, { credentials: 'include' });
       const j = await r.json().catch(() => ({}));
       url = j.url || PLACEHOLDER_IMG;
     }
@@ -105,52 +105,44 @@ const normIdTiny = v => {
 // 1) imagem vinda no JSON
 // 2) endpoint backend (se existir)
 // 3) fallback direto no Tiny via /api/tiny-proxy
+// === Novo trecho completo ===
+// === Novo trecho completo ===
 async function resolveCompImage(comp) {
   if (!comp) return PLACEHOLDER_IMG;
 
-  // 1) Veio no JSON
+  // 1) veio no JSON
   if (comp.imagem_url_comp && String(comp.imagem_url_comp).trim()) {
     return comp.imagem_url_comp;
   }
 
-  // 2) Backend (se você criou a rota)
-  const compId = comp.id_comp || comp.id || comp.id_composicao || null;
-  if (compId) {
-    try {
-      const r = await fetch(`/api/retirado/composicao/${compId}/imagem`);
-      if (r.ok) {
-        const j = await r.json().catch(() => ({}));
-        if (j && j.url) return j.url;
-      }
-    } catch { /* ignora e segue pro fallback */ }
-  }
-
-  // 3) Fallback Tiny (usa /api/tiny-proxy)
+  // 2) backend resolve por id_comp ou (fk_id_prod/sku/id_tiny)
   try {
-    const idTiny = comp.id_tiny || comp.id_produto || comp.idProduto || null;
-    if (idTiny) {
-      const tkResp = await getTinyToken("jaupesca", "tiny");
-      const accessToken = tkResp?.[0]?.access_token;
-      if (accessToken) {
-        const r = await fetch('/api/tiny-proxy', {
-          method: 'GET',
-          headers: {
-            'Path': `/public-api/v3/produtos/${idTiny}`,
-            'Authorization': 'Bearer ' + accessToken
-          }
-        });
-        if (r.ok) {
-          const j = await r.json().catch(() => ({}));
-          if (Array.isArray(j?.anexos) && j.anexos.length > 0) {
-            return j.anexos[0].url;
-          }
-        }
-      }
-    }
-  } catch { /* mantém placeholder */ }
+    const key = comp.id_comp ?? `${comp.fk_id_prod}|${comp.sku || ''}|${comp.id_tiny || ''}`;
+    if (_compImageCache.has(key)) return _compImageCache.get(key);
 
-  return PLACEHOLDER_IMG;
+    let url = PLACEHOLDER_IMG;
+    if (comp.id_comp) {
+      const r = await fetch(`/api/retirado/composicao/${comp.id_comp}/imagem`, { credentials: 'include' });
+      const j = await r.json().catch(() => ({}));
+      url = j.url || PLACEHOLDER_IMG;
+    } else if (comp.fk_id_prod) {
+      const qs = new URLSearchParams({
+        fk_id_prod: String(comp.fk_id_prod),
+        sku: comp.sku || "",
+        id_tiny: comp.id_tiny ? String(comp.id_tiny) : ""
+      });
+      const r = await fetch(`/api/retirado/composicao/imagem?${qs}`, { credentials: 'include' });
+      const j = await r.json().catch(() => ({}));
+      url = j.url || PLACEHOLDER_IMG;
+    }
+
+    _compImageCache.set(key, url);
+    return url;
+  } catch {
+    return PLACEHOLDER_IMG;
+  }
 }
+// ======================================================
 
 document.addEventListener('DOMContentLoaded', () => {
   // ─── Collapse responsivo ───────────────────────
@@ -189,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Aqui ele pega as informações que estão no HTML e transforma em variáveis usáveis no JS
   const raw = document.getElementById("js-data").dataset.comps;
   const produtos = JSON.parse(raw);
-  // console.log('>', produtos); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('>', produtos); // TODO REMOVER DEPOIS (DEBUG)
 
   const empresaId = parseInt(document.getElementById("infoAgend").dataset.empresa, 10);
   const empresaNome =
@@ -203,12 +195,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const marketplaceAgendamento = document.getElementById("infoAgend").dataset.marketplace;
 
   // Testa as variáveis
-  // console.log('Empresa>', empresaNome); // TODO REMOVER DEPOIS (DEBUG)
-  // console.log('Nº Agendamento>', numeroAgendamento); // TODO REMOVER DEPOIS (DEBUG)
-  // console.log('Colaborador>', nomeColaborador); // TODO REMOVER DEPOIS (DEBUG)
-  // console.log('Marketplace>', marketplaceAgendamento); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Empresa>', empresaNome); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Nº Agendamento>', numeroAgendamento); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Colaborador>', nomeColaborador); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Marketplace>', marketplaceAgendamento); // TODO REMOVER DEPOIS (DEBUG)
 
-  // console.log('Produtos>', produtos); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Produtos>', produtos); // TODO REMOVER DEPOIS (DEBUG)
 
   let obj = [];
 
@@ -240,13 +232,13 @@ document.addEventListener('DOMContentLoaded', () => {
     p.composicoes.some(c => c.sku === "JP12324")
   );
 
-  // console.log('Esse aqui é o resultado askdaldkajsdl >', resultado); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Esse aqui é o resultado askdaldkajsdl >', resultado); // TODO REMOVER DEPOIS (DEBUG)
 });
 
 // ─── busca estado no servidor e atualiza UI ─────────────────────
 async function carregarProgressoServer() {
   try {
-    const resp = await fetch(`/api/bipados-total/${idAgend}`);
+    const resp = await fetch(`/api/bipados-total/${idAgend}`, { credentials: 'include' });
     if (!resp.ok) throw new Error(resp.statusText);
     const dados = await resp.json();
     // console.log('Kelvinhoooo >', dados);
@@ -271,7 +263,7 @@ async function carregarProgressoServer() {
 
 // ─── atualiza cores, barra e texto de um item ─────────────────────
 function atualizarUI(item, bip) {
-  const total = +item.dataset.total;
+  const total = toNum(item?.dataset?.total, 0);
   const barra = item.querySelector('.progress-bar');
 
   item.querySelector('.bipados').textContent = `Bipados: ${bip}`;
@@ -322,9 +314,15 @@ function iniciarContadorTempo() {
   const tempoP = document.getElementById('tempoP');
   const estP = document.getElementById('estimadoP');
   if (estP) {
-    const [, h, m, s] = estP.textContent.match(/(\d{2})h (\d{2})m (\d{2})s/);
-    tempoEstimadoSegundos = (+h * 3600) + (+m * 60) + (+s);
+    const m = estP.textContent.match(/(\d{2})h (\d{2})m (\d{2})s/);
+    if (m) {
+      const [, h, mnt, s] = m;
+      tempoEstimadoSegundos = (+h * 3600) + (+mnt * 60) + (+s);
+    } else {
+      tempoEstimadoSegundos = 0;
+    }
   }
+
   inicioTimestamp = Date.now();
   intervaloTempo = setInterval(() => {
     const secDec = Math.floor((Date.now() - inicioTimestamp) / 1000);
@@ -497,7 +495,18 @@ async function finalizarAgendamento() {
   });
 
   try {
-    const resp = await fetch(`/relatorio/finalizar/${idAgend}`, { method: 'POST' });
+    const csrf = getCsrf();
+    const resp = await fetch(`/relatorio/finalizar/${idAgend}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        // cobre os n omes mais usados pelos frameworks
+        'X-CSRFToken': csrf,      // Django
+        'X-CSRF-Token': csrf,     // Rails/Express
+        'X-XSRF-TOKEN': csrf      // Laravel/Sanctum
+      },
+    });
     const data = await resp.json();
     if (!resp.ok || !data.success) throw new Error(data?.message || `HTTP ${resp.status}`);
 
@@ -518,71 +527,81 @@ async function finalizarAgendamento() {
   }
 }
 
+function getCsrf() {
+  // tenta meta <meta name="csrf-token" content="...">
+  const m = document.querySelector('meta[name="csrf-token"], meta[name="csrf"]');
+  if (m?.content) return m.content;
 
-// Rotaciona o código utilizando a chave
-function dec(b64, key) {
-  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  const k = new TextEncoder().encode(key);
-  for (let i = 0; i < bytes.length; i++) bytes[i] ^= k[i % k.length];
-  return new TextDecoder().decode(bytes);
+  // tenta cookies mais comuns: Laravel/Django/etc.
+  const c = document.cookie.match(/(?:^|;\s*)(XSRF-TOKEN|XSRF|csrftoken|csrf_token)=([^;]+)/);
+  return c ? decodeURIComponent(c[2]) : '';
 }
 
-async function getTinyToken(empresa, marketplace) {
-  const PATH_KEY = 'tP2TTtorDkG6sxdA7UTkg2ErxBHQ7fRvQfpDLRSbBu2fswYxxmkZpf7pBusDpVJWiWCBrdsPU5rsDQfU3DB72ZiB5eJ3W7QtvAgUdRopfDDtbdijak2tP3PJmDyK3PzaQgD7gi6MtoPP3Y8QeF7VuYq4zEVHYGURCkXJxo3uEu48bbKWnQzhoyNvpzANfiFTJ7ZMsY58v9rSKZk88yLvMMhyBmoYg7zmfbqSjWJPsrBca7uSsjaNTT4qPRddkky956W7BvkaGPcmZAzSmCriGmCBwBwxFT49uxf6hhDcTq8unsbfSLjLzikxTji9dtNZ7DkvAfEYAcJBq7HoPug9E9HNPiEy9gSc5qys2zHBGQ9ez8iKGLegQCom3Km6T8zyMamMdPb29BYRutwaRd5TzhccD5Vzm2KxeoKNZzxdvgLaKCm9HgPLTb5pdDdWLAcmXqJK6iHk5kdgXCAzsnKKoieFxVNAWRiUMJYYmyvsX5ACBSPsnW8f4QAT6ohVSGMC';
-  const PASS_KEY = 'GE7bKeydUk8zEmqMoXM2uSF3i8PYXVAXh5nvQM7UwGbjWmxkFRYdr7HUbzP8WUSJkUF4AxFTooNqReDYqPUoLRG75ypxij88tZ2MWNzciWyAwZ4c68F2GHYQNirS4L7kVQhMMqgTdqX2sJmF2PvtukmvZ4AjieP3cnvJZ6zRPqYPV3RzNeT35rmT3mU4ob4hUeagosEz4m5rNEHKv9ni26PBZYyPVyqycoYn3gvxAM5Vaz2L88cLxUqsfwaAJtNdxeBwUuJRQfrW6qFV4aa39EWFkDaMisizZnEGQhc5AGDzJXmApoQE55W4fm6L67wY6PTmQpoeio9vfNdawhXetDg8PE2ZRCkDZTQeXunL9z4YFwEeFghQ6T4gtKr8647VaRKDL4rV4twKfyUrAjyHSiEJNPNaehzET3koczEToJnE3EJxv5z8gPsMMgZe5ChNQDADKeydspxEALbraQqLw3zxUsBAJFfmKPmpDA3cbsrL93gvLCbabeiYx8BmoEd5';
-  const PATH_COD = 'GTNjMDAXJwcsJR1YRxUTDHIdEBsjUxcnMiQZYnM1OCU+PEc2OCY3LwBGZSQbQRg/KwMKYxMoDjp0DQMAOD4wDR04dzI3AgkVBU0dFCVlVWxwKnRgXCIvIFIkI3cxYikAQyI3bSVhDkIlcTQyVFBeECoEXRVjShUtAhVLH2AnGw9lHXx0CABuPD8lBGJgGFMGMQt6YUANNQ1OKmECOCoCO3YTCHMvOX4Bc0FiUCwJIRQJCx0eHAMjHgIQLAQ+UBVnOAQuKUcBBnkffBNqDTBTf3YRCAAvIipNNho7FxdBKzVSVzMHGiMpNABLNyFZfCZnGDksKBkiZDQbIzw3HjlLfQZUBw41Gy8jAQNWHzU2CDgdNCEcPTgOIUQzMBB0O2VBLRksTCI5FwYSJVMPPzY4VDsLJgkbPwQIYxAGeiAHJDJZFClPKlI/I3kOMAA2ZRo6EwEzaRF4AgAFKzE+TggJAEI9DypXIBs6BiNtMUkPHRESCCM2MwBcVWcMVU8XXAM/ARULeA0CUXF9ADo/MD8GBxNQQRZJAysCfFwTTlpTLBJXFxMWL0JBHCcrI1UKAglKOCMTODIqZgIgAQUzChITAwsGMBNlMC4ODC4GDjo7CwsUHRMhWCsgKC07HCkbMBg8dTwtEj86LysKUCxxehUTEAY0UC5xOHg/YiosFSFxKxA='
-  const PASS_COD = 'A2ZWLwoEMgMbXFkRLDo5Cko9CH9BdgV2Sg9nKm5gBTsMUAsVCD9CDCVhAQMkDD8hHzZ9ChhWMCRET3QMJSAnPxIsBgEoHzEQOhw6EjsKZxcACTs+LRpkXWAqOxspXXJtRjdmO3IQGwRKGwsfIxF0GQIZGH8Lay0BDyw5dV4+fD4/FT4VLEYkO1Y8AgA1DDofcA4RGUwzLBg0Yy8MJzE4EiImMihtRjBxOQUROTNUYSw/RjF+ZDBfBHQfdgMiQ1cMcwo5Dkkecx5bC20mGHMSMi4aBwtCdxcqFAwnFwE4VA9HDREMCxcCOSw9cw82T3cnC00gKgFtRTYoBwkJCDUCQSAREidhMSACFCQRPXdDMSJ4VVdySDQtEQ5gFQwcCgASCB0jdSYjIBE4LiMkfDIIEUUjAh8HYj1yF1tYJVhzDzpnIRwzKRUfQSw5DgIFKjcSFUl+CjgxURwqH0NtDBE1Im4lPhUvVh0dYShdawIVcEAiLF8LRxVbIRckBGICQ30CP2sFFj8RFwJGASQAEE9gGgM4LDg1OCd9e2I2U10ZTxADXhw+UQgBBjg7KTBZJBkfLgcwVhQoNx4KAzUQfxA2AhRgNyMIOyBdARkoAnImNBc/OjR5IVwOPD4ZKSwpAD8KDxoJJAoSQFYbKRRqcUkCBgwEUDEsURsfPQ8YLwgSDV0=';
+// // Rotaciona o código utilizando a chave
+// function dec(b64, key) {
+//   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+//   const k = new TextEncoder().encode(key);
+//   for (let i = 0; i < bytes.length; i++) bytes[i] ^= k[i % k.length];
+//   return new TextDecoder().decode(bytes);
+// }
 
-  const path = dec(PATH_COD, PATH_KEY).trim();
-  const pass = dec(PASS_COD, PASS_KEY).trim();
-  // console.log('Senha:', pass);
-  const url = 'https://n8n.jaupesca.com.br/webhook/' + path + `?empresa=${empresa}&marketplace=${marketplace}`;
+// async function getTinyToken(empresa, marketplace) {
+//   const PATH_KEY = 'tP2TTtorDkG6sxdA7UTkg2ErxBHQ7fRvQfpDLRSbBu2fswYxxmkZpf7pBusDpVJWiWCBrdsPU5rsDQfU3DB72ZiB5eJ3W7QtvAgUdRopfDDtbdijak2tP3PJmDyK3PzaQgD7gi6MtoPP3Y8QeF7VuYq4zEVHYGURCkXJxo3uEu48bbKWnQzhoyNvpzANfiFTJ7ZMsY58v9rSKZk88yLvMMhyBmoYg7zmfbqSjWJPsrBca7uSsjaNTT4qPRddkky956W7BvkaGPcmZAzSmCriGmCBwBwxFT49uxf6hhDcTq8unsbfSLjLzikxTji9dtNZ7DkvAfEYAcJBq7HoPug9E9HNPiEy9gSc5qys2zHBGQ9ez8iKGLegQCom3Km6T8zyMamMdPb29BYRutwaRd5TzhccD5Vzm2KxeoKNZzxdvgLaKCm9HgPLTb5pdDdWLAcmXqJK6iHk5kdgXCAzsnKKoieFxVNAWRiUMJYYmyvsX5ACBSPsnW8f4QAT6ohVSGMC';
+//   const PASS_KEY = 'GE7bKeydUk8zEmqMoXM2uSF3i8PYXVAXh5nvQM7UwGbjWmxkFRYdr7HUbzP8WUSJkUF4AxFTooNqReDYqPUoLRG75ypxij88tZ2MWNzciWyAwZ4c68F2GHYQNirS4L7kVQhMMqgTdqX2sJmF2PvtukmvZ4AjieP3cnvJZ6zRPqYPV3RzNeT35rmT3mU4ob4hUeagosEz4m5rNEHKv9ni26PBZYyPVyqycoYn3gvxAM5Vaz2L88cLxUqsfwaAJtNdxeBwUuJRQfrW6qFV4aa39EWFkDaMisizZnEGQhc5AGDzJXmApoQE55W4fm6L67wY6PTmQpoeio9vfNdawhXetDg8PE2ZRCkDZTQeXunL9z4YFwEeFghQ6T4gtKr8647VaRKDL4rV4twKfyUrAjyHSiEJNPNaehzET3koczEToJnE3EJxv5z8gPsMMgZe5ChNQDADKeydspxEALbraQqLw3zxUsBAJFfmKPmpDA3cbsrL93gvLCbabeiYx8BmoEd5';
+//   const PATH_COD = 'GTNjMDAXJwcsJR1YRxUTDHIdEBsjUxcnMiQZYnM1OCU+PEc2OCY3LwBGZSQbQRg/KwMKYxMoDjp0DQMAOD4wDR04dzI3AgkVBU0dFCVlVWxwKnRgXCIvIFIkI3cxYikAQyI3bSVhDkIlcTQyVFBeECoEXRVjShUtAhVLH2AnGw9lHXx0CABuPD8lBGJgGFMGMQt6YUANNQ1OKmECOCoCO3YTCHMvOX4Bc0FiUCwJIRQJCx0eHAMjHgIQLAQ+UBVnOAQuKUcBBnkffBNqDTBTf3YRCAAvIipNNho7FxdBKzVSVzMHGiMpNABLNyFZfCZnGDksKBkiZDQbIzw3HjlLfQZUBw41Gy8jAQNWHzU2CDgdNCEcPTgOIUQzMBB0O2VBLRksTCI5FwYSJVMPPzY4VDsLJgkbPwQIYxAGeiAHJDJZFClPKlI/I3kOMAA2ZRo6EwEzaRF4AgAFKzE+TggJAEI9DypXIBs6BiNtMUkPHRESCCM2MwBcVWcMVU8XXAM/ARULeA0CUXF9ADo/MD8GBxNQQRZJAysCfFwTTlpTLBJXFxMWL0JBHCcrI1UKAglKOCMTODIqZgIgAQUzChITAwsGMBNlMC4ODC4GDjo7CwsUHRMhWCsgKC07HCkbMBg8dTwtEj86LysKUCxxehUTEAY0UC5xOHg/YiosFSFxKxA='
+//   const PASS_COD = 'A2ZWLwoEMgMbXFkRLDo5Cko9CH9BdgV2Sg9nKm5gBTsMUAsVCD9CDCVhAQMkDD8hHzZ9ChhWMCRET3QMJSAnPxIsBgEoHzEQOhw6EjsKZxcACTs+LRpkXWAqOxspXXJtRjdmO3IQGwRKGwsfIxF0GQIZGH8Lay0BDyw5dV4+fD4/FT4VLEYkO1Y8AgA1DDofcA4RGUwzLBg0Yy8MJzE4EiImMihtRjBxOQUROTNUYSw/RjF+ZDBfBHQfdgMiQ1cMcwo5Dkkecx5bC20mGHMSMi4aBwtCdxcqFAwnFwE4VA9HDREMCxcCOSw9cw82T3cnC00gKgFtRTYoBwkJCDUCQSAREidhMSACFCQRPXdDMSJ4VVdySDQtEQ5gFQwcCgASCB0jdSYjIBE4LiMkfDIIEUUjAh8HYj1yF1tYJVhzDzpnIRwzKRUfQSw5DgIFKjcSFUl+CjgxURwqH0NtDBE1Im4lPhUvVh0dYShdawIVcEAiLF8LRxVbIRckBGICQ30CP2sFFj8RFwJGASQAEE9gGgM4LDg1OCd9e2I2U10ZTxADXhw+UQgBBjg7KTBZJBkfLgcwVhQoNx4KAzUQfxA2AhRgNyMIOyBdARkoAnImNBc/OjR5IVwOPD4ZKSwpAD8KDxoJJAoSQFYbKRRqcUkCBgwEUDEsURsfPQ8YLwgSDV0=';
 
-  try {
-    // const response = await fetch(url, {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'Authorization': `${pass}`
-    //   },
-    //   body: JSON.stringify({
-    //     empresa: empresa,
-    //     marketplace: marketplace,
-    //     agendamento: agendamento,
-    //     colaborador: colaborador,
-    //     produtos_agendamento: obj
-    //   })
-    // });
+//   const path = dec(PATH_COD, PATH_KEY).trim();
+//   const pass = dec(PASS_COD, PASS_KEY).trim();
+//   // console.log('Senha:', pass);
+//   const url = 'https://n8n.jaupesca.com.br/webhook/' + path + `?empresa=${empresa}&marketplace=${marketplace}`;
 
-    // if (!response.ok) {
-    //   const txt = await response.text().catch(() => '');
-    //   throw new Error(`HTTP ${response.status} – ${txt}`);
-    // }
+//   try {
+//     // const response = await fetch(url, {
+//     //   method: 'POST',
+//     //   headers: {
+//     //     'Content-Type': 'application/json',
+//     //     'Authorization': `${pass}`
+//     //   },
+//     //   body: JSON.stringify({
+//     //     empresa: empresa,
+//     //     marketplace: marketplace,
+//     //     agendamento: agendamento,
+//     //     colaborador: colaborador,
+//     //     produtos_agendamento: obj
+//     //   })
+//     // });
+
+//     // if (!response.ok) {
+//     //   const txt = await response.text().catch(() => '');
+//     //   throw new Error(`HTTP ${response.status} – ${txt}`);
+//     // }
 
 
-    // const data = await response.json();
-    // console.log('Resposta do n8n:', data);
-    // return data;
+//     // const data = await response.json();
+//     // console.log('Resposta do n8n:', data);
+//     // return data;
 
-    const resp = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `${pass}`
-      }
-    });
+//     const resp = await fetch(url, {
+//       method: 'GET',
+//       headers: {
+//         'Authorization': `${pass}`
+//       },
+//       credentials: 'include'
+//     });
 
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} | ${resp.json}`);
-    }
+//     if (!resp.ok) {
+//       throw new Error(`HTTP ${resp.status} | ${resp.json}`);
+//     }
 
-    const data = await resp.json();
-    console.log('Resposta do n8n:', data);
-    return data;
+//     const data = await resp.json();
+//     console.log('Resposta do n8n:', data);
+//     return data;
 
-  } catch (error) {
-    console.error('Erro na requisição:', error);
-  }
-}
+//   } catch (error) {
+//     console.error('Erro na requisição:', error);
+//   }
+// }
 
 function adicionarEquivalente(sku) {
   resetModalEquivalenteUI(); // limpa UI anterior (soft)
@@ -649,60 +668,44 @@ function resetModalEquivalenteUI({ hard = false } = {}) {
   if (hard) _equivCache.clear(); // se quiser zerar o cache entre aberturas
 }
 
+// === Novo trecho completo ===
 async function confirmarModalEquivalente() {
-  // já existe overlay de confirmação aberto? não dispare outra busca
   if (document.querySelector('#modal-equivalente .eq-confirm-overlay')) return;
 
   const inputEl = document.getElementById('eq-input');
   const val = (inputEl?.value || '').trim();
-  // se a confirmação estiver aberta, não inicie nova busca
-  if (document.querySelector('#modal-equivalente .eq-confirm-overlay')) return;
+  if (!val) { notify.error('Digite ou bipe um SKU/GTIN.', { duration: 3000 }); return; }
 
-  if (!val) {
-    notify.error('Digite ou bipe um SKU/GTIN.', { duration: 3000 });
-    return;
-  }
-
-  // evita flood
   if (_equivBusy) return;
-  _equivBusy = true;
-  inputEl.disabled = true;
+  _equivBusy = true; inputEl.disabled = true;
 
   try {
-    // token tiny
-    const tk = await getTinyToken('jaupesca', 'tiny');
-    const accessToken = tk?.[0]?.access_token;
-    if (!accessToken) throw new Error('Falha ao obter token do Tiny.');
-
-    // cache (60s) para o mesmo valor digitado
     const key = val.toLowerCase();
     let resultadoPromise = _equivCache.get(key);
     if (!resultadoPromise) {
-      resultadoPromise = buscaProdutoEquivalente(val, accessToken);
+      resultadoPromise = buscaProdutoEquivalente(val);
       _equivCache.set(key, resultadoPromise);
       setTimeout(() => _equivCache.delete(key), 60_000);
     }
     const produtoEquivalente = await resultadoPromise;
 
-    // seus códigos de retorno continuam valendo
-    if (produtoEquivalente === 1 || produtoEquivalente === 2) return;
+    // trata objeto {result, message}
+    if (produtoEquivalente && typeof produtoEquivalente === 'object' && 'result' in produtoEquivalente) {
+      notify.error(produtoEquivalente.message || 'Referência não permitida.', { duration: 4000 });
+      return;
+    }
     if (produtoEquivalente === 3) {
       notify.error('Nenhum produto encontrado (GTIN ou SKU inválidos).', { duration: 4000 });
       return;
     }
 
-    // abre a CONFIRMAÇÃO dentro do próprio modal (sem painel externo)
-    await confirmaProdutoEquivalente(produtoEquivalente.itens[0], _eqModalSkuTarget, accessToken);
+    await confirmaProdutoEquivalente(produtoEquivalente.itens[0], _eqModalSkuTarget);
   } catch (e) {
     const msg = String(e?.message || e);
-    if (/429/.test(msg)) {
-      notify.error('Tiny respondeu 429 (limite de requisições). Tente novamente em alguns segundos.', { duration: 5000 });
-    } else {
-      notify.error(msg, { duration: 5000 });
-    }
+    if (/429/.test(msg)) notify.error('Tiny respondeu 429 (limite de requisições). Tente novamente em alguns segundos.', { duration: 5000 });
+    else notify.error(msg, { duration: 5000 });
   } finally {
-    _equivBusy = false;
-    inputEl.disabled = false;
+    _equivBusy = false; inputEl.disabled = false;
   }
 }
 
@@ -720,246 +723,100 @@ async function verificaAdicaoProdutoEquivalentePermitido(valorBipado) {
   const raw = document.getElementById("js-data").dataset.comps;
   const anunciosOriginais = JSON.parse(raw);
 
-  // normalizadores
-  const normSku = (v) => String(v ?? '').trim().toLowerCase();
-  const normGtin = (v) => String(v ?? '').replace(/\D+/g, '');
+  const normSku = v => String(v ?? '').trim().toLowerCase();
+  const normGtin = v => String(v ?? '').replace(/\D+/g, '');
 
   const valorSku = normSku(valorBipado);
   const valorGtin = normGtin(valorBipado);
 
-  let produtosComposicoes = [];
-  let vistos = new Set(); // dedup por SKU normalizado
-
-  console.log('TODOS OS ANÚNCIOS EXEMPLO AGENDAMENTO ATUAL >', anunciosOriginais);
-
+  // junta todas as composições do agendamento sem duplicar SKU
+  const vistos = new Set();
+  const produtosComposicoes = [];
   anunciosOriginais.forEach(p => {
-    const i = Array.isArray(p.composicoes) ? p.composicoes : [];
-    i.forEach(c => {
+    (Array.isArray(p.composicoes) ? p.composicoes : []).forEach(c => {
       const keySku = normSku(c.sku);
-      if (vistos.has(keySku)) return; // evita duplicatas por caixa alta/baixa
+      if (vistos.has(keySku)) return;
       vistos.add(keySku);
-      produtosComposicoes.push({
-        nome: c.nome,
-        sku: keySku,               // já normalizado
-        gtin: normGtin(c.gtin),    // dígitos
-        id_tiny: c.id_tiny
-      });
+      produtosComposicoes.push({ sku: keySku, gtin: normGtin(c.gtin) });
     });
   });
 
-  console.log('Todas as composições normalizadas >', produtosComposicoes);
-
-  // 1) bloquear se tentar usar algo que já é do agendamento (SKU ou GTIN)
+  // 1) bloquear se tentar usar algo que já é do agendamento (SKU/GTIN)
   for (const p of produtosComposicoes) {
     const clashSku = p.sku === valorSku;
     const clashGtin = !!valorGtin && p.gtin === valorGtin;
-
     if (clashSku || clashGtin) {
-      console.log(`Para ${p.nome}: conflito — SKU(${p.sku}) ou GTIN(${p.gtin}) bate com ${valorBipado}`);
       return {
         result: 1,
         message: 'Você não pode definir um produto do agendamento como Equivalente'
       };
     }
-    console.log(`Para ${p.nome}: OK — SKU(${p.sku}) / GTIN(${p.gtin}) não batem com ${valorBipado}`);
   }
 
-  // 2) checar duplicata no BD (case-insensitive para SKU e dígitos para GTIN)
+  // 2) bloquear duplicata no BD (SKU/GTIN normalizados)
   let data = [];
   try {
-    const resp = await fetch(`/api/equiv/${idAgend}`);
+    const resp = await fetch(`/api/equiv/${idAgend}`, { credentials: 'include' });
     data = await resp.json();
-  } catch (e) {
-    console.warn('Falha ao consultar equivalentes do BD:', e);
-    // Em caso de erro, não bloqueia aqui — deixa seguir e o backend validará também.
-  }
-
-  console.log('Resultado da busca de produtos equivalentes do BD >', data);
+  } catch { /* backend também valida; aqui é só UX */ }
 
   for (const p of data) {
     const skuEq = normSku(p.sku_bipado);
     const gtinEq = normGtin(p.gtin_bipado);
-
     if (skuEq === valorSku || (!!valorGtin && gtinEq === valorGtin)) {
-      console.log(`Duplicado no BD: ${valorBipado} já equivale a ${p.sku_original}.`);
       return {
         result: 2,
         message: `Referência duplicada: ${valorBipado} já está cadastrada como equivalente de ${p.sku_original} e não pode ser registrada novamente.`
       };
     }
-    console.log(`Este produto ${p.sku_original} possui ${p.sku_bipado} como referência. Valor bipado não confere: ${valorBipado} (esperado)`);
   }
 
-  return null;
+  return null; // permitido
 }
 
-async function buscaProdutoEquivalente(valorBipado, token) {
-  const urlDefault = 'https://api.tiny.com.br/public-api/v3';
-  // const urlSku = urlDefault + `/produtos?codigo=${valorBipado}`; // Assumi que é um SKU
-  // const urlGtin = urlDefault + `/produtos?gtin=${valorBipado}`; // Assumi que é um GTIN/EAN
-  const isLikelyGTIN = (v) => /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(v);
-  let result = null;
-
-  const permitidoAddEquivalente = await verificaAdicaoProdutoEquivalentePermitido(valorBipado);
-
-  if (permitidoAddEquivalente !== null) {
-    // messageBuscaEquivalenteTiny(permitidoAddEquivalente);
-    if (permitidoAddEquivalente.result === 1) {
-      notify.error(permitidoAddEquivalente.message, { type: 'info', duration: 5000 });
-      result = 1;
-      console.log('Result para adição do bagulho equivalente >', result);
-      return result;
-    } else if (permitidoAddEquivalente.result === 2) {
-      notify.error(permitidoAddEquivalente.message, { type: 'info', duration: 5000 });
-      result = 2;
-      console.log('Result para adição do bagulho equivalente >', result);
-      return result;
-    } else {
-      console.log('Result para adição do bagulho equivalente > Não retornou nada aí vai voltar nulo');
-      return; // Não consigo imaginar que caso pode cair...
-    }
+// === Novo trecho completo ===
+async function buscaProdutoEquivalente(valorBipado) {
+  // 1) validações/limites do seu fluxo continuam valendo
+  const permitido = await verificaAdicaoProdutoEquivalentePermitido(valorBipado);
+  if (permitido) {
+    notify.error(permitido.message, { duration: 4000 });
+    return permitido.result; // 1 = tentou usar item do agendamento | 2 = duplicado
   }
 
-  try {
-    // const tinySku = await fetch(urlSku, {
-    //   method: 'GET',
-    //   headers: {
-    //     'Authorization': `Bearer ${token}`
-    //   }
-    // });
+  // 2) backend resolve por GTIN ou SKU e já tenta kit
+  const url = `/api/tiny/composicao-auto?valor=${encodeURIComponent(valorBipado)}`;
+  const r = await fetch(url, { credentials: 'include' });
 
-    // const data = await tinySku.json();
+  if (r.status === 429) throw new Error('429');
+  const j = await r.json().catch(() => ({}));
 
-    // Ex.: buscar produto pelo código (SKU)
-
-    if (isLikelyGTIN(valorBipado)) {
-      // Se determinado como GTIN, tenta por GTIN
-      console.log('DETERMINADO COMO GTIN >', valorBipado);
-
-      // BUSCA POR GTIN/EAN
-      const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}&situacao=A`, {
-        method: 'GET',
-        headers: {
-          'Path': '/public-api/v3/produtos',
-          'Authorization': 'Bearer ' + token
-        }
-      });
-
-      const dataGtin = await tentativaGtin.json();
-      console.log('Resultado por GTIN:', dataGtin);
-
-      if (dataGtin.itens.length === 0) {
-        console.log('NENHUM PRODUTO ENCONTRADO POR GTIN');
-        console.log('Tentando como SKU');
-
-        // BUSCA POR SKU
-        const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}&situacao=A`;
-        const tentativaSku = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Path': '/public-api/v3/produtos',
-            'Authorization': 'Bearer ' + token
-          }
-        });
-        const dataSku = await tentativaSku.json();
-        console.log('RESULT POR SKU: ', dataSku);
-
-        if (dataSku.itens.length === 0) {
-          console.log('INFELIZMENTE NÃO FOI POSSÍVEL ENCONTRAR NENHUM PRODUTO NEM COM SKU NEM COM GTIN');
-          result = 3;
-          return result;
-        } else {
-          result = dataSku;
-        }
-      } else {
-        result = dataGtin;
-      }
-      return result;
-    }
-    else {
-      // Caso contrário faz como SKU primeiro
-
-      console.log('DETERMINADO COMO SKU >', valorBipado);
-
-      // BUSCA POR SKU
-      const url = `/api/tiny-proxy?codigo=${encodeURIComponent(valorBipado)}&situacao=A`;
-      const tentativaSku = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Path': '/public-api/v3/produtos',
-          'Authorization': 'Bearer ' + token
-        }
-      });
-      const dataSku = await tentativaSku.json();
-      console.log('RESULT POR SKU: ', dataSku);
-
-      if (dataSku.itens.length === 0) {
-        console.log('NADA ENCONTRADO');
-        console.log('Tentando agora a pesquisa por GTIN/EAN');
-
-        // BUSCA POR GTIN/EAN
-        const tentativaGtin = await fetch(`/api/tiny-proxy?gtin=${encodeURIComponent(valorBipado)}&situacao=A`, {
-          method: 'GET',
-          headers: {
-            'Path': '/public-api/v3/produtos',
-            'Authorization': 'Bearer ' + token
-          }
-        });
-
-        console.log(tentativaGtin.status);
-
-        let data = null;
-        let text = null;
-
-        // Tenta JSON; se falhar, lê como texto
-        try {
-          data = await tentativaGtin.clone().json();
-        } catch {
-          text = await tentativaGtin.text();
-        }
-
-        if (!tentativaGtin.ok) {
-          // 4xx/5xx
-          const msg =
-            (data && data.detalhes && data.detalhes[0] && data.detalhes[0].mensagem) ||
-            (data && data.error) || // caso o seu proxy retorne {error: "..."}
-            text ||
-            'Erro ao consultar Tiny \nCOD Err: #j3uY3c6FC8Sd';
-
-          console.log(`Erro ${tentativaGtin.status}:`, msg);
-          throw new Error(`Erro ${tentativaGtin.status}:`, msg);
-        } else {
-          // Sucesso 2xx
-          console.log('OK:', data);
-        }
-
-
-        const dataGtin = await tentativaGtin.json();
-        console.log('Resultado por GTIN:', dataGtin);
-
-        if (dataGtin.itens.length === 0) {
-          console.log('INFELIZMENTE NÃO FOI POSSÍVEL ENCONTRAR NENHUM PRODUTO NEM COM SKU NEM COM GTIN');
-          result = 3;
-          return result;
-        } else {
-          result = dataGtin;
-        }
-      } else {
-        result = dataSku;
-      }
-
-      return result;
-    }
-  } catch (error) {
-    console.log(`Deu erro na requisição TINY com SKU: ${error}`);
-    const erro = error.toString();
-    if (erro.includes("400")) {
-      result = 3;
-      return result;
-    } else {
-      notify.error(error, { type: 'info', duration: 5000 })
-    }
+  if (!r.ok || !j.ok) {
+    // mantém semântica antiga: 3 = “não encontrado”
+    return 3;
   }
+
+  // 3) Se você precisa do array no formato {itens:[...]}, normalize:
+  //    Aqui usamos o próprio candidato (id/sku/descricao) como "item"
+  //    e, se for kit, você pode criar itens derivados.
+  const itens = [];
+  if (j.id_tiny) {
+    // detalhe do produto (para pegar sku/gtin/descricao/anexos se quiser)
+    const d = await fetch(`/api/tiny/produto/${j.id_tiny}`, { credentials: 'include' })
+      .then(x => x.json().catch(() => ({})))
+      .catch(() => ({}));
+
+    const prod = d?.produto || {};
+    itens.push({
+      id: j.id_tiny,
+      sku: prod?.codigo || prod?.sku || '',
+      gtin: prod?.gtin || '',
+      descricao: prod?.descricao || '',
+      situacao: prod?.situacao || 'A'
+    });
+  }
+
+  if (itens.length === 0) return 3;
+  return { itens };
 }
 
 async function messageBuscaEquivalenteTiny(message) {
@@ -980,7 +837,8 @@ async function fetchJSON(url, { method = 'GET', headers = {}, body, timeoutMs = 
     method,
     headers: { 'Content-Type': 'application/json', ...headers },
     body: body ? JSON.stringify(body) : undefined,
-    signal: ctrl.signal
+    signal: ctrl.signal,
+    credentials: 'include'
   });
   clearTimeout(t);
 
@@ -1260,7 +1118,7 @@ async function buscarCompKit(idEanSku) {
 
 async function buscarProdutoTiny(sku) {
   try {
-    const r = await fetch(`/api/tiny/buscar-produto?valor=${encodeURIComponent(sku)}`);
+    const r = await fetch(`/api/tiny/buscar-produto?valor=${encodeURIComponent(sku)}`, { credentials: 'include' });
     if (!r.ok) throw r;
     //   {
     //   const txt = await r.text().catch(() => '');
@@ -1268,13 +1126,13 @@ async function buscarProdutoTiny(sku) {
     // }
     return r.json();
   } catch (e) {
-    if (e.status === 400) {
+    if (e?.status === 400) {
       Swal.fire({ icon: 'error', title: 'Nenhum produto encontrado com o SKU/EAN enviado', timer: 2500, showConfirmButton: false });
-      console.log('ERRO:', e);
       return;
     }
-    Swal.fire({ icon: 'error', title: `ERRO: ${e}`, timer: 2500, showConfirmButton: false });
-    console.log('ERRO:', e);
+    const status = e?.status || 0;
+    const text = (typeof e.text === 'function') ? await e.text().catch(() => '') : String(e);
+    Swal.fire({ icon: 'error', title: `ERRO HTTP ${status}`, text, timer: 2500, showConfirmButton: false });
     return;
   }
 }
@@ -1287,6 +1145,7 @@ async function addUnidadesProdOriginal(prodOriginal, qtd) {
 
   const r = await fetch('/api/bipar', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
@@ -1307,6 +1166,7 @@ async function addUnidadesEquivalentes(produtoBipado, qtd) {
 
   const requestAdd = await fetch('/api/equiv/add-unidades', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
@@ -1320,6 +1180,7 @@ async function addUnidadesEquivalentes(produtoBipado, qtd) {
 }
 
 // exemplo
+// === Novo trecho completo ===
 async function addDbEquivalente(sku, valorBipado) {
   const raw = document.getElementById("js-data").dataset.comps;
   const produtos = JSON.parse(raw);
@@ -1328,47 +1189,33 @@ async function addDbEquivalente(sku, valorBipado) {
   // 1) Localiza o produto de referência (case-insensitive)
   let prodRef = null;
   for (const p of produtos) {
-    // console.log(p);
-    const composicoes = p.composicoes;
+    const composicoes = p.composicoes || [];
     for (const c of composicoes) {
-      // console.log('>', c);
-      if (c.sku === sku) {
-        prodRef = c;
-        break;
-      }
+      if (c.sku === sku) { prodRef = c; break; }
     }
+    if (prodRef) break;
   }
   if (!prodRef) {
-    notify.error(`SKU de referência não encontrado: ${sku}`, { type: 'info', duration: 4000 });
+    notify.error(`SKU de referência não encontrado: ${sku}`, { duration: 4000 });
     return;
   }
 
-  // 2) Token Tiny
-  let token;
-  try {
-    const result = await getTinyToken("jaupesca", "tiny");
-    token = result[0].access_token;
-  } catch (err) {
-    notify.error('Falha ao obter token do Tiny.', { type: 'info', duration: 5000 });
-    return;
-  }
-
-  // 3) Busca no Tiny (respeita teus códigos de retorno 1/2/3)
-  const produtoEquivalente = await buscaProdutoEquivalente(valorBipado, token);
+  // 2) Busca no Tiny via backend (sem token no cliente)
+  const produtoEquivalente = await buscaProdutoEquivalente(valorBipado);
   if (produtoEquivalente === 1 || produtoEquivalente === 2) return;
   if (produtoEquivalente === 3) {
-    notify.error('Nenhum produto encontrado (GTIN ou SKU inválidos)', { type: 'info', duration: 5000 });
+    notify.error('Nenhum produto encontrado (GTIN ou SKU inválidos)', { duration: 5000 });
     return;
   }
 
-  // 4) Confirmação do usuário
-  const confirmed = await confirmaProdutoEquivalente(produtoEquivalente.itens[0], sku, token);
+  // 3) Confirmação do usuário
+  const confirmed = await confirmaProdutoEquivalente(produtoEquivalente.itens[0], sku);
   if (confirmed.respostaUser === false) {
-    notify('Adição de produto equivalente foi cancelada com sucesso!');
+    notify('Adição de produto equivalente cancelada.');
     return;
   }
 
-  // 5) Payload e gravação
+  // 4) Gravação
   const equivalente = produtoEquivalente.itens[0];
   const payload = {
     id_agend: idAgend,
@@ -1385,36 +1232,32 @@ async function addDbEquivalente(sku, valorBipado) {
 
   try {
     await fetchJSON('/api/equiv/bipar', { method: 'POST', body: payload });
-    notify.success('Produto equivalente adicionado com sucesso!', { type: 'info', duration: 2000 });
+    notify.success('Produto equivalente adicionado com sucesso!', { duration: 2000 });
   } catch (e) {
-    notify.error(`Erro ao gravar equivalente: ${e}`, { type: 'info', duration: 5000 });
+    notify.error(`Erro ao gravar equivalente: ${e}`, { duration: 5000 });
   }
 }
 
-async function confirmaProdutoEquivalente(prod, skuOriginal, accessToken) {
+// === Novo trecho completo ===
+async function confirmaProdutoEquivalente(prod, skuOriginal) {
   const modal = document.getElementById('modal-equivalente');
   const content = modal.querySelector('.modal-content') || modal;
   const comp = _findCompBySku(skuOriginal) || {};
 
-  // trava o input enquanto o overlay existir
   const inputEl = document.getElementById('eq-input');
   inputEl && (inputEl.disabled = true);
 
-  // marca conteúdo do modal como “confirmando” para esconder .modal-actions
   content.classList.add('confirming');
 
-  // imagem (placeholder se falhar)
+  // imagem (placeholder se falhar) — agora via backend
   let imgUrl = PLACEHOLDER_IMG;
   try {
-    const r = await fetch('/api/tiny-proxy', {
-      method: 'GET',
-      headers: { 'Path': `/public-api/v3/produtos/${prod.id}`, 'Authorization': 'Bearer ' + accessToken }
-    });
+    const r = await fetch(`/api/tiny/produto/${prod.id}`, { credentials: 'include' });
     const j = await r.json().catch(() => ({}));
-    if (Array.isArray(j?.anexos) && j.anexos.length > 0) imgUrl = j.anexos[0].url;
-  } catch { }
+    const anexos = j?.produto?.anexos;
+    if (Array.isArray(anexos) && anexos.length > 0) imgUrl = anexos[0].url;
+  } catch { /* ignora e mantém placeholder */ }
 
-  // cria / reutiliza overlay interno
   let ov = content.querySelector('#eq-confirm-overlay');
   if (!ov) {
     ov = document.createElement('div');
@@ -1445,7 +1288,6 @@ async function confirmaProdutoEquivalente(prod, skuOriginal, accessToken) {
   ov.querySelector('#eq-confirm-no').onclick = () => fecharModalEquivalente(true);
 
   ov.querySelector('#eq-confirm-yes').onclick = async (e) => {
-    // anti-duplo clique
     const btn = e.currentTarget;
     if (btn._busy) return;
     btn._busy = true;
@@ -1494,10 +1336,62 @@ function perguntarConfirmacao() {
   });
 }
 
+/**
+ * Agrupa por (id_produto, de, para, etapa, equivalente) e agrega pk_list.
+ * Não mexe em "unidades" (você já soma em outro lugar).
+ * - Evita duplicar PKs (Set)
+ * - Normaliza tipos pra chave estável
+ * - Retorna pk_list ordenada
+ *
+ * @param {Array<object>} rows
+ * @returns {Array<object>}
+ */
+function groupPkList(rows) {
+  const toBool = (v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v !== 0;
+    if (typeof v === 'string') return ['true', '1', 'yes', 'y', 'sim'].includes(v.trim().toLowerCase());
+    return Boolean(v);
+  };
+
+  const keyOf = (r) => JSON.stringify({
+    id_produto: String(r.id_produto),
+    de: Number(r.de),
+    para: Number(r.para),
+    etapa: String(r.etapa),
+    equivalente: toBool(r.equivalente),
+  });
+
+  const map = new Map();
+
+  for (const r of rows) {
+    const key = keyOf(r);
+    let acc = map.get(key);
+    if (!acc) {
+      const { pk, ...rest } = r;        // remove pk do “modelo”
+      acc = { ...rest, pk_list: new Set() };
+      map.set(key, acc);
+    }
+    if (r.pk !== undefined && r.pk !== null) {
+      acc.pk_list.add(r.pk);
+    }
+  }
+
+  // Converte Set -> Array e ordena pk_list
+  return Array.from(map.values()).map(o => {
+    const list = Array.from(o.pk_list);
+    const allNumeric = list.every(v => typeof v === 'number' || /^\d+$/.test(String(v)));
+    if (allNumeric) list.sort((a, b) => Number(a) - Number(b));
+    else list.sort(); // ordenação lexicográfica para strings mistas
+    return { ...o, pk_list: list };
+  });
+}
+
 //? Ajuste esses IDs conforme seu mapeamento atual (ou traga do expedicao.js para 1 fonte só)
 //? const DEPOSITO_ORIGEM = 785301556; //* Estoque (151) 
 //? const DEPOSITO_DESTINO = 822208355; //* Produção (141)
 async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301556, DEPOSITO_DESTINO = 822208355) {
+  // console.log('Função de transferencia chamada...'); // TODO REMOVER DEPOIS (DEBUG)
   // * Apenas um guardinha de trânsito... Não é para acontecer, mas vai que o depósito origem e destino são iguais né...
   if (DEPOSITO_ORIGEM === DEPOSITO_DESTINO) {
     throw new Error('Depósitos iguais — operação inválida.');
@@ -1505,7 +1399,7 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
 
   //? Busca a bipagem no banco
   const url = `/api/agendamento/${idAgend}/completo`;
-  const resp = await fetch(url);
+  const resp = await fetch(url, { credentials: 'include' });
   if (!resp.ok) { //! Se deu algum erro na requisição ele ignora e não faz a transferência de *NADA*
     throw new Error(`Erro: ${resp.status} \n${resp.statusText}`);
   }
@@ -1514,20 +1408,27 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
   const bipagemCompleta = await resp.json();
   let listaObjPrincipal = []; //? Cria uma lista de objetos principal, ele será colocado dentro de "movimentos" no payload...
   //? Ele que será enviado para a rota fazer a transferência, ele basicamente avisa quais produtos devem ser transferidos, quantos e em qual depósito.
-  console.log('bipagemCompleta (DEBUG) >', bipagemCompleta); // TODO REMOVER DEPOIS (DEBUG)
-
+  // console.log('bipagemCompleta (DEBUG) >', bipagemCompleta); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log(bipagemCompleta.produtos.length); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Tipo de bipagemCompleta.produtos >', typeof bipagemCompleta.produtos); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('É um array? >', Array.isArray(bipagemCompleta.produtos)); // TODO REMOVER DEPOIS (DEBUG)
   // ? Inicia um Looping onde esse looping serve para poder capturar os produtos do Agendamento e criar um objeto, a
   for (const prod of bipagemCompleta.produtos) {
+    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
     const p = prod.produto_original; // * Para facilitar na construção do Objeto
-    console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
+    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', p); // TODO REMOVER DEPOIS (DEBUG)
+    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
     //! Eu não tinha pensado nisso... Mas também é possível que não vá NADA do produto original!
     //! Exemplo: Produto original = Vara azul | Mas não vai vara azul, vai a vara verde, adiciona como equivalente apenas!
-    if (prod.bipagem.bipados > 0) { //! Sendo assim, caso aconteça de não ser enviado nada do produto original apenas não faça o objeto do produto original no Payload!
+    const bipadosOriginal = prod.bipagem.bipados || 0; // ? Quantidade bipada do produto original (Caso não tenha nada, define como 0)
+    // console.log('Quantidade bipada do produto original >', bipadosOriginal); // TODO REMOVER DEPOIS (DEBUG)
+    if (bipadosOriginal > 0) { //! Sendo assim, caso aconteça de não ser enviado nada do produto original apenas não faça o objeto do produto original no Payload!
+      // console.log('Produto original que será processado (DEBUG) >', p); // TODO REMOVER DEPOIS (DEBUG)
       const objProdOriginal = { // ? Cira o objeto para o produto original
         // * NEW
         equivalente: false, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
         etapa: 'conf', // TODO "conf" || "exp" (Isso define a coluna que é feita a transferência)
-        pk: p.id_prod, // ? ID do produto (Database) que vai ser transferido (Original)
+        pk: p.id_comp, // ? ID do produto (Database) que vai ser transferido (Original)
         // * NEW
         sku: p.sku_prod, // ? SKU do produto que vai ser transferido (Original)
         id_produto: p.id_prod_tiny, // ? ID do produto que vai ser transferido (Original)
@@ -1536,12 +1437,14 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
         unidades: prod.bipagem.bipados, // ? Quantidade que foi bipado do produto (Original)
         preco_unitario: 0 // * Isso daqui é opicional...
       }
+      // console.log('Objeto do produto original criado (DEBUG) >', objProdOriginal); // TODO REMOVER DEPOIS (DEBUG)
       listaObjPrincipal.push(objProdOriginal); // ? Adiciona o objeto criado na lista de objetos
     }
 
     if (prod.equivalentes.length > 0) { //! Existe a possibilidadde de não haver produtos equivalentes, nesse caso apenas ignora
       for (const equiv of prod.equivalentes) {
         if (equiv.bipados <= 0) continue; //! Existe a possibilidade de haver produtos equivalentes porém sem ter sido bipado nenhuma unidade! Nesse caso, apenas ignore.
+        // console.log('Produto equivalente que será processado (DEBUG) >', equiv); // TODO REMOVER DEPOIS (DEBUG)
         const objProdEquiv = { // ? Cira o objeto para o produto equivalente
           // equivalente: true, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
           sku: equiv.sku_bipado, // ? SKU do produto que vai ser transferido (Equivalente)
@@ -1556,6 +1459,7 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
           pk: equiv.id,
           // **** NEW ****
         }
+        // console.log('Objeto do produto equivalente criado (DEBUG) >', objProdEquiv); // TODO REMOVER DEPOIS (DEBUG)
         listaObjPrincipal.push(objProdEquiv); // ? Adiciona o objeto criado na lista de objetos
       }
     } else { continue }
@@ -1564,7 +1468,7 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
   // ! Não sei se isso é uma possibilidade, mas é bom evitar...
   // ! Caso aconteça de não ter nada a transferir, retorna erro.
   if (listaObjPrincipal.length <= 0) throw new Error('Nada para transferir (bipagem total = 0).');
-  console.log('Objeto Principal (DEBUG) >', listaObjPrincipal); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Objeto Principal (DEBUG) >', listaObjPrincipal); // TODO REMOVER DEPOIS (DEBUG)
 
   // ? Definindo variáveis para OBS (Tiny)
   const empresa = { 1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports" }
@@ -1576,7 +1480,9 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
   // Definindo Usuário que fez a transferência
   let user = ((await whoAmI())?.nome_display_usuario || "Indefinido");
 
-  // console.log('User >', user); // TODO REMOVER DEPOIS (DEBUG)
+  listaObjPrincipal = groupPkList(listaObjPrincipal);
+
+  // // console.log('User >', user); // TODO REMOVER DEPOIS (DEBUG)
   const payload = {
     empresa: empresa[empresaId],             // opcional (futuro: seleção de token)
     observacoes: `Conferência - AgendamentosWeb \nAg.: ${numAg}\nMktp.: ${mktp}\nEmp.: ${empresa[empresaId]}\nCo.: ${user}`,      // opcional
@@ -1584,14 +1490,14 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
     movimentos: listaObjPrincipal
   }
 
-  console.log('Payload pronto para a transferência >', payload); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Payload pronto para a transferência >', payload); // TODO REMOVER DEPOIS (DEBUG)
 
-  console.log('Preparando fetch para transferência de estoque...'); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Preparando fetch para transferência de estoque...'); // TODO REMOVER DEPOIS (DEBUG)
 
   const transfReq = await fetch('/estoque/mover', {
     method: 'POST',
+    credentials: 'include', // garante cookie de sessão
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
     body: JSON.stringify(payload)
   });
 
@@ -1602,6 +1508,7 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301
 
   return;
 }
+// agendamentoFinalizadoChamarTransferencia(); // TODOD REMOVER DEPOIS (DEBUG)
 
 async function whoAmI() {
   const r = await fetch('/api/me', { credentials: 'same-origin' });
@@ -1610,13 +1517,13 @@ async function whoAmI() {
   return j.authenticated ? j.user : null;
 }
 
-// TODO REMOVER DEPOIS (DEBUG)
-// async function testeDebug() { // TODO REMOVER DEPOIS (DEBUG)
-//   const response = await fetch('/api/retirado/329/originais-equivalentes'); // TODO REMOVER DEPOIS (DEBUG)
-//   const data = await response.json(); // TODO REMOVER DEPOIS (DEBUG)
-//   console.log(data); // TODO REMOVER DEPOIS (DEBUG)
-// } // TODO REMOVER DEPOIS (DEBUG)
-// testeDebug(); // TODO REMOVER DEPOIS (DEBUG)
+// // TODO REMOVER DEPOIS (DEBUG)
+// // async function testeDebug() { // TODO REMOVER DEPOIS (DEBUG)
+// //   const response = await fetch('/api/retirado/329/originais-equivalentes'); // TODO REMOVER DEPOIS (DEBUG)
+// //   const data = await response.json(); // TODO REMOVER DEPOIS (DEBUG)
+// //   console.log(data); // TODO REMOVER DEPOIS (DEBUG)
+// // } // TODO REMOVER DEPOIS (DEBUG)
+// // testeDebug(); // TODO REMOVER DEPOIS (DEBUG)
 
 async function moverEstoque(movimentos, meta = {}) {
   // movimentos: [{ sku?, id_produto, de, para, unidades, preco_unitario? }, ...]
@@ -1732,7 +1639,8 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
   const resp = await fetch('/transf-estoque', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    credentials: 'include'
   });
 
 
@@ -1985,6 +1893,9 @@ async function editarProdutoCompLapis(sku) {
     const raw = document.getElementById("js-data").dataset.comps;
     const produtos = JSON.parse(raw);
     const comp = produtos.flatMap(p => p.composicoes ?? []).find(c => c.sku === sku);
+    const compEl = document.querySelector(`[data-sku="${esc(sku)}"]`);
+    const compTotal = compEl?.dataset.total ?? "Não encontrado";
+
     if (!comp) {
       notify.error(`Composição não encontrada para o SKU ${sku}.`);
       fecharModal();
@@ -1992,7 +1903,7 @@ async function editarProdutoCompLapis(sku) {
     }
 
     // busca totais do servidor p/ esse SKU original
-    const response = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${encodeURIComponent(sku)}`);
+    const response = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${encodeURIComponent(sku)}`, { credentials: 'include' });
     const data = await response.json();
 
     let totalBipadosOriginal = (data?.bipagem?.bipados ?? 0);
@@ -2023,7 +1934,7 @@ async function editarProdutoCompLapis(sku) {
           </div>
           <div class="small" style="font-size:.85rem; color:#6b7280;">
             Bipado: <strong id="bipado-${sku}">${totalBipadosOriginal}</strong> /
-            Total: <strong id="total-${sku}">${comp.unidades_totais}</strong>
+            Total: <strong id="total-${sku}">${compTotal}</strong>
             (<span id="percent-${sku}">${porcento}</span>%)
           </div>
         </div>
@@ -2033,7 +1944,7 @@ async function editarProdutoCompLapis(sku) {
           <div id="progressFill-${sku}" class="progress-bar" role="progressbar"
                style="width:${porcento}%; background:#f59e0b; height:10px;"
                aria-valuenow="${totalBipadosOriginal}" aria-valuemin="0"
-               aria-valuemax="${comp.unidades_totais}"></div>
+               aria-valuemax="${compTotal}"></div>
         </div>
 
         <div class="controls" style="display:flex; align-items:center; gap:8px;">
@@ -2131,7 +2042,8 @@ async function excluirEquivalente(obj) {
   const resp = await fetch('/api/equiv/delete', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    credentials: 'include'
   });
 
   const data = await resp.json();
@@ -2244,7 +2156,8 @@ async function salvarAlteracoes() {
         const req = await fetch('/api/equiv/add-unidades', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          credentials: 'include'
         });
         const data = await req.json();
 
@@ -2280,7 +2193,8 @@ async function salvarAlteracoes() {
         const req = await fetch('/api/bipar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          credentials: 'include'
         });
 
         const data = await req.json();
@@ -2349,5 +2263,9 @@ window.addEventListener('click', (e) => {
 
 // Fecha com ESC
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') fecharModal();
+  if (e.key !== 'Escape') return;
+  const modalEq = document.getElementById('modal-equivalente');
+  const modalEdit = document.getElementById('modal-editar-produto');
+  if (modalEq?.style.display === 'block') fecharModalEquivalente(true);
+  else if (modalEdit?.style.display === 'block') fecharModal();
 });

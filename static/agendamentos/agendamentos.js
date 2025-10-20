@@ -463,30 +463,39 @@ async function verTransferenciasAgendamento(idAgend) {
     const asInt = v => Number.isFinite(v) ? v : parseInt(v ?? 0, 10) || 0;
     const isZeroLike = v => v === null || v === undefined || v === '' || Number(v) === 0;
 
+    const effStatus = (st, unused) => {
+        const s = Number.isFinite(st) ? st : parseInt(st ?? 0, 10) || 0;
+        if (s === 3 || s === 1 || s === 2) return s; // Erro / Em execução / Concluído preservam
+        return unused ? 4 : 0;                        // senão, 0 (Pendente)
+    };
+
+    const hasRunStatus = (a, b) => [a, b].some(v => [1, 2, 3].includes(parseInt(v ?? 0, 10)));
+
     const isUnusedEquiv = (e) => {
-        // Não usado = zero mov./bipagem e sem lançamentos
+        if (hasRunStatus(e.status_conf, e.status_exp)) return false;
         const noMoves = isZeroLike(e.qtd_mov_conf) && isZeroLike(e.qtd_mov_exp) && isZeroLike(e.bipados);
         const noLanc = !e.lanc_conf_s && !e.lanc_conf_e && !e.lanc_exp_s && !e.lanc_exp_e;
         return noMoves && noLanc;
     };
 
     const isUnusedComp = (c, pack, prod) => {
-        // “não usado” = sem movimentos e sem lançamentos...
         const noMoves = isZeroLike(c.qtd_mov_conf) && isZeroLike(c.qtd_mov_exp);
         const noLanc = !c.lanc_conf_s && !c.lanc_conf_e && !c.lanc_exp_s && !c.lanc_exp_e;
 
-        // ...mas se houve bipagem direta do ORIGINAL (mesmo SKU), então NÃO é “não usado”
+        // NOVO: se houve bipagem no SKU da composição, não é "não usado"
+        const bipComp = asInt(c?.bipados_diretos_comp);
+        if (bipComp > 0) return false;
+
+        // regra antiga (mantida): bipagem direta no SKU do ORIGINAL
         const bipSku = pack?.bipagemDireta?.sku;
         const bipQtd = asInt(pack?.bipagemDireta?.bipados);
         const skuComp = c?.sku_comp || '';
         const skuProd = prod?.sku_prod || '';
-
         const isOriginalSku = (skuComp && skuComp === skuProd) || (skuComp && bipSku && skuComp === bipSku);
         const usedByDirectBip = isOriginalSku && bipQtd > 0;
 
         return !usedByDirectBip && noMoves && noLanc;
     };
-
 
     const mascarar = (val) => {
         if (val === null || val === undefined || val === '') return '—';
@@ -587,6 +596,7 @@ async function verTransferenciasAgendamento(idAgend) {
     }
 
     const itens = data?.produtosOriginais ?? [];
+    console.log('Dados recebidos:', itens); // TODO remover SOMENTE DEBUG REMOVER DEPOIS
     if (!Array.isArray(itens) || itens.length === 0) {
         pastasContainer.innerHTML = `<div class="alert alert-warning">Nenhum item encontrado para este agendamento.</div>`;
         return;
@@ -600,10 +610,10 @@ async function verTransferenciasAgendamento(idAgend) {
         const equivs = Array.isArray(pack.equivalentes) ? pack.equivalentes : [];
 
         // Agregações: originais/equivalentes “não usados” => Ignorado (4)
-        const compConfList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_conf));
-        const compExpList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_exp));
-        const equivConfList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_conf));
-        const equivExpList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_exp));
+        const compConfList = comps.map(c => effStatus(asInt(c.status_conf), isUnusedComp(c, pack, prod)));
+        const compExpList = comps.map(c => effStatus(asInt(c.status_exp), isUnusedComp(c, pack, prod)));
+        const equivConfList = equivs.map(e => effStatus(asInt(e.status_conf), isUnusedEquiv(e)));
+        const equivExpList = equivs.map(e => effStatus(asInt(e.status_exp), isUnusedEquiv(e)));
 
         const confAgg = aggStatus([...compConfList, ...equivConfList]);
         const expAgg = aggStatus([...compExpList, ...equivExpList]);
@@ -638,8 +648,8 @@ async function verTransferenciasAgendamento(idAgend) {
         for (const c of comps) {
             const stConfRaw = asInt(c.status_conf);
             const stExpRaw = asInt(c.status_exp);
-            const effConf = isUnusedComp(c, pack, prod) ? 4 : stConfRaw; // Ignorado se bipagem=0 e sem mov/lanc
-            const effExp = isUnusedComp(c, pack, prod) ? 4 : stExpRaw;
+            const effConf = effStatus(stConfRaw, isUnusedComp(c, pack, prod));
+            const effExp = effStatus(stExpRaw, isUnusedComp(c, pack, prod));
 
             const lancs = [
                 chip('S', c.lanc_conf_s, effConf),
@@ -667,8 +677,8 @@ async function verTransferenciasAgendamento(idAgend) {
             for (const e of equivs) {
                 const stConfRaw = asInt(e.status_conf);
                 const stExpRaw = asInt(e.status_exp);
-                const effConf = isUnusedEquiv(e) ? 4 : stConfRaw; // coerce -> Ignorado
-                const effExp = isUnusedEquiv(e) ? 4 : stExpRaw;
+                const effConf = effStatus(stConfRaw, isUnusedEquiv(e));
+                const effExp = effStatus(stExpRaw, isUnusedEquiv(e));
 
                 const lancs = [
                     chip('S', e.lanc_conf_s, effConf),
@@ -836,10 +846,10 @@ async function verTransferenciasAgendamento(idAgend) {
                 const equivs = Array.isArray(pack.equivalentes) ? pack.equivalentes : [];
 
                 // === mesmo cálculo de antes ===
-                const compConfList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_conf));
-                const compExpList = comps.map(c => isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_exp));
-                const equivConfList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_conf));
-                const equivExpList = equivs.map(e => isUnusedEquiv(e) ? 4 : asInt(e.status_exp));
+                const compConfList = comps.map(c => effStatus(asInt(c.status_conf), isUnusedComp(c, pack, prod)));
+                const compExpList = comps.map(c => effStatus(asInt(c.status_exp), isUnusedComp(c, pack, prod)));
+                const equivConfList = equivs.map(e => effStatus(asInt(e.status_conf), isUnusedEquiv(e)));
+                const equivExpList = equivs.map(e => effStatus(asInt(e.status_exp), isUnusedEquiv(e)));
 
                 const confAgg = aggStatus([...compConfList, ...equivConfList]);
                 const expAgg = aggStatus([...compExpList, ...equivExpList]);
@@ -861,8 +871,9 @@ async function verTransferenciasAgendamento(idAgend) {
                 // Monta tbody novamente (troca só o conteúdo da tabela)
                 const linhas = [];
                 for (const c of comps) {
-                    const stConf = isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_conf);
-                    const stExp = isUnusedComp(c, pack, prod) ? 4 : asInt(c.status_exp);
+                    const stConf = effStatus(asInt(c.status_conf), isUnusedComp(c, pack, prod));
+                    const stExp = effStatus(asInt(c.status_exp), isUnusedComp(c, pack, prod));
+
                     const lancs = [
                         chip('S', c.lanc_conf_s, stConf),
                         chip('E', c.lanc_conf_e, stConf),
@@ -884,8 +895,9 @@ async function verTransferenciasAgendamento(idAgend) {
                 }
                 if (equivs.length > 0) {
                     for (const e of equivs) {
-                        const stConf = isUnusedEquiv(e) ? 4 : asInt(e.status_conf);
-                        const stExp = isUnusedEquiv(e) ? 4 : asInt(e.status_exp);
+                        const stConf = effStatus(asInt(e.status_conf), isUnusedEquiv(e));
+                        const stExp = effStatus(asInt(e.status_exp), isUnusedEquiv(e));
+
                         const lancs = [
                             chip('S', e.lanc_conf_s, stConf),
                             chip('E', e.lanc_conf_e, stConf),
@@ -1023,12 +1035,12 @@ async function verTransferenciasAgendamento(idAgend) {
     }, { once: true });
 }
 
-async function carregarInfoEmpresaModal(idAgend){
+async function carregarInfoEmpresaModal(idAgend) {
     const a = await fetch(`/api/agendamento/${encodeURIComponent(idAgend)}/basico`);
     if (!a.ok) throw new Error(`HTTP ${a.status} ${a.statusText}`);
 
     const data = await a.json();
-    
+
     const numAgend = document.getElementById('ag-num');
     const empresa = document.getElementById('ag-empresa');
     const mktp = document.getElementById('ag-marketplace');
