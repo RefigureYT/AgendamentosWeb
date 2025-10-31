@@ -1391,120 +1391,120 @@ function groupPkList(rows) {
 //? const DEPOSITO_ORIGEM = 785301556; //* Estoque (151) 
 //? const DEPOSITO_DESTINO = 822208355; //* Produção (141)
 async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301556, DEPOSITO_DESTINO = 822208355) {
-  // console.log('Função de transferencia chamada...'); // TODO REMOVER DEPOIS (DEBUG)
-  // * Apenas um guardinha de trânsito... Não é para acontecer, mas vai que o depósito origem e destino são iguais né...
-  if (DEPOSITO_ORIGEM === DEPOSITO_DESTINO) {
-    throw new Error('Depósitos iguais — operação inválida.');
-  }
+  // // console.log('Função de transferencia chamada...'); // TODO REMOVER DEPOIS (DEBUG)
+  // // * Apenas um guardinha de trânsito... Não é para acontecer, mas vai que o depósito origem e destino são iguais né...
+  // if (DEPOSITO_ORIGEM === DEPOSITO_DESTINO) {
+  //   throw new Error('Depósitos iguais — operação inválida.');
+  // }
 
-  //? Busca a bipagem no banco
-  const url = `/api/agendamento/${idAgend}/completo`;
-  const resp = await fetch(url, { credentials: 'include' });
-  if (!resp.ok) { //! Se deu algum erro na requisição ele ignora e não faz a transferência de *NADA*
-    throw new Error(`Erro: ${resp.status} \n${resp.statusText}`);
-  }
+  // //? Busca a bipagem no banco
+  // const url = `/api/agendamento/${idAgend}/completo`;
+  // const resp = await fetch(url, { credentials: 'include' });
+  // if (!resp.ok) { //! Se deu algum erro na requisição ele ignora e não faz a transferência de *NADA*
+  //   throw new Error(`Erro: ${resp.status} \n${resp.statusText}`);
+  // }
 
-  // * Se deu tudo certo então define bipagemCompleta
-  const bipagemCompleta = await resp.json();
-  let listaObjPrincipal = []; //? Cria uma lista de objetos principal, ele será colocado dentro de "movimentos" no payload...
-  //? Ele que será enviado para a rota fazer a transferência, ele basicamente avisa quais produtos devem ser transferidos, quantos e em qual depósito.
-  // console.log('bipagemCompleta (DEBUG) >', bipagemCompleta); // TODO REMOVER DEPOIS (DEBUG)
-  // console.log(bipagemCompleta.produtos.length); // TODO REMOVER DEPOIS (DEBUG)
-  // console.log('Tipo de bipagemCompleta.produtos >', typeof bipagemCompleta.produtos); // TODO REMOVER DEPOIS (DEBUG)
-  // console.log('É um array? >', Array.isArray(bipagemCompleta.produtos)); // TODO REMOVER DEPOIS (DEBUG)
-  // ? Inicia um Looping onde esse looping serve para poder capturar os produtos do Agendamento e criar um objeto, a
-  for (const prod of bipagemCompleta.produtos) {
-    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
-    const p = prod.produto_original; // * Para facilitar na construção do Objeto
-    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', p); // TODO REMOVER DEPOIS (DEBUG)
-    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
-    //! Eu não tinha pensado nisso... Mas também é possível que não vá NADA do produto original!
-    //! Exemplo: Produto original = Vara azul | Mas não vai vara azul, vai a vara verde, adiciona como equivalente apenas!
-    const bipadosOriginal = prod.bipagem.bipados || 0; // ? Quantidade bipada do produto original (Caso não tenha nada, define como 0)
-    // console.log('Quantidade bipada do produto original >', bipadosOriginal); // TODO REMOVER DEPOIS (DEBUG)
-    if (bipadosOriginal > 0) { //! Sendo assim, caso aconteça de não ser enviado nada do produto original apenas não faça o objeto do produto original no Payload!
-      // console.log('Produto original que será processado (DEBUG) >', p); // TODO REMOVER DEPOIS (DEBUG)
-      const objProdOriginal = { // ? Cira o objeto para o produto original
-        // * NEW
-        equivalente: false, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
-        etapa: 'conf', // TODO "conf" || "exp" (Isso define a coluna que é feita a transferência)
-        pk: p.id_comp, // ? ID do produto (Database) que vai ser transferido (Original)
-        // * NEW
-        sku: p.sku_prod, // ? SKU do produto que vai ser transferido (Original)
-        id_produto: p.id_prod_tiny, // ? ID do produto que vai ser transferido (Original)
-        de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
-        para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
-        unidades: prod.bipagem.bipados, // ? Quantidade que foi bipado do produto (Original)
-        preco_unitario: 0 // * Isso daqui é opicional...
-      }
-      // console.log('Objeto do produto original criado (DEBUG) >', objProdOriginal); // TODO REMOVER DEPOIS (DEBUG)
-      listaObjPrincipal.push(objProdOriginal); // ? Adiciona o objeto criado na lista de objetos
-    }
+  // // * Se deu tudo certo então define bipagemCompleta
+  // const bipagemCompleta = await resp.json();
+  // let listaObjPrincipal = []; //? Cria uma lista de objetos principal, ele será colocado dentro de "movimentos" no payload...
+  // //? Ele que será enviado para a rota fazer a transferência, ele basicamente avisa quais produtos devem ser transferidos, quantos e em qual depósito.
+  // // console.log('bipagemCompleta (DEBUG) >', bipagemCompleta); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log(bipagemCompleta.produtos.length); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Tipo de bipagemCompleta.produtos >', typeof bipagemCompleta.produtos); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('É um array? >', Array.isArray(bipagemCompleta.produtos)); // TODO REMOVER DEPOIS (DEBUG)
+  // // ? Inicia um Looping onde esse looping serve para poder capturar os produtos do Agendamento e criar um objeto, a
+  // for (const prod of bipagemCompleta.produtos) {
+  //   // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
+  //   const p = prod.produto_original; // * Para facilitar na construção do Objeto
+  //   // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', p); // TODO REMOVER DEPOIS (DEBUG)
+  //   // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
+  //   //! Eu não tinha pensado nisso... Mas também é possível que não vá NADA do produto original!
+  //   //! Exemplo: Produto original = Vara azul | Mas não vai vara azul, vai a vara verde, adiciona como equivalente apenas!
+  //   const bipadosOriginal = prod.bipagem.bipados || 0; // ? Quantidade bipada do produto original (Caso não tenha nada, define como 0)
+  //   // console.log('Quantidade bipada do produto original >', bipadosOriginal); // TODO REMOVER DEPOIS (DEBUG)
+  //   if (bipadosOriginal > 0) { //! Sendo assim, caso aconteça de não ser enviado nada do produto original apenas não faça o objeto do produto original no Payload!
+  //     // console.log('Produto original que será processado (DEBUG) >', p); // TODO REMOVER DEPOIS (DEBUG)
+  //     const objProdOriginal = { // ? Cira o objeto para o produto original
+  //       // * NEW
+  //       equivalente: false, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
+  //       etapa: 'conf', // TODO "conf" || "exp" (Isso define a coluna que é feita a transferência)
+  //       pk: p.id_comp, // ? ID do produto (Database) que vai ser transferido (Original)
+  //       // * NEW
+  //       sku: p.sku_prod, // ? SKU do produto que vai ser transferido (Original)
+  //       id_produto: p.id_prod_tiny, // ? ID do produto que vai ser transferido (Original)
+  //       de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
+  //       para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
+  //       unidades: prod.bipagem.bipados, // ? Quantidade que foi bipado do produto (Original)
+  //       preco_unitario: 0 // * Isso daqui é opicional...
+  //     }
+  //     // console.log('Objeto do produto original criado (DEBUG) >', objProdOriginal); // TODO REMOVER DEPOIS (DEBUG)
+  //     listaObjPrincipal.push(objProdOriginal); // ? Adiciona o objeto criado na lista de objetos
+  //   }
 
-    if (prod.equivalentes.length > 0) { //! Existe a possibilidadde de não haver produtos equivalentes, nesse caso apenas ignora
-      for (const equiv of prod.equivalentes) {
-        if (equiv.bipados <= 0) continue; //! Existe a possibilidade de haver produtos equivalentes porém sem ter sido bipado nenhuma unidade! Nesse caso, apenas ignore.
-        // console.log('Produto equivalente que será processado (DEBUG) >', equiv); // TODO REMOVER DEPOIS (DEBUG)
-        const objProdEquiv = { // ? Cira o objeto para o produto equivalente
-          // equivalente: true, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
-          sku: equiv.sku_bipado, // ? SKU do produto que vai ser transferido (Equivalente)
-          id_produto: equiv.id_tiny_equivalente, // ? ID do produto que vai ser transferido (Equivalente)
-          de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
-          para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
-          unidades: equiv.bipados, // ? Quantidade que foi bipado do produto (Equivalente)
-          preco_unitario: 0, // * Isso daqui é opicional...
-          // **** NEW ****
-          equivalente: true,
-          etapa: 'conf',
-          pk: equiv.id,
-          // **** NEW ****
-        }
-        // console.log('Objeto do produto equivalente criado (DEBUG) >', objProdEquiv); // TODO REMOVER DEPOIS (DEBUG)
-        listaObjPrincipal.push(objProdEquiv); // ? Adiciona o objeto criado na lista de objetos
-      }
-    } else { continue }
-  }
+  //   if (prod.equivalentes.length > 0) { //! Existe a possibilidadde de não haver produtos equivalentes, nesse caso apenas ignora
+  //     for (const equiv of prod.equivalentes) {
+  //       if (equiv.bipados <= 0) continue; //! Existe a possibilidade de haver produtos equivalentes porém sem ter sido bipado nenhuma unidade! Nesse caso, apenas ignore.
+  //       // console.log('Produto equivalente que será processado (DEBUG) >', equiv); // TODO REMOVER DEPOIS (DEBUG)
+  //       const objProdEquiv = { // ? Cira o objeto para o produto equivalente
+  //         // equivalente: true, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
+  //         sku: equiv.sku_bipado, // ? SKU do produto que vai ser transferido (Equivalente)
+  //         id_produto: equiv.id_tiny_equivalente, // ? ID do produto que vai ser transferido (Equivalente)
+  //         de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
+  //         para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
+  //         unidades: equiv.bipados, // ? Quantidade que foi bipado do produto (Equivalente)
+  //         preco_unitario: 0, // * Isso daqui é opicional...
+  //         // **** NEW ****
+  //         equivalente: true,
+  //         etapa: 'conf',
+  //         pk: equiv.id,
+  //         // **** NEW ****
+  //       }
+  //       // console.log('Objeto do produto equivalente criado (DEBUG) >', objProdEquiv); // TODO REMOVER DEPOIS (DEBUG)
+  //       listaObjPrincipal.push(objProdEquiv); // ? Adiciona o objeto criado na lista de objetos
+  //     }
+  //   } else { continue }
+  // }
 
-  // ! Não sei se isso é uma possibilidade, mas é bom evitar...
-  // ! Caso aconteça de não ter nada a transferir, retorna erro.
-  if (listaObjPrincipal.length <= 0) throw new Error('Nada para transferir (bipagem total = 0).');
-  // console.log('Objeto Principal (DEBUG) >', listaObjPrincipal); // TODO REMOVER DEPOIS (DEBUG)
+  // // ! Não sei se isso é uma possibilidade, mas é bom evitar...
+  // // ! Caso aconteça de não ter nada a transferir, retorna erro.
+  // if (listaObjPrincipal.length <= 0) throw new Error('Nada para transferir (bipagem total = 0).');
+  // // console.log('Objeto Principal (DEBUG) >', listaObjPrincipal); // TODO REMOVER DEPOIS (DEBUG)
 
-  // ? Definindo variáveis para OBS (Tiny)
-  const empresa = { 1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports" }
-  const info = document.getElementById("infoAgend")?.dataset || {};
-  const empresaId = parseInt(info.empresa, 10);
-  const numAg = info.agendamento;
-  const mktp = info.marketplace;
+  // // ? Definindo variáveis para OBS (Tiny)
+  // const empresa = { 1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports" }
+  // const info = document.getElementById("infoAgend")?.dataset || {};
+  // const empresaId = parseInt(info.empresa, 10);
+  // const numAg = info.agendamento;
+  // const mktp = info.marketplace;
 
-  // Definindo Usuário que fez a transferência
-  let user = ((await whoAmI())?.nome_display_usuario || "Indefinido");
+  // // Definindo Usuário que fez a transferência
+  // let user = ((await whoAmI())?.nome_display_usuario || "Indefinido");
 
-  listaObjPrincipal = groupPkList(listaObjPrincipal);
+  // listaObjPrincipal = groupPkList(listaObjPrincipal);
 
-  // // console.log('User >', user); // TODO REMOVER DEPOIS (DEBUG)
-  const payload = {
-    empresa: empresa[empresaId],             // opcional (futuro: seleção de token)
-    observacoes: `Conferência - AgendamentosWeb \nAg.: ${numAg}\nMktp.: ${mktp}\nEmp.: ${empresa[empresaId]}\nCo.: ${user}`,      // opcional
-    preco_unitario: 0,               // opcional; default=0
-    movimentos: listaObjPrincipal
-  }
+  // // // console.log('User >', user); // TODO REMOVER DEPOIS (DEBUG)
+  // const payload = {
+  //   empresa: empresa[empresaId],             // opcional (futuro: seleção de token)
+  //   observacoes: `Conferência - AgendamentosWeb \nAg.: ${numAg}\nMktp.: ${mktp}\nEmp.: ${empresa[empresaId]}\nCo.: ${user}`,      // opcional
+  //   preco_unitario: 0,               // opcional; default=0
+  //   movimentos: listaObjPrincipal
+  // }
 
-  // console.log('Payload pronto para a transferência >', payload); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Payload pronto para a transferência >', payload); // TODO REMOVER DEPOIS (DEBUG)
 
-  // console.log('Preparando fetch para transferência de estoque...'); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('Preparando fetch para transferência de estoque...'); // TODO REMOVER DEPOIS (DEBUG)
 
-  const transfReq = await fetch('/estoque/mover', {
-    method: 'POST',
-    credentials: 'include', // garante cookie de sessão
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  // const transfReq = await fetch('/estoque/mover', {
+  //   method: 'POST',
+  //   credentials: 'include', // garante cookie de sessão
+  //   headers: { 'Content-Type': 'application/json' },
+  //   body: JSON.stringify(payload)
+  // });
 
-  if (!transfReq.ok) {
-    const txt = await transfReq.text().catch(() => '');
-    throw new Error(`Falha na transferência (${transfReq.status} ${transfReq.statusText}) ${txt}`);
-  }
+  // if (!transfReq.ok) {
+  //   const txt = await transfReq.text().catch(() => '');
+  //   throw new Error(`Falha na transferência (${transfReq.status} ${transfReq.statusText}) ${txt}`);
+  // }
 
   return;
 }

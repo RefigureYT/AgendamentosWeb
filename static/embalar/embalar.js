@@ -289,12 +289,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       // imprime conforme a seleção
       try {
         if (selectedOpcaoImpressao === 'ambas') {
-          gerarEtiquetaCustom(ultimaCaixaSnapshot); // ML inbound
-          gerarEtiquetaCaixa(ultimaCaixaSnapshot);  // JP interna
+          gerarEtiquetaCustom(ultimaCaixaSnapshot.id); // ML inbound
+          gerarEtiquetaCaixa(ultimaCaixaSnapshot.id);  // JP interna
         } else if (selectedOpcaoImpressao === 'ml') {
-          gerarEtiquetaCustom(ultimaCaixaSnapshot);
+          gerarEtiquetaCustom(ultimaCaixaSnapshot.id);
         } else if (selectedOpcaoImpressao === 'jp') {
-          gerarEtiquetaCaixa(ultimaCaixaSnapshot);
+          gerarEtiquetaCaixa(ultimaCaixaSnapshot.id);
         } // 'nenhuma' => não imprime
       } catch (e) {
         console.error('Erro ao imprimir etiqueta(s):', e);
@@ -802,12 +802,12 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     atualizarPainelEsquerdo();
   }
 
-  function gerarEtiquetaCustom(caixa) {
+  function gerarEtiquetaCustom(nCaixa) {
     // Bloqueia etiqueta ML se não for ML OU se for COLETA
     if (!assertCanPrintMLOrWarn()) return;
 
     const idAgendamento = idAgendMl;
-    const numeroCaixa = caixa.id;
+    const numeroCaixa = nCaixa;
 
     // Busca o centro de distribuição
     const centroRaw = agendamentoCompleto.centro_distribuicao;
@@ -934,12 +934,12 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
 
     // 2) imprime conforme a tecla
     if (e.key === 'F1') {
-      gerarEtiquetaCustom(caixa);    // ML + JP
-      gerarEtiquetaCaixa(caixa);
+      gerarEtiquetaCustom(caixa.id);    // ML + JP
+      gerarEtiquetaCaixa(caixa.id);
     } else if (e.key === 'F2') {    // só ML
-      gerarEtiquetaCustom(caixa);
+      gerarEtiquetaCustom(caixa.id);
     } else if (e.key === 'F3') {    // só JP
-      gerarEtiquetaCaixa(caixa);
+      gerarEtiquetaCaixa(caixa.id);
     } else if (e.key === 'F4') {
       // nenhuma
     }
@@ -948,12 +948,33 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     atualizarPainelEsquerdo();
   });
 
-  function gerarEtiquetaCaixa(caixa) {
+  function gerarEtiquetaCaixa(caixaRef) {
+    // Permite receber SÓ o número (preferido) ou ainda o objeto (retrocompatível)
+    // - número: procura por id exato; se não achar, tenta como índice 1-based (id = posição)
+    // - objeto: usa direto
+    let cx = null;
+    if (typeof caixaRef === 'number' || typeof caixaRef === 'string') {
+      const idNum = Number(caixaRef);
+      cx = (Array.isArray(caixas) ? (caixas.find(c => Number(c.id) === idNum) || caixas[idNum - 1]) : null) || null;
+    } else if (caixaRef && typeof caixaRef === 'object') {
+      cx = caixaRef;
+    }
+
+    if (!cx) {
+      console.error('Caixa não encontrada para referência:', caixaRef);
+      Swal.fire('Erro', `Caixa ${caixaRef} não encontrada.`, 'error');
+      return;
+    }
+
     const headerBar = document.querySelector('.header-bar');
-    const freteId = headerBar.dataset.idMl;
-    const dataStr = caixa.startTime.toLocaleDateString('pt-BR');
-    const horaIni = caixa.startTime.toLocaleTimeString('pt-BR', { hour12: false });
-    const horaFim = caixa.endTime.toLocaleTimeString('pt-BR', { hour12: false });
+    const freteId = headerBar?.dataset?.idMl || '';
+
+    // Garante datas válidas
+    const start = cx.startTime ? new Date(cx.startTime) : new Date();
+    const end = cx.endTime ? new Date(cx.endTime) : new Date();
+    const dataStr = start.toLocaleDateString('pt-BR');
+    const horaIni = start.toLocaleTimeString('pt-BR', { hour12: false });
+    const horaFim = end.toLocaleTimeString('pt-BR', { hour12: false });
 
     const logoJauPesca = '^FO250,120^GFA,4440,4440,37,,:::hP03C,hP01FC,hQ0FF8,hQ03FF,hQ01FFE,hR0IFC,hR07IF,hR03IFC,hR01JF,hR01JFC,hS0KF,hS07JF8,hS07JFE,hS03KF,hS03KFC,hS03KFE,hS01LF,hI03JFK01LF8,hH07LF8I01LFC,hG03NFI01LFE,h01OFE001MF,h07PFC01MF8,gY01RF01MFC,gY03RFE0MFE,gY0TF81LFE,gX01UF07LF,gX03UFE0LF8,gX07VF83KF8,18gV0XF0KFC,0EgU01XFC3JFC,07gU01YF0JFE,038gT03YFE3IFE,03EgT07gF87IF,01FgT0gGFE1IF,00FCP0FFCY01gHF87FF,00FEO0JFCX01gIF3FF8,007F8M03KF8W03gIFCFF8,007FCM07KFEW07gJF3F8,003FFM0MF8V07QF00QFCF8,001FF8K01MFCV0QFE001QF38,001FFEK03NFU01QFCI03PFC8,I0IFK07NF8T01QF8J07PF,I0IFCJ0OFCT03QFK01PFC,I07FFEJ0OFCT07QFL03PF,I07IF8001OFET07PFEM07OFC,I03IFC003OFET0QFCM01PF,I03IFE003PFS01QF8N03OFC,I01JF807PFS01QF8O0OFE,I01JFC0QFS03QFP01OF8,I01JF80QFS07QFQ03NFE,J0JF81QFS07PFER0OF,J0JF03QFS0QFCR03NFC,J0JF03QFR01QFCS0OF,J07FFE07PFER01QF8S07NF8,J07FFE07PFCR03QFT03NFC,J07FFC0QFCR07QFT01JFC0IF,J07FFC0QF8R0QFET01JF803FF8,J07FFC1QFS0QFCT01JF003FFC,J03FF81QFR01QF8T01JF001FFE,J03FF81PFER03QF8T03JF001IF,J03FF81PFCR03QFU07JF001IF8,J03FF83PFCR07PFEU07JF001IFC,J03FF83PF8R0QFEU0KF001IFE,J03FF03PFS0QFCT01KF803JF,J03FF03PFR01QF8I01EO01KF803JF,J03FF03OFER03QF8001IFN03KFE0KF8,J03FF03OFCR03QFI07IFEM07RF8,J03FF03OFCR07PFEI0KFCL07RF8,J03FF01OF8R0QFE001LFL0SFC,J03FF81OF8R0QFC003LFEJ01SF8,J03FF81OFR01QF8003MFCI03SF8,J07FF80OFR03QF8003NFI0TF,J07FF80OFR03QFI03OF9TFE,J07FFC0OF8Q07PFEI03gJFC,J07FFC07NF8Q0QFEI03gJF,J07FFE03NFCQ0QFCI01gIFC,J0IFE03NFCP01QF8J0gIF,J0JF01NFEP03QF8J07gGFC,J0JF80OF8O03QFK03gGF,I01JF807NFEO07PFEK01gF8,I01JFC03OFCN0QFCL07XFC,I01JFC01PFM01QFCL01WFC,I03JFI0PFEL01QF8M03UFC,I03IFCI07PFCK03QFO07SFC,I03IF8I03QFK07QFP03QF,I07FFEJ01QFEJ0QFEQ01NF8,I07FF8K07QFC001QFCN03EJ01FF,I0FFEL03RF81RFCN07FFE,I0FFCM0gLF8N07JFE,001FFN03gKFO0LF8,001FCO07gJFN01LF,003FP01gIFEN03KFC,003EQ03gHFCN07KF,0078R07gGFCM01KFC,006S01gGF8M03JFE,008T03gFN0KF8,X0gFM07JFC,X01XFEL07JFC,Y03WFCK07JF,g0WF8,g01VF,gG03TFE,gH0TFC,gH01SF,gI03QFE,gJ0QF8,gJ01OFE,gK03NF,gL07LF8,gM01JF,,:::::^FS';
     const logoMercadoLivre = '^FO350,356^GFA,1800,1800,15,,::::::::::::::::::::::::::R03JFE,Q0NF,P07FFC001IF,O03FEL03FE,N01FEN03FC,N07EP07F,M01FR0FC,M07CR03F,L01FT0F8,L07CL01F8K03E,L0FL01IF8K0F,K01EL07JFK07C,K03F8J01F800FCJ0FE,K0F7F8I0FCI01FC00FF7,J01C0FF80FF8J07JF838,J01801KFL0IFC01C,J03I01FFDCR0E,J07L01801FCN06,J0EL03007FEN07,J0CL0700E07N038,I018L0E03C01CM018,I038K01C07I0EM01C,I03L0180EI07N0C,I03L01E3CI038M0E,I06M0FFJ01EM06,I06N08K07M06,I06T038L06,I0ET01CL0F,I0FET0EK07F,I0FFES07J07FF,I0EFFCR01C003FE7,I0E07F8R0E01FE07,I0E00FER0707F007,I0E001F87N04039F8007,I0EI03FFDFL0601FCI07,I0EJ0F8FF8K0300FJ07,I0EJ07061F8J01807J07,I0FJ07I0FEK0C03J0F,I07J07I0C7K0703J0E,I07J03J03K0387I01E,I078I0388001I0C01FEI01E,I078I01F8001800600FCI03C,I03CJ0F8001E00380FJ03C,I03EJ01C003F801C1CJ07C,I01EK0E2001880E3CJ0F8,I01FK0FEI0CC07F8I01F8,J0F8J03FI0C607FJ03F,J0FCK07980C3078J07F,J07EK03F80C18EK0FE,J03F8K0FC0C1FEJ01FC,J03FCL0E3IF8J03F8,J01FEL07IF8K0FF,K0FF8K03E1EK01FF,K07FET07FC,K03FF8R01FF8,L0FFER0IF,L07FFCP03FFE,L03IF8N01IF8,M0JF8L01JF,M03JFCJ07JFC,N0TF,N03RFC,O0QFE,O01PF,P01NF,R0KFE,,::::::::::::::::::::::::::^FS';
@@ -973,30 +994,23 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     // DOBJ47694
     // ISZR57209
     const linhas = [
-      '^XA', // Inicia Doc
-      '^CI28', // Usa o Charset Latin-1 (Para permitir acentos)
-      '^LH0,0', // Diz para a impressora que todo o código deve ser impresso considerando a posição 0,0 em relação ao topo da esquerda
-
-      objEmpresaLogo[agendamentoCompleto.empresa], // Exibe a imagem com o nome da empresa
-      logoJauPesca, // Exibe a imagem da logo da Jaú Pesca
-
+      '^XA', '^CI28', '^LH0,0',
+      objEmpresaLogo[agendamentoCompleto.empresa],
+      logoJauPesca,
       `^FO35,250^A0N,40,40^FDFrete: ${freteId}^FS`,
       `^FO480,250^A0N,40,40^FDData: ${dataStr}^FS`,
       `^FO35,300^A0N,40,40^FDInicio: ${horaIni}^FS`,
       `^FO480,300^A0N,40,40^FDTermino: ${horaFim}^FS`,
-
-      logoMercadoLivre, // Exibe a logo do mercado livre
-
+      logoMercadoLivre,
       '^FO30,380^GB750,2,2^FS',
       '^FO30,400^A0N,40,40^FDEtiqueta/UN^FS',
-      `^FO600,400^A0N,40,40^FDCaixa: ${caixa.id}^FS`,
+      `^FO600,400^A0N,40,40^FDCaixa: ${cx.id}^FS`,
       '^FO30,450^GB750,2,2^FS'
     ];
 
-    // agora renderiza cada SKU/qtde na sequência
     let y = 480;
     const step = 50;
-    Object.entries(caixa.itens).forEach(([sku, qtd]) => {
+    Object.entries(cx.itens || {}).forEach(([sku, qtd]) => {
       linhas.push(`^FO25,${y}^A0N,30,30^FD ${sku} / ${qtd}^FS`);
       y += step;
     });
@@ -1004,11 +1018,9 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     linhas.push('^XZ');
 
     const zpl = linhas.join('\n');
-    console.log(zpl)
+    console.log(zpl);
     imprimirEtiqueta(zpl, 'caixa');
   }
-
-
 
   function fecharCaixaAtiva() {
     if (caixaAtivaIndex === -1 || caixas[caixaAtivaIndex].fechada) {
@@ -1231,8 +1243,7 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     if (!qtdRaw) return;
 
     const qtd = Math.max(1, parseInt(qtdRaw, 10) || 1);
-
-    reimprimirEtiquetas(produto.sku, qtd); // o dispatcher já decide: ML, Shopee ou alerta "indisponível"
+    reimprimirEtiquetas(produto.id_ml, qtd); // usa a etiqueta/ID do anúncio
   });
 
   inputSku.addEventListener("keydown", async (e) => {
@@ -1415,9 +1426,10 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
       return;
     }
     modalConfirme.hide();
-    const produtoParaEtiqueta = produtos.find(p => p.id_ml === idMlConferido);
+    const produtoParaEtiqueta = produtos.find(p => String(p.id_ml) === String(idMlConferido));
     if (produtoParaEtiqueta) {
-      gerarEtiqueta(produtoParaEtiqueta.sku);
+      // Imprime pelo ID do anúncio (etiqueta), não pelo SKU
+      gerarEtiqueta(idMlConferido);
     }
     try {
       await iniciarEmbalagem(idMlConferido);
@@ -1437,14 +1449,14 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     }
   }
 
-  function gerarEtiqueta(sku) {
+  function gerarEtiqueta(idMl) {
     console.log('[ LOG ] Marketplace ID:', idMktp);
     switch (parseInt(idMktp)) {
       case 1: // Mercado Livre
-        gerarEtiquetaMeLi(sku);
+        gerarEtiquetaMeLi(idMl);
         break;
       case 3: // Shopee
-        gerarEtiquetaShopee(sku);
+        gerarEtiquetaShopee(idMl);
         break;
       default:
         Swal.fire("Não disponível",
@@ -1454,7 +1466,7 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     }
   }
 
-  function reimprimirEtiquetas(sku, qtd) {
+  function reimprimirEtiquetas(idMl, qtd) {
     const q = Number(qtd);
     if (!Number.isFinite(q) || q <= 0) {
       Swal.fire("Quantidade inválida", "Informe um número maior que zero.", "warning");
@@ -1462,16 +1474,16 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     }
     switch (parseInt(idMktp, 10)) {
       case 1: // Mercado Livre
-        return gerarEtiquetaMeLi(sku, q);
+        return gerarEtiquetaMeLi(idMl, q);
       case 3: // Shopee
-        return gerarEtiquetaShopee(sku, q);
+        return gerarEtiquetaShopee(idMl, q);
       default:
         Swal.fire("Reimpressão indisponível", "Este marketplace ainda não tem reimpressão.", "info");
     }
   }
 
-  function gerarEtiquetaMeLi(sku, un = null) {
-    const anuncio = produtos.find((p) => p.sku === sku);
+  function gerarEtiquetaMeLi(idMl, un = null) {
+    const anuncio = produtos.find((p) => String(p.id_ml) === String(idMl));
     if (!anuncio) return;
 
     // POSIÇÕES FIXAS
@@ -1546,15 +1558,15 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     imprimirEtiqueta(zpl, "id");
   }
 
-  function gerarEtiquetaShopee(sku, un = null) {
-    const anuncio = produtos.find((p) => p.sku === sku);
+  function gerarEtiquetaShopee(idMl, un = null) {
+    const anuncio = produtos.find((p) => String(p.id_ml) === String(idMl));
     if (!anuncio) return;
 
     const nomeAnuncio = anuncio.nome;
     const etiqueta = anuncio.id_ml;
     const unidadesTotais = un === null ? anuncio.unidades : Number(un);
 
-    console.log("LOG: Gerando etiqueta Shopee para o SKU:", sku, anuncio);
+    console.log("LOG: Gerando etiqueta Shopee para o anúncio:", idMl, anuncio);
 
     const zplConstructor = []; // Array para armazenar as etiquetas (cada índice será separado por quebra de linha "\n")
 
@@ -1627,7 +1639,7 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     //    (supondo que cada objeto em `caixas` tenha `startTime` e `endTime` definidos)
     caixas
       .filter(cx => cx.fechada && cx.startTime && cx.endTime)
-      .forEach(cx => gerarEtiquetaCaixa(cx));
+      .forEach(cx => gerarEtiquetaCaixa(cx.id));
 
     // 2) Mostra o loading
     Swal.fire({
@@ -1668,8 +1680,8 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
 
   function funcoesDisponiveis() {
     console.log('======= IDENTIFICAÇÃO =======');
-    console.log('gerarEtiquetaShopee(\"sku\", \"un\");');
-    console.log('gerarEtiquetaMeLi(\"sku\", \"un\");\n\n');
+    console.log('gerarEtiquetaShopee(\"ID_ML\", \"un\");');
+    console.log('gerarEtiquetaMeLi(\"ID_ML\", \"un\");\n\n');
 
 
     console.log('=========== VOLUME ===========');
@@ -1690,4 +1702,3 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   window.gerarEtiquetaCaixa = gerarEtiquetaCaixa; // JP
   inicializarModalFecharCaixa();
 });
-

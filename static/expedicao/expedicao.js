@@ -24,6 +24,7 @@ document.addEventListener("DOMContentLoaded", function () {
     // Variáveis de estado
     let cronometroInterval;
     let pollingInterval;
+    let transfOn = false; // false = finalizar sem transferir (temporário); true = transferir + finalizar
 
     // ====== MAPAS DE DEPÓSITOS ======
     // Atenção: mapeado conforme seu template: 1=Jaú Pesca, 2=Jaú Fishing, 3=L.T. Sports
@@ -315,7 +316,7 @@ document.addEventListener("DOMContentLoaded", function () {
             containerInicio.style.display = 'block';
         }
     }
-    
+
     // --- 4. EVENT LISTENERS E LÓGICA DE AÇÕES ---
     btnIniciarExpedicao?.addEventListener('click', function () {
         this.disabled = true;
@@ -401,6 +402,57 @@ document.addEventListener("DOMContentLoaded", function () {
     btnFinalizarExpedicao?.addEventListener('click', async function () {
         if (this.disabled) return;
 
+        // 🔀 Interruptor temporário: se false => apenas finaliza, se true => transfere + finaliza
+        const transfFlag = !!transfOn;
+
+        // Caminho A: SOMENTE FINALIZAR (sem transferir)
+        if (!transfFlag) {
+            const { isConfirmed } = await Swal.fire({
+                title: "Finalizar sem transferir?",
+                html: `Este modo temporário irá <b>apenas finalizar</b> a expedição, sem gerar movimentações de estoque.`,
+                icon: "question",
+                showCancelButton: true,
+                confirmButtonColor: "#28a745",
+                cancelButtonColor: "#6c757d",
+                confirmButtonText: "Sim, só finalizar",
+                cancelButtonText: "Cancelar"
+            });
+            if (!isConfirmed) return;
+
+            this.disabled = true;
+            Swal.fire({
+                title: 'Finalizando…',
+                html: 'Registrando conclusão da expedição.',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const respFin = await fetch('/api/expedicao/finalizar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ id_agend_bd: panelControl?.dataset.idBd })
+                }).then(x => x.json()).catch(() => ({ success: false }));
+
+                if (!respFin?.success) {
+                    this.disabled = false;
+                    await Swal.fire('Erro', 'Não foi possível finalizar a expedição.', 'error');
+                    return;
+                }
+
+                await Swal.fire({ icon: 'success', title: 'Expedição finalizada!', timer: 1500, showConfirmButton: false });
+                window.location.href = '/agendamentos/ver?finalizado=ok';
+                return;
+            } catch (e) {
+                console.error(e);
+                this.disabled = false;
+                await Swal.fire('Erro de rede', 'Falha ao comunicar com o servidor.', 'error');
+                return;
+            }
+        }
+
+        // Caminho B: TRANSFERIR + FINALIZAR (fluxo existente)
         const empresaId = Number(panelControl?.dataset.empresa || 0);
         const mktpId = Number(panelControl?.dataset.mktp || 0);
         const depProducao = Number(panelControl?.dataset.depProducao || DEPOSITO_PRODUCAO);
@@ -412,7 +464,7 @@ document.addEventListener("DOMContentLoaded", function () {
         let dados;
         try {
             dados = await fetchAgendamentoCompleto(agendamentoIdBD);
-            console.log('[DEBUG] agendamento completo:', dados); // <- remova depois
+            // console.log('[DEBUG] agendamento completo:', dados);
         } catch (e) {
             await Swal.fire('Erro', esc(e.message || 'Falha ao ler bipagem do agendamento.'), 'error');
             return;
