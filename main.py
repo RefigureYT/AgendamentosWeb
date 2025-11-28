@@ -32,7 +32,8 @@ def require_login():
         'static',                   # arquivos estáticos
         'retirado.api_bipar',       # POST /api/bipar
         'retirado.api_bipados_agend',  # GET /api/bipados/<id_agend>  <-- vírgula aqui
-        'health_check'              # rota de health check
+        'health_check',              # rota de health check
+        'healthz'
     }
     ep = flask_request.endpoint or ''
     if ep not in open_endpoints and 'id_usuario' not in flask_session:

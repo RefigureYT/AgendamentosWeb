@@ -113,6 +113,29 @@ body {
   color: #6c757d;
 }
 
+/* Estilos para pallets abertos */
+.pallet-aberto {
+  border-color: #0d6efd;
+  border-width: 2px;
+  box-shadow: 0 4px 12px rgba(13, 110, 253, 0.25);
+}
+
+.pallet-aberto .card-header {
+  background-color: #0d6efd;
+  color: white;
+  font-weight: bold;
+}
+
+/* Estilos para pallets fechados */
+.pallet-fechada {
+  background-color: #f8f9fa;
+}
+
+.pallet-fechada .card-header {
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
 .caixa-vazia-mensagem {
   color: #6c757d;
   font-style: italic;
@@ -155,6 +178,85 @@ body {
 
 .ajuste_btn_finalizar {
   margin: 0px 10px 20px 0px;
+}
+
+/* Linha que organiza o retângulo (Caixa) e o quadrado (Pallet) */
+.box-actions-row {
+  display: flex;
+  gap: 10px;
+  margin: 0 10px 15px 0;
+}
+
+/* Dentro dessa linha, tiramos a margem padrão dos cards */
+.box-actions-row .add-new-box {
+  margin: 0;
+}
+
+/* Retângulo pontilhado principal – Nova Caixa (~75%) */
+.box-card-main {
+  flex: 3 1 0;
+}
+
+/* Bloco menor, mais “quadrado” – Novo Pallet (~25%) */
+.box-card-secondary {
+  flex: 1 1 0;
+}
+
+.box-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0.65rem 0.9rem;
+}
+
+/* Para o Novo Pallet: centralizar conteúdo e manter tudo em uma linha */
+.box-card-secondary .box-card-body {
+  justify-content: center;
+}
+
+.box-card-secondary .box-card-text {
+  align-items: center;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.box-card-icon {
+  font-size: 1.2rem;
+  margin-right: 0.55rem;
+  color: #0d6efd;
+  display: flex;
+  align-items: center;
+}
+
+.box-card-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.box-card-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #343a40;
+}
+
+.box-card-sub {
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+/* Hover discreto só nos dois blocos clicáveis */
+.box-card-main:hover,
+.box-card-secondary:hover {
+  background-color: rgba(13, 110, 253, 0.04);
+  border-color: #0d6efd;
+}
+
+/* Em telas pequenas, empilha os dois */
+@media (max-width: 480px) {
+  .box-actions-row {
+    flex-direction: column;
+  }
 }
 
 /*
@@ -416,3 +518,308 @@ body {
 #lista-anuncios .produto-item.produto-concluido .btn-reimprimir {
   border-color: rgba(255, 255, 255, .5);
 }
+
+/* ===================== */
+/* Abas Caixas / Pallets */
+/* ===================== */
+
+.volume-tabs {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.85rem 0.5rem;
+  border-radius: 16px;
+  background: #f3f6ff;
+  /* fundo levemente azul */
+  border: 1px solid #d0ddff;
+}
+
+.volume-tabs-nav {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  /* abas à esquerda, ícones à direita */
+  margin-bottom: 0.75rem;
+}
+
+/* grupo de abas (Caixas / Pallets) */
+.volume-tabs-nav-left {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* grupo dos ícones à direita */
+.volume-tabs-nav-actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+/* botão base (lápis / lixeira) */
+.volume-action-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #111827;
+  /* preto / quase preto padrão */
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+.volume-action-btn i {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* hover genérico */
+.volume-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.22);
+}
+
+/* lápis: hover azul de edição */
+.volume-action-edit:hover {
+  background-color: rgba(0, 87, 146, 0.08);
+  /* azul JP bem suave */
+  color: #005792;
+  /* mesma cor da aba ativa */
+}
+
+/* lixeira: hover vermelho */
+.volume-action-delete:hover {
+  background-color: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
+  /* vermelho alerta */
+}
+
+.volume-tab {
+  position: relative;
+  border: 1px solid #c7d2fe;
+  background: #e5edff;
+  /* azul claro */
+  padding: 0.35rem 1.1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 999px;
+  color: #1e3a8a;
+  /* azul escuro */
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.12s ease,
+    border-color 0.18s ease;
+}
+
+.volume-tab:hover {
+  background: #dbe7ff;
+  border-color: #b4c3ff;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(15, 23, 42, 0.18);
+}
+
+.volume-tab.is-active,
+.volume-tab.active {
+  background: #005792;
+  /* azul JP principal */
+  border-color: #00406d;
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(0, 63, 120, 0.35);
+}
+
+.volume-tab.is-active::after,
+.volume-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  bottom: -6px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #00b4d8, #57ffc7);
+}
+
+/* Conteúdo das abas */
+.volume-tabs-content {
+  min-height: 40px;
+}
+
+.volume-tab-pane {
+  display: none;
+}
+
+.volume-tab-pane.is-active,
+.volume-tab-pane.active {
+  display: block;
+}
+
+/* Modal de exclusão de caixa */
+#modalExcluirCaixa .modal-header {
+  background-color: #dc3545;
+  color: #fff;
+}
+
+#modalExcluirCaixa .btn-close-white {
+  filter: invert(1);
+}
+
+#modalExcluirCaixa .alert-warning strong {
+  text-transform: uppercase;
+}
+
+/* Botão de reabrir caixa / pallet – ícone de caixa animada */
+.caixa-reabrir-btn,
+.pallet-reabrir-btn {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: #e0f2fe;
+  /* azul clarinho */
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.16);
+  transition:
+    background-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+  overflow: hidden;
+}
+
+/* Esconde qualquer ícone <i> antigo dentro do botão */
+.caixa-reabrir-btn>i,
+.pallet-reabrir-btn>i {
+  display: none;
+}
+
+/* “Corpo” da caixa */
+.caixa-reabrir-btn::before,
+.pallet-reabrir-btn::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 11px;
+  bottom: 8px;
+  background: #0b69f5;
+  /* laranja corpo */
+  border-radius: 3px 3px 2px 2px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12);
+}
+
+/* “Tampa” da caixa */
+.caixa-reabrir-btn::after,
+.pallet-reabrir-btn::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 5px;
+  bottom: 16px;
+  background: #2e8de6;
+  /* tampa mais clara */
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+  transform-origin: center bottom;
+  transition:
+    transform 0.18s ease,
+    bottom 0.18s ease;
+}
+
+/* Animação de “pulo” + tampa abrindo */
+@keyframes box-bounce-open {
+  0% {
+    transform: translateY(0);
+  }
+
+  30% {
+    transform: translateY(-4px);
+  }
+
+  60% {
+    transform: translateY(-2px);
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.caixa-reabrir-btn:hover,
+.pallet-reabrir-btn:hover {
+  background: #dbeafe;
+  /* leve destaque no hover */
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.25);
+  animation: box-bounce-open 0.45s ease-out;
+}
+
+/* Tampa “abrindo” ao passar o mouse */
+.caixa-reabrir-btn:hover::after,
+.pallet-reabrir-btn:hover::after {
+  bottom: 19px;
+  transform: rotate(-12deg);
+}
+
+.caixa-reabrir-btn:active,
+.pallet-reabrir-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+}
+
+/* Estado desabilitado */
+.caixa-reabrir-btn[disabled],
+.pallet-reabrir-btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+  background: #e5e7eb;
+}
+
+/* Oculta o botão de reabrir quando a caixa está aberta */
+.caixa-aberta .caixa-reabrir-btn {
+  display: none;
+}
+
+/* Oculta o botão de reabrir quando o pallet está aberto */
+.pallet-aberto .pallet-reabrir-btn {
+  display: none;
+}
+
+/* Esconde o botão se quiser mostrar só em caixas fechadas (classe auxiliar) */
+.caixa-reabrir-btn--hidden {
+  display: none;
+}
+
+/* Garante layout com botão à direita (caixa + pallet) */
+.jp-card-caixa__header,
+.jp-card-pallet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.jp-card-caixa__header-main,
+.jp-card-pallet__header-main {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===================== */

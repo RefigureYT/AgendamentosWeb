@@ -117,11 +117,38 @@ def api_embalar_bipados(id_agend_ml):
         print(f"Erro em api_embalar_bipados: {e}")
         return jsonify(error=str(e)), 500
     
-# cria uma nova caixa
+def _resolve_tabelas_embalagem(tipo):
+    """
+    Decide se usa as tabelas de CAIXA ou de PALLET.
+
+    tipo:
+      - 0, None, "", "0"            => caixas (padrão)
+      - 1, "1", "pallet", "pallets" => pallets
+
+    Retorna (tabela_principal, tabela_itens, label).
+    """
+    is_pallet = False
+    if isinstance(tipo, str):
+        t = tipo.strip().lower()
+        if t in ("1", "pallet", "pallets"):
+            is_pallet = True
+    elif tipo == 1:
+        is_pallet = True
+
+    if is_pallet:
+        return "embalagem_pallets", "embalagem_pallet_itens", "pallet"
+    else:
+        return "embalagem_caixas", "embalagem_caixa_itens", "caixa"
+
+
+# cria uma nova caixa/pallet
 @bp_embalar.route("/api/embalar/caixa", methods=["POST"])
 def criar_caixa():
     data = request.get_json() or {}
     id_agend = str(data.get("id_agend_ml") or "").strip()
+    tipo = data.get("type")
+    tabela_embalagem, _, label = _resolve_tabelas_embalagem(tipo)
+
     if not id_agend:
         return jsonify(error="id_agend_ml obrigatório"), 400
 
@@ -130,53 +157,70 @@ def criar_caixa():
         conn.start_transaction()
         cur = conn.cursor()
 
-        cur.execute("""
+        cur.execute(
+            f"""
             SELECT COALESCE(MAX(caixa_num), 0)
-            FROM embalagem_caixas
+            FROM {tabela_embalagem}
             WHERE id_agend_ml=%s
             FOR UPDATE
-        """, (id_agend,))
+            """,
+            (id_agend,),
+        )
         prox = (cur.fetchone()[0] or 0) + 1
 
         codigo = f"{id_agend}-{prox}"
-        cur.execute("""
-            INSERT INTO embalagem_caixas
+        cur.execute(
+            f"""
+            INSERT INTO {tabela_embalagem}
                 (id_agend_ml, caixa_num, codigo_unico_caixa, inicio_embalagem)
             VALUES (%s, %s, %s, NOW())
-        """, (id_agend, prox, codigo))
+            """,
+            (id_agend, prox, codigo),
+        )
         conn.commit()
-        return jsonify(caixa_num=prox, codigo_unico_caixa=codigo), 201
+        return jsonify(caixa_num=prox, codigo_unico_caixa=codigo, tipo=label), 201
 
     except mysql.connector.Error as e:
         conn.rollback()
         if getattr(e, "errno", None) == errorcode.ER_DUP_ENTRY:
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(
+                f"""
                 SELECT caixa_num, codigo_unico_caixa
-                FROM embalagem_caixas
+                FROM {tabela_embalagem}
                 WHERE id_agend_ml=%s
                 ORDER BY caixa_num DESC LIMIT 1
-            """, (id_agend,))
+                """,
+                (id_agend,),
+            )
             row = cur.fetchone()
             if row:
-                return jsonify(caixa_num=row[0], codigo_unico_caixa=row[1]), 200
+                return jsonify(caixa_num=row[0], codigo_unico_caixa=row[1], tipo=label), 200
         raise
     finally:
-        try: cur.close()
-        except Exception: pass
+        try:
+            cur.close()
+        except Exception:
+            pass
         conn.close()
         
+
 @bp_embalar.route("/api/embalar/scan", methods=["POST"])
 def scan_atomico():
     data = request.get_json() or {}
     id_agend = str(data.get("id_agend_ml") or "").strip()
     id_prod_ml = str(data.get("id_prod_ml") or "").strip()  # etiqueta
-    sku = str(data.get("sku") or "").strip()                # o que vai gravar na caixa (pode ser a própria etiqueta)
+    sku = str(data.get("sku") or "").strip()                # o que vai gravar na caixa/pallet
     codigo = (data.get("codigo_unico_caixa") or "").strip()
     cx_num = data.get("caixa_num")
+    tipo = data.get("type")
+    tabela_embalagem, tabela_itens, label = _resolve_tabelas_embalagem(tipo)
 
     if not id_agend or not id_prod_ml or not sku or (not codigo and cx_num is None):
-        return jsonify(ok=False, error="Informe id_agend_ml, id_prod_ml, sku e caixa (codigo_unico_caixa OU caixa_num)."), 400
+        return jsonify(
+            ok=False,
+            error="Informe id_agend_ml, id_prod_ml, sku e caixa/pallet (codigo_unico_caixa OU caixa_num).",
+        ), 400
 
     conn = mysql.connector.connect(**_db_config)
     try:
@@ -184,65 +228,91 @@ def scan_atomico():
         cur = conn.cursor()
 
         if codigo and cx_num is None:
-            cur.execute("""
-                SELECT caixa_num FROM embalagem_caixas
+            cur.execute(
+                f"""
+                SELECT caixa_num FROM {tabela_embalagem}
                 WHERE id_agend_ml=%s AND codigo_unico_caixa=%s
                 FOR UPDATE
-            """, (id_agend, codigo))
+                """,
+                (id_agend, codigo),
+            )
             row = cur.fetchone()
             if not row:
                 conn.rollback()
-                return jsonify(ok=False, error="Caixa não encontrada (codigo_unico_caixa)."), 404
+                return jsonify(ok=False, error=f"{label.capitalize()} não encontrada (codigo_unico_caixa)."), 404
             cx_num = int(row[0])
         else:
-            cur.execute("""
-                SELECT 1 FROM embalagem_caixas
+            cur.execute(
+                f"""
+                SELECT 1 FROM {tabela_embalagem}
                 WHERE id_agend_ml=%s AND caixa_num=%s
                 FOR UPDATE
-            """, (id_agend, cx_num))
+                """,
+                (id_agend, cx_num),
+            )
             if not cur.fetchone():
                 conn.rollback()
-                return jsonify(ok=False, error="Caixa não encontrada (caixa_num)."), 404
+                return jsonify(ok=False, error=f"{label.capitalize()} não encontrada (caixa_num)."), 404
 
-        cur.execute("""
+        # bipagem sempre na mesma tabela
+        cur.execute(
+            """
             INSERT INTO embalagem_bipados (id_agend_ml, id_prod_ml, bipados)
             VALUES (%s, %s, 1)
             ON DUPLICATE KEY UPDATE bipados = bipados + 1
-        """, (id_agend, id_prod_ml))
+            """,
+            (id_agend, id_prod_ml),
+        )
 
-        cur.execute("""
-            INSERT INTO embalagem_caixa_itens (id_agend_ml, caixa_num, sku, quantidade)
+        # itens na tabela dinâmica (caixas ou pallets)
+        cur.execute(
+            f"""
+            INSERT INTO {tabela_itens} (id_agend_ml, caixa_num, sku, quantidade)
             VALUES (%s, %s, %s, 1)
             ON DUPLICATE KEY UPDATE quantidade = quantidade + 1
-        """, (id_agend, cx_num, sku))
+            """,
+            (id_agend, cx_num, sku),
+        )
 
-        cur.execute("""
+        cur.execute(
+            """
             SELECT bipados FROM embalagem_bipados
             WHERE id_agend_ml=%s AND id_prod_ml=%s
-        """, (id_agend, id_prod_ml))
+            """,
+            (id_agend, id_prod_ml),
+        )
         bipados_atual = int((cur.fetchone() or [0])[0])
 
-        cur.execute("""
-            SELECT quantidade FROM embalagem_caixa_itens
+        cur.execute(
+            f"""
+            SELECT quantidade FROM {tabela_itens}
             WHERE id_agend_ml=%s AND caixa_num=%s AND sku=%s
-        """, (id_agend, cx_num, sku))
+            """,
+            (id_agend, cx_num, sku),
+        )
         qtd_na_caixa = int((cur.fetchone() or [0])[0])
 
         conn.commit()
-        return jsonify(ok=True,
-                       id_agend_ml=id_agend,
-                       id_prod_ml=id_prod_ml,
-                       caixa_num=cx_num,
-                       sku=sku,
-                       bipados=bipados_atual,
-                       quantidade_caixa=qtd_na_caixa)
+        return jsonify(
+            ok=True,
+            id_agend_ml=id_agend,
+            id_prod_ml=id_prod_ml,
+            caixa_num=cx_num,
+            sku=sku,
+            bipados=bipados_atual,
+            quantidade_caixa=qtd_na_caixa,
+            tipo=label,
+        )
     except Exception as e:
         conn.rollback()
         return jsonify(ok=False, error=str(e)), 500
     finally:
-        try: cur.close()
-        except Exception: pass
+        try:
+            cur.close()
+        except Exception:
+            pass
         conn.close()
+
 
 @bp_embalar.route("/api/embalar/caixa/item", methods=["POST"])
 def adicionar_item_caixa():
@@ -250,160 +320,553 @@ def adicionar_item_caixa():
     id_agend = data.get("id_agend_ml")
     caixa_num = data.get("caixa_num")
     sku = data.get("sku")
+    tipo = data.get("type")
+    _, tabela_itens, label = _resolve_tabelas_embalagem(tipo)
+
     if not all([id_agend, caixa_num, sku]):
         return jsonify(error="Parâmetros inválidos"), 400
 
     conn = mysql.connector.connect(**_db_config)
     cur  = conn.cursor()
     # tenta inserir, ou incrementa se já existir
-    cur.execute("""
-        INSERT INTO embalagem_caixa_itens (id_agend_ml, caixa_num, sku, quantidade)
+    cur.execute(
+        f"""
+        INSERT INTO {tabela_itens} (id_agend_ml, caixa_num, sku, quantidade)
         VALUES (%s,%s,%s,1)
         ON DUPLICATE KEY UPDATE quantidade = quantidade + 1
-    """, (id_agend, caixa_num, sku))
+        """,
+        (id_agend, caixa_num, sku),
+    )
     conn.commit()
     # lê quantidade atual
-    cur.execute("""
-    SELECT quantidade FROM embalagem_caixa_itens
-    WHERE id_agend_ml=%s AND caixa_num=%s AND sku=%s
-    """, (id_agend, caixa_num, sku))
+    cur.execute(
+        f"""
+        SELECT quantidade FROM {tabela_itens}
+        WHERE id_agend_ml=%s AND caixa_num=%s AND sku=%s
+        """,
+        (id_agend, caixa_num, sku),
+    )
     qtd = cur.fetchone()[0]
     cur.close()
     conn.close()
-    return jsonify(caixa_num=caixa_num, sku=sku, quantidade=qtd), 200
+    return jsonify(caixa_num=caixa_num, sku=sku, quantidade=qtd, tipo=label), 200
+
 
 @bp_embalar.route("/api/embalar/caixa/<id_agend_ml>", methods=["GET"])
 def buscar_caixas(id_agend_ml):
+    """
+    Retorna TODAS as caixas/pallets de um agendamento, com seus itens.
+    """
+    tipo = request.args.get("type")
+    tabela_embalagem, tabela_itens, label = _resolve_tabelas_embalagem(tipo)
+
     conn = mysql.connector.connect(**_db_config)
     cur  = conn.cursor(dictionary=True)
-    cur.execute("""
-        SELECT caixa_num, codigo_unico_caixa
-        FROM embalagem_caixas
-        WHERE id_agend_ml=%s
-        ORDER BY caixa_num
-    """, (id_agend_ml,))
-    caixas_rows = cur.fetchall()
-    resultado = []
-    for row in caixas_rows:
-        num = row["caixa_num"]
-        cur.execute("""
-            SELECT sku, quantidade
-            FROM embalagem_caixa_itens
-            WHERE id_agend_ml=%s AND caixa_num=%s
-        """, (id_agend_ml, num))
-        itens = [{"sku": r["sku"], "quantidade": r["quantidade"]} for r in cur.fetchall()]
-        resultado.append({
-            "caixa_num": num,
-            "codigo_unico_caixa": row["codigo_unico_caixa"],
-            "itens": itens
-        })
-    cur.close(); conn.close()
-    return jsonify(resultado)
+    try:
+        cur.execute(
+            f"""
+            SELECT caixa_num, codigo_unico_caixa
+            FROM {tabela_embalagem}
+            WHERE id_agend_ml=%s
+            ORDER BY caixa_num
+            """,
+            (id_agend_ml,),
+        )
+        caixas_rows = cur.fetchall()
+        resultado = []
+        for row in caixas_rows:
+            num = row["caixa_num"]
+            cur.execute(
+                f"""
+                SELECT sku, quantidade
+                FROM {tabela_itens}
+                WHERE id_agend_ml=%s AND caixa_num=%s
+                """,
+                (id_agend_ml, num),
+            )
+            itens = [
+                {"sku": r["sku"], "quantidade": r["quantidade"]}
+                for r in cur.fetchall()
+            ]
+            resultado.append({
+                "caixa_num": num,
+                "codigo_unico_caixa": row["codigo_unico_caixa"],
+                "itens": itens,
+                "tipo": label,
+            })
+        return jsonify(resultado)
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
-@bp_embalar.route('/api/embalar/iniciar', methods=['POST'])
-def iniciar_embalagem():
-    """Cria um registro para um produto no início da embalagem com 0 bipados."""
+
+@bp_embalar.route("/api/embalar/caixa/reabrir", methods=["POST"])
+def reabrir_caixa():
+    """
+    Reabre uma caixa/pallet específica de um agendamento.
+    """
     data = request.get_json() or {}
-    id_agend = data.get("id_agend_ml")
-    id_prod_ml = data.get("id_prod_ml")
 
-    if not id_agend or not id_prod_ml:
-        return jsonify(error="Parâmetros 'id_agend_ml' e 'id_prod_ml' são obrigatórios."), 400
+    id_agend = str(data.get("id_agend_ml") or "").strip()
+    caixa_num = data.get("caixa_num")
+    tipo = data.get("type")
+    tabela_embalagem, _, label = _resolve_tabelas_embalagem(tipo)
 
-    # Insere com 0 ou atualiza para 0 se já existir por algum motivo
-    sql = """
-        INSERT INTO embalagem_bipados (id_agend_ml, id_prod_ml, bipados)
-        VALUES (%s, %s, 0)
-        ON DUPLICATE KEY UPDATE bipados = 0
-    """
+    if not id_agend or caixa_num is None:
+        return jsonify(
+            ok=False,
+            error="Informe 'id_agend_ml' e 'caixa_num'."
+        ), 400
 
+    conn = mysql.connector.connect(**_db_config)
+    cur = conn.cursor()
     try:
-        conn = mysql.connector.connect(**_db_config)
-        cur = conn.cursor()
-        cur.execute(sql, (id_agend, id_prod_ml))
+        # Garante que a caixa/pallet existe
+        cur.execute(
+            f"""
+            SELECT 1
+            FROM {tabela_embalagem}
+            WHERE id_agend_ml = %s AND caixa_num = %s
+            """,
+            (id_agend, caixa_num),
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify(
+                ok=False,
+                error=f"{label.capitalize()} não encontrada para este agendamento."
+            ), 404
+
+        # Tenta limpar fim_embalagem, se existir
+        try:
+            cur.execute(
+                f"""
+                UPDATE {tabela_embalagem}
+                SET fim_embalagem = NULL
+                WHERE id_agend_ml = %s AND caixa_num = %s
+                """,
+                (id_agend, caixa_num),
+            )
+        except mysql.connector.Error:
+            # Se não existir essa coluna, só ignora
+            pass
+
         conn.commit()
-        cur.close()
+
+        return jsonify(
+            ok=True,
+            id_agend_ml=id_agend,
+            caixa_num=caixa_num,
+            message=f"{label.capitalize()} reaberta com sucesso.",
+        ), 200
+
+    except Exception as e:
+        conn.rollback()
+        print("Erro em reabrir_caixa:", e)
+        return jsonify(ok=False, error=str(e)), 500
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
         conn.close()
-        return jsonify(success=True, message="Produto iniciado na embalagem.")
-    except Exception as e:
-        print(f"Erro em iniciar_embalagem: {e}")
-        return jsonify(error=str(e)), 500
+    
 
-@bp_embalar.route('/embalar/finalizar/<int:id_agend_bd>', methods=['POST'])
-def finalizar_embalagem(id_agend_bd):
+@bp_embalar.route("/api/embalar/caixa/<id_agend_ml>/<int:caixa_num>", methods=["GET"])
+def buscar_caixa_unica(id_agend_ml, caixa_num):
     """
-    Finaliza a fase de embalagem, gera um relatório e move o agendamento para a expedição.
+    Retorna APENAS uma caixa/pallet específica de um agendamento,
+    com todos os itens dessa caixa/pallet.
+    Usado no modal do lápis.
     """
+    tipo = request.args.get("type")
+    tabela_embalagem, tabela_itens, label = _resolve_tabelas_embalagem(tipo)
+
+    conn = mysql.connector.connect(**_db_config)
+    cur  = conn.cursor(dictionary=True)
     try:
-        cfg = current_app.config
-        agendamento_controller = cfg['AG_CTRL']
-        access = cfg['ACCESS']
-        
-        # 1. Carrega o agendamento completo a partir do banco de dados
-        agendamento_controller.clear_agendamentos()
-        agendamento_controller.insert_agendamento(id_bd=id_agend_bd)
-        agend = agendamento_controller.get_last_made_agendamento()
-        agendamento_controller.create_agendamento_from_bd_data(agend)
-
-        if not agend:
-            return jsonify({"success": False, "message": "Agendamento não encontrado."}), 404
-
-        # 2. Busca dados das caixas e itens embalados para o relatório
-        caixas_result = access.custom_select_query(
-            "SELECT caixa_num FROM embalagem_caixas WHERE id_agend_ml = %s ORDER BY caixa_num",
-            (agend.id_agend_ml,)
+        # Dados da caixa/pallet
+        cur.execute(
+            f"""
+            SELECT caixa_num, codigo_unico_caixa
+            FROM {tabela_embalagem}
+            WHERE id_agend_ml=%s AND caixa_num=%s
+            """,
+            (id_agend_ml, caixa_num),
         )
-        
-        caixas_relatorio = []
-        if caixas_result:
-            for caixa_row in caixas_result:
-                caixa_num = caixa_row[0]
-                # Busca os itens na caixa, incluindo o nome do produto
-                itens_result = access.custom_select_query(
-                    """SELECT i.sku, i.quantidade, p.nome_prod
-                    FROM embalagem_caixa_itens i
-                    LEFT JOIN produtos_agend p ON i.sku = p.sku_prod AND p.id_agend_prod = %s
-                    WHERE i.id_agend_ml = %s AND i.caixa_num = %s
+        caixa = cur.fetchone()
+        if not caixa:
+            return jsonify(ok=False, error=f"{label.capitalize()} não encontrada."), 404
+
+        # Itens
+        cur.execute(
+            f"""
+            SELECT sku, quantidade
+            FROM {tabela_itens}
+            WHERE id_agend_ml=%s AND caixa_num=%s
+            """,
+            (id_agend_ml, caixa_num),
+        )
+        itens = [
+            {"sku": r["sku"], "quantidade": r["quantidade"]}
+            for r in cur.fetchall()
+        ]
+
+        return jsonify({
+            "ok": True,
+            "caixa_num": caixa["caixa_num"],
+            "codigo_unico_caixa": caixa["codigo_unico_caixa"],
+            "itens": itens,
+            "tipo": label,
+        })
+    except Exception as e:
+        print("Erro em buscar_caixa_unica:", e)
+        return jsonify(ok=False, error=str(e)), 500
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@bp_embalar.route("/api/embalar/caixa/editar", methods=["POST"])
+def editar_conteudo_caixa():
+    """
+    Edita o conteúdo de uma caixa/pallet:
+      - Recebe as QUANTIDADES FINAIS por SKU
+      - Calcula o delta em relação ao que havia
+      - Atualiza tabela de itens (caixa ou pallet)
+      - Atualiza embalagem_bipados somando/subtraindo o delta
+        (mantendo bipados >= 0)
+    """
+    data = request.get_json() or {}
+
+    id_agend = str(data.get("id_agend_ml") or "").strip()
+    caixa_num = data.get("caixa_num")
+    codigo = str(data.get("codigo_unico_caixa") or "").strip()
+    itens_novos = data.get("itens") or []
+    tipo = data.get("type")
+    tabela_embalagem, tabela_itens, label = _resolve_tabelas_embalagem(tipo)
+
+    if not id_agend or (caixa_num is None and not codigo):
+        return jsonify(
+            ok=False,
+            error="Informe 'id_agend_ml' e 'caixa_num' ou 'codigo_unico_caixa'."
+        ), 400
+
+    # Normaliza itens novos em um dict {sku: quantidade_final}
+    novos_map = {}
+    for item in itens_novos:
+        sku = str((item or {}).get("sku") or "").strip()
+        if not sku:
+            continue
+        try:
+            qtd = int((item or {}).get("quantidade") or 0)
+        except (ValueError, TypeError):
+            qtd = 0
+        if qtd < 0:
+            qtd = 0
+        novos_map[sku] = novos_map.get(sku, 0) + qtd
+
+    conn = mysql.connector.connect(**_db_config)
+    cur  = conn.cursor(dictionary=True)
+    try:
+        conn.start_transaction()
+
+        # 1) Localiza e trava a caixa/pallet
+        if codigo and caixa_num is None:
+            cur.execute(
+                f"""
+                SELECT caixa_num, codigo_unico_caixa
+                FROM {tabela_embalagem}
+                WHERE id_agend_ml=%s AND codigo_unico_caixa=%s
+                FOR UPDATE
+                """,
+                (id_agend, codigo),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT caixa_num, codigo_unico_caixa
+                FROM {tabela_embalagem}
+                WHERE id_agend_ml=%s AND caixa_num=%s
+                FOR UPDATE
+                """,
+                (id_agend, caixa_num),
+            )
+
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return jsonify(ok=False, error=f"{label.capitalize()} não encontrada para este agendamento."), 404
+
+        cx_num = int(row["caixa_num"])
+        codigo = row["codigo_unico_caixa"]
+
+        # 2) Lê itens atuais
+        cur.execute(
+            f"""
+            SELECT sku, quantidade
+            FROM {tabela_itens}
+            WHERE id_agend_ml=%s AND caixa_num=%s
+            FOR UPDATE
+            """,
+            (id_agend, cx_num),
+        )
+        atuais_rows = cur.fetchall()
+
+        atuais_map = {}
+        for r in atuais_rows:
+            atuais_map[str(r["sku"])] = int(r["quantidade"] or 0)
+
+        # 3) Calcula deltas por SKU (novo - atual)
+        todos_skus = set(atuais_map.keys()) | set(novos_map.keys())
+        deltas = {}
+        for sku in todos_skus:
+            old_q = atuais_map.get(sku, 0)
+            new_q = novos_map.get(sku, 0)
+            delta = new_q - old_q
+            if delta != 0:
+                deltas[sku] = delta
+
+        # 4) Atualiza embalagem_bipados conforme o delta
+        for sku, delta in deltas.items():
+            if delta > 0:
+                # Somar bipados
+                cur.execute(
+                    """
+                    INSERT INTO embalagem_bipados (id_agend_ml, id_prod_ml, bipados)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE bipados = bipados + VALUES(bipados)
                     """,
-                    (agend.id_bd, agend.id_agend_ml, caixa_num)
+                    (id_agend, sku, delta),
                 )
-                itens_caixa = [{"sku": item[0], "quantidade": item[1], "nome": item[2]} for item in itens_result] if itens_result else []
-                caixas_relatorio.append({"caixa_numero": caixa_num, "itens": itens_caixa})
+            else:
+                # Subtrair bipados, sem deixar negativo
+                cur.execute(
+                    """
+                    UPDATE embalagem_bipados
+                    SET bipados = GREATEST(bipados + %s, 0)
+                    WHERE id_agend_ml = %s AND id_prod_ml = %s
+                    """,
+                    (delta, id_agend, sku),
+                )
 
-        # 3. Monta o payload do relatório de embalagem
-        relatorio_payload = {
-            "tipo_relatorio": "embalagem",
-            "termino_embalagem": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "detalhes_embalagem": {
-                "total_caixas": len(caixas_relatorio),
-                "caixas": caixas_relatorio
-            }
-        }
-
-        # 4. Busca o relatório de conferência existente para adicionar as novas informações
-        relatorio_final = {}
-        relatorio_existente_raw = access.custom_select_query(
-            "SELECT relatorio FROM relatorio_agend WHERE id_agend_ml = %s", (agend.id_agend_ml,)
-        )
-        if relatorio_existente_raw and relatorio_existente_raw[0][0]:
-            relatorio_final = json.loads(relatorio_existente_raw[0][0])
-
-        # Adiciona os dados de embalagem ao relatório geral
-        relatorio_final['RelatorioEmbalagem'] = relatorio_payload
-
-        # 5. Salva o relatório atualizado no banco
-        access.custom_i_u_query(
-            """INSERT INTO relatorio_agend (id_agend_ml, relatorio) VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE relatorio = VALUES(relatorio)""",
-            [(agend.id_agend_ml, json.dumps(relatorio_final, ensure_ascii=False))]
+        # 5) Regrava itens (estado final)
+        cur.execute(
+            f"""
+            DELETE FROM {tabela_itens}
+            WHERE id_agend_ml=%s AND caixa_num=%s
+            """,
+            (id_agend, cx_num),
         )
 
-        # 6. Altera o tipo do agendamento para Expedição (ID 5)
-        agend.set_tipo(5)
-        agendamento_controller.update_agendamento(agend)
+        for sku, qtd in novos_map.items():
+            if qtd <= 0:
+                continue
+            cur.execute(
+                f"""
+                INSERT INTO {tabela_itens}
+                    (id_agend_ml, caixa_num, sku, quantidade)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (id_agend, cx_num, sku, qtd),
+            )
 
-        return jsonify({"success": True, "message": "Embalagem finalizada. Agendamento movido para expedição."})
+        # 6) Lê bipados atualizados para os SKUs alterados
+        bipados_atualizados = []
+        if deltas:
+            placeholders = ",".join(["%s"] * len(deltas))
+            params = [id_agend] + list(deltas.keys())
+            cur.execute(
+                f"""
+                SELECT id_prod_ml, bipados
+                FROM embalagem_bipados
+                WHERE id_agend_ml = %s
+                  AND id_prod_ml IN ({placeholders})
+                """,
+                params,
+            )
+            bipados_atualizados = cur.fetchall()
+
+        conn.commit()
+
+        itens_saida = [
+            {"sku": sku, "quantidade": qtd}
+            for sku, qtd in novos_map.items()
+            if qtd > 0
+        ]
+
+        return jsonify(
+            ok=True,
+            id_agend_ml=id_agend,
+            caixa_num=cx_num,
+            codigo_unico_caixa=codigo,
+            itens=itens_saida,
+            deltas=deltas,
+            bipados_atualizados=bipados_atualizados,
+            tipo=label,
+        )
 
     except Exception as e:
-        print(f"Erro ao finalizar embalagem: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        conn.rollback()
+        print("Erro em editar_conteudo_caixa:", e)
+        return jsonify(ok=False, error=str(e)), 500
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@bp_embalar.route("/api/embalar/caixa/excluir", methods=["POST"])
+def excluir_caixa():
+    """
+    Exclui uma caixa/pallet específica de um agendamento, remove todos os itens
+    e devolve as quantidades (decrementando embalagem_bipados).
+    """
+    data = request.get_json() or {}
+
+    id_agend = str(data.get("id_agend_ml") or "").strip()
+    caixa_num = data.get("caixa_num")
+    codigo = str(data.get("codigo_unico_caixa") or "").strip()
+    tipo = data.get("type")
+    tabela_embalagem, tabela_itens, label = _resolve_tabelas_embalagem(tipo)
+
+    if not id_agend or (caixa_num is None and not codigo):
+        return jsonify(
+            ok=False,
+            error="Informe 'id_agend_ml' e 'caixa_num' ou 'codigo_unico_caixa'."
+        ), 400
+
+    conn = mysql.connector.connect(**_db_config)
+    cur = conn.cursor(dictionary=True)
+    try:
+        conn.start_transaction()
+
+        # 1) Localiza e trava a caixa/pallet deste agendamento
+        if codigo and caixa_num is None:
+            cur.execute(
+                f"""
+                SELECT caixa_num, codigo_unico_caixa
+                FROM {tabela_embalagem}
+                WHERE id_agend_ml = %s AND codigo_unico_caixa = %s
+                FOR UPDATE
+                """,
+                (id_agend, codigo),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT caixa_num, codigo_unico_caixa
+                FROM {tabela_embalagem}
+                WHERE id_agend_ml = %s AND caixa_num = %s
+                FOR UPDATE
+                """,
+                (id_agend, caixa_num),
+            )
+
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return jsonify(ok=False, error=f"{label.capitalize()} não encontrada para este agendamento."), 404
+
+        cx_num = int(row["caixa_num"])
+        codigo = row["codigo_unico_caixa"]
+
+        # 2) Lê itens (para devolver bipagem)
+        cur.execute(
+            f"""
+            SELECT sku AS id_prod_ml, quantidade
+            FROM {tabela_itens}
+            WHERE id_agend_ml = %s AND caixa_num = %s
+            """,
+            (id_agend, cx_num),
+        )
+        itens_rows = cur.fetchall()
+
+        # Agrupa por id_prod_ml (sku) para evitar UPDATE repetido
+        agregados = {}
+        for it in itens_rows:
+            k = str(it["id_prod_ml"])
+            agregados[k] = agregados.get(k, 0) + int(it["quantidade"] or 0)
+
+        # 3) Devolve bipados (GREATEST para nunca ficar negativo)
+        bipados_atualizados = []
+        for id_prod_ml, qtd in agregados.items():
+            cur.execute(
+                """
+                UPDATE embalagem_bipados
+                SET bipados = GREATEST(bipados - %s, 0)
+                WHERE id_agend_ml = %s AND id_prod_ml = %s
+                """,
+                (qtd, id_agend, id_prod_ml),
+            )
+
+        if agregados:
+            placeholders = ",".join(["%s"] * len(agregados))
+            params = [id_agend] + list(agregados.keys())
+            cur.execute(
+                f"""
+                SELECT id_prod_ml, bipados
+                FROM embalagem_bipados
+                WHERE id_agend_ml = %s
+                  AND id_prod_ml IN ({placeholders})
+                """,
+                params,
+            )
+            bipados_atualizados = cur.fetchall()
+
+        # 4) Apaga itens
+        cur.execute(
+            f"""
+            DELETE FROM {tabela_itens}
+            WHERE id_agend_ml = %s AND caixa_num = %s
+            """,
+            (id_agend, cx_num),
+        )
+
+        # 5) Apaga a própria caixa/pallet
+        cur.execute(
+            f"""
+            DELETE FROM {tabela_embalagem}
+            WHERE id_agend_ml = %s AND caixa_num = %s
+            """,
+            (id_agend, cx_num),
+        )
+
+        conn.commit()
+        return jsonify(
+            ok=True,
+            id_agend_ml=id_agend,
+            caixa_num=cx_num,
+            codigo_unico_caixa=codigo,
+            itens_removidos=list(agregados.items()),
+            bipados_atualizados=bipados_atualizados,
+            tipo=label,
+        )
+
+    except Exception as e:
+        conn.rollback()
+        print("Erro em excluir_caixa:", e)
+        return jsonify(ok=False, error=str(e)), 500
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        conn.close()

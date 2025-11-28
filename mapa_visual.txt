@@ -1,9 +1,6 @@
 AgendamentosWeb/
-├─ .gitignore
 ├─ Dockerfile
-├─ README.md
 ├─ base_jp_lab
-│  ├─ README.md
 │  ├─ base_jp_lab
 │  │  ├─ Configs
 │  │  │  └─ decrypt_keys.json
@@ -18,7 +15,6 @@ AgendamentosWeb/
 │  │  │  └─ __init__.py
 │  │  └─ __init__.py
 │  └─ setup.py
-├─ build.sh
 ├─ classes
 │  ├─ __init__.py
 │  ├─ controllers
@@ -41,7 +37,6 @@ AgendamentosWeb/
 │     ├─ AgendamentoView.py
 │     └─ __init__.py
 ├─ exceptions.py
-├─ git
 ├─ main.py
 ├─ requirements.txt
 ├─ rotas
@@ -65,6 +60,7 @@ AgendamentosWeb/
 │  ├─ relatorio.py
 │  ├─ reservados.py
 │  ├─ retiradoEstoque.py
+│  ├─ tasks_async.py
 │  ├─ teste.py
 │  ├─ upload_excel.py
 │  ├─ upload_pdf.py
@@ -150,5 +146,4 @@ AgendamentosWeb/
 │  ├─ retiradoEstoque.html
 │  ├─ teste.html
 │  └─ view_excel.html
-├─ teste.js
 └─ uwsgi.ini

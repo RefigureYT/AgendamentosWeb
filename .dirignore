@@ -12,3 +12,11 @@ Funcional_Sem_Merge.ini
 .dirignore
 migrations
 patch
+.gitignore
+build.sh
+git
+patch
+README.md
+teste.js
+tree_agend_content.ini.bkp
+tree_agend.ini.bkp

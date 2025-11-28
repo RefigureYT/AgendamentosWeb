@@ -25,7 +25,3 @@ mapa_visual.txt
 # Mapa MUITO ANTIGO (manual)
 tree_agend_content.ini.bkp
 tree_agend.ini.bkp
-
-# Ignore pois realmente isso não faz diferença kkkkkk
-# Não está sendo usado
-uwsgi.ini

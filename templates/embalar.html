@@ -61,25 +61,125 @@
       </div>
 
       <div id="caixa-actions-container">
+        <!-- Template para ações de abertura (Nova Caixa / Novo Pallet) -->
         <template id="template-nova-caixa">
-          <div id="btn-nova-caixa" class="card add-new-box text-center text-decoration-none">
-            <div class="card-body nova_caixa">
-              <i class="bi bi-plus-circle me-2"></i> Nova Caixa
-            </div>
+          <div class="box-actions-row">
+            <!-- Retângulo pontilhado: Nova Caixa (75%) -->
+            <button type="button"
+                    id="btn-nova-caixa"
+                    class="card add-new-box box-card-main text-start">
+              <div class="box-card-body">
+                <span class="box-card-icon">
+                  <i class="bi bi-box-seam"></i>
+                </span>
+                <span class="box-card-text">
+                  <span class="box-card-title">Nova Caixa</span>
+                  <!--<small class="box-card-sub">Volume individual</small>-->
+                </span>
+              </div>
+            </button>
+
+            <!-- Quadrado/retângulo menor pontilhado: Novo Pallet (25%) -->
+            <button type="button"
+                    id="btn-novo-pallet"
+                    class="card add-new-box box-card-secondary text-start">
+              <div class="box-card-body">
+                <span class="box-card-icon">
+                  <i class="bi bi-grid-3x3-gap-fill"></i>
+                </span>
+                <span class="box-card-text">
+                  <span class="box-card-title">Novo Pallet</span>
+                  <!-- <small class="box-card-sub">Agrupar volumes</small> -->
+                </span>
+              </div>
+            </button>
           </div>
         </template>
 
+        <!-- Continua igual: botão de Finalizar Embalagem -->
         <template id="template-finalizar-embalagem">
           <a href="#" id="btn-finalizar-embalagem"
-             class="card add-new-box text-center text-decoration-none bg-success text-white ajuste_btn_finalizar">
+            class="card add-new-box text-center text-decoration-none bg-success text-white ajuste_btn_finalizar">
             <div class="card-body nova_caixa">
               <i class="bi bi-check-circle-fill me-2"></i> Finalizar Embalagem
             </div>
           </a>
         </template>
 
-        <div>
-          <div id="caixas-container" class="mb-4 d-flex flex-column gap-3"></div>
+        <!-- Abas: Caixas / Pallets -->
+        <div class="volume-tabs">
+        <div class="volume-tabs-nav">
+          <div class="volume-tabs-nav-left">
+            <button
+              type="button"
+              id="tab-btn-caixas"
+              class="volume-tab active"
+              data-tab="caixas"
+              aria-selected="true"
+            >
+              Caixas
+            </button>
+
+            <button
+              type="button"
+              id="tab-btn-pallets"
+              class="volume-tab"
+              data-tab="pallets"
+              aria-selected="false"
+            >
+              Pallets
+            </button>
+          </div>
+
+          <div class="volume-tabs-nav-actions">
+          <!-- Editar volume -->
+          <button
+            type="button"
+            class="volume-action-btn volume-action-edit"
+            title="Editar volume"
+            id="btn-editar-caixa"
+          >
+            <i class="bi bi-pencil"></i>
+          </button>
+
+          <!-- Excluir volume -->
+          <button
+            type="button"
+            class="volume-action-btn volume-action-delete"
+            title="Excluir volume"
+            id="btn-excluir-caixa"
+          >
+            <i class="bi bi-trash"></i>
+          </button>
+          </div>
+        </div>
+
+          <div class="volume-tabs-content">
+            <!-- Ab a CAIXAS -->
+            <div
+              id="tab-caixas"
+              class="volume-tab-pane is-active"
+              role="tabpanel"
+              aria-labelledby="tab-btn-caixas">
+              <div
+                id="caixas-container"
+                class="mb-4 d-flex flex-column gap-3">
+              </div>
+            </div>
+
+            <!-- Aba PALLETS (placeholder para futura lógica) -->
+            <div
+              id="tab-pallets"
+              class="volume-tab-pane"
+              role="tabpanel"
+              aria-labelledby="tab-btn-pallets">
+              <div
+                id="pallets-container"
+                class="mb-4 d-flex flex-column gap-3">
+              </div>
+            </div>
+            
+          </div>
         </div>
       </div>
     </div>
@@ -229,6 +329,113 @@
         </div>
         <button type="button" class="btn btn-outline-secondary" id="btnCancelarFechamento">Cancelar</button>
         <button type="button" class="btn btn-success" id="btnConfirmarFechamento">Fechar caixa</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Excluir volume (caixa ou pallet) -->
+<div class="modal fade" id="modalExcluirCaixa" tabindex="-1"
+     aria-labelledby="modalExcluirCaixaLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title" id="modalExcluirCaixaLabel">
+          <i class="bi bi-trash me-2"></i>Excluir volume
+        </h5>
+        <button type="button" class="btn-close btn-close-white"
+                data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-3">
+          Esta ação irá <strong>excluir definitivamente</strong> o volume
+          selecionado e <strong>devolver todos os itens para bipagem</strong>.
+        </p>
+
+        <div class="mb-3">
+          <label for="inputCaixaExcluir" class="form-label fw-semibold">
+            Número do volume a excluir
+          </label>
+          <input type="number" min="1" class="form-control"
+                 id="inputCaixaExcluir" placeholder="Ex.: 3">
+          <div class="form-text">
+            Informe o <strong>número exato</strong> do volume deste agendamento.
+          </div>
+        </div>
+
+        <div class="alert alert-warning mb-0" role="alert">
+          <strong>ATENÇÃO:</strong> Essa ação <u>não tem volta</u>.
+          Tenha <strong>CERTEZA ABSOLUTA</strong> antes de confirmar.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary"
+                data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-danger"
+                id="btnConfirmarExcluirCaixa">
+          Excluir volume
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de edição de volume (caixa ou pallet) -->
+<div class="modal fade" id="modalEditarCaixa" tabindex="-1" aria-labelledby="modalEditarCaixaLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalEditarCaixaLabel">
+          Editar conteúdo do volume
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Passo 1: escolher o volume -->
+        <div class="mb-3 d-flex align-items-end gap-2">
+          <div>
+            <label for="inputCaixaEditar" class="form-label">Número do volume</label>
+            <input type="number" min="1" class="form-control" id="inputCaixaEditar" placeholder="Ex.: 1">
+          </div>
+          <button type="button" class="btn btn-outline-primary" id="btnCarregarCaixaEditar">
+            Carregar
+          </button>
+          <span class="text-muted small flex-grow-1">
+            Informe o número do volume fechado que deseja ajustar.
+          </span>
+        </div>
+
+        <!-- Passo 2: tabela de itens do volume -->
+        <div class="table-responsive border rounded p-2" id="wrapTabelaEditarCaixa" style="max-height: 360px; overflow-y: auto;">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="width: 60%">SKU / Etiqueta</th>
+                <th style="width: 40%">Quantidade no volume</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyEditarCaixa">
+              <!-- Preenchido via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-2 text-end">
+          <small class="text-muted">
+            Total de itens no volume:
+            <span id="totalItensEditarCaixa">0</span>
+          </small>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+          Cancelar
+        </button>
+        <button type="button" class="btn btn-primary" id="btnSalvarEdicaoCaixa" disabled>
+          Salvar alterações
+        </button>
       </div>
     </div>
   </div>

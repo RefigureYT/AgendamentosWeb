@@ -389,11 +389,25 @@ document.addEventListener("DOMContentLoaded", async () => {
 A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticamente.
 <br><br>Por favor, gere a etiqueta diretamente no <b>site do Mercado Livre</b>. Utilize 
 <b>F3</b> (etiqueta interna) ou <b>F4</b> (sem etiqueta).`
-
       });
       return false;
     }
     return true;
+  }
+
+  // === Guard para recursos exclusivos de Pallet (apenas Mercado Livre) ===
+  function assertPalletAllowedOrWarn() {
+    // Se for Mercado Livre, está liberado
+    if (isMercadoLivre()) return true;
+
+    // Caso contrário, mostra alerta e bloqueia
+    Swal.fire({
+      icon: "info",
+      title: "Função indisponível",
+      html: `A funcionalidade de <b>Pallets</b> está disponível apenas para agendamentos do <b>Mercado Livre</b>.<br><br>Este agendamento é para o "<b>${esc(marketplace)}</b>".`
+    });
+
+    return false;
   }
 
   const agendamentoCompleto = {};
@@ -447,6 +461,517 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   let caixas = [];
   let caixaAtivaIndex = -1;
   let caixaStartTime = null;
+
+  // Variáveis de estado para os pallets
+  let pallets = [];
+  let palletAtivoIndex = -1;
+  let palletStartTime = null;
+
+  // === Modal de exclusão de caixa / pallet ===
+  const modalExcluirCaixaEl = document.getElementById("modalExcluirCaixa");
+  const modalExcluirCaixa = modalExcluirCaixaEl ? new bootstrap.Modal(modalExcluirCaixaEl) : null;
+  const inputCaixaExcluir = document.getElementById("inputCaixaExcluir");
+  const btnExcluirCaixa = document.getElementById("btn-excluir-caixa");
+  const btnConfirmarExcluirCaixa = document.getElementById("btnConfirmarExcluirCaixa");
+
+  // tipo atual de volume com base na aba
+  function getTipoVolumeAtual() {
+    return tabBtnPallets?.classList.contains("active") ? "pallet" : "caixa";
+  }
+
+  // textos por tipo de volume (caixa/pallet)
+  function getConfigVolume(tipo) {
+    if (tipo === "pallet") {
+      return {
+        nome: "pallet",
+        Nome: "Pallet",
+        // Mensagem mais amigável quando não há pallets
+        tituloNenhum: "Nenhum pallet localizado",
+        textoNenhum: "Ainda não houve pallets neste agendamento.",
+        tituloNaoEncontrado: (num) => `Não existe o pallet número ${num} neste agendamento.`,
+        tituloConfirm: (num) => `Excluir o pallet ${num}?`,
+        tituloSucesso: "Pallet excluído",
+        textoSucesso: (num) => `O pallet ${num} foi apagado e os itens voltaram para bipagem.`
+      };
+    }
+    return {
+      nome: "caixa",
+      Nome: "Caixa",
+      tituloNenhum: "Nenhuma caixa",
+      textoNenhum: "Não há caixas para excluir neste agendamento.",
+      tituloNaoEncontrado: (num) => `Não existe a caixa número ${num} neste agendamento.`,
+      tituloConfirm: (num) => `Excluir a caixa ${num}?`,
+      tituloSucesso: "Caixa excluída",
+      textoSucesso: (num) => `A caixa ${num} foi apagada e os itens voltaram para bipagem.`
+    };
+  }
+
+  // ajusta título e placeholder do modal conforme o tipo
+  function configurarTextoModalExcluir(tipo) {
+    if (!modalExcluirCaixaEl) return;
+    const cfg = getConfigVolume(tipo);
+    const tituloEl = modalExcluirCaixaEl.querySelector(".modal-title");
+    if (tituloEl) {
+      tituloEl.textContent = `Excluir ${cfg.nome}`;
+    }
+    if (inputCaixaExcluir) {
+      inputCaixaExcluir.placeholder = tipo === "pallet"
+        ? "Número do pallet..."
+        : "Número da caixa...";
+    }
+    // Ajusta o texto do botão principal do modal (Excluir caixa/pallet)
+    if (btnConfirmarExcluirCaixa) {
+      btnConfirmarExcluirCaixa.textContent =
+        tipo === "pallet" ? "Excluir pallet" : "Excluir caixa";
+    }
+  }
+
+  // abre o modal já respeitando a aba ativa
+  if (btnExcluirCaixa && modalExcluirCaixa) {
+    btnExcluirCaixa.addEventListener("click", () => {
+      const tipo = getTipoVolumeAtual();
+      const cfg = getConfigVolume(tipo);
+      const lista = tipo === "caixa" ? caixas : pallets;
+      const ativoIndex = tipo === "caixa" ? caixaAtivaIndex : palletAtivoIndex;
+
+      if (!lista.length) {
+        Swal.fire(cfg.tituloNenhum, cfg.textoNenhum, "info");
+        return;
+      }
+
+      configurarTextoModalExcluir(tipo);
+
+      const ativo = (ativoIndex !== -1 && lista[ativoIndex]) ? lista[ativoIndex] : null;
+      if (inputCaixaExcluir) {
+        inputCaixaExcluir.value = ativo && ativo.id ? ativo.id : "";
+      }
+
+      modalExcluirCaixa.show();
+      setTimeout(() => inputCaixaExcluir?.focus(), 200);
+    });
+  }
+
+  if (btnConfirmarExcluirCaixa) {
+    // Enter no input do número do volume => clica em "Excluir"
+    if (inputCaixaExcluir) {
+      inputCaixaExcluir.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          btnConfirmarExcluirCaixa.click();
+        }
+      });
+    }
+
+    btnConfirmarExcluirCaixa.addEventListener("click", async () => {
+      const num = parseInt(inputCaixaExcluir.value, 10);
+      if (!num || num <= 0) {
+        Swal.fire("Número inválido", "Informe um número válido.", "warning");
+        return;
+      }
+
+      const tipo = getTipoVolumeAtual();
+      const cfg = getConfigVolume(tipo);
+      const lista = tipo === "caixa" ? caixas : pallets;
+      const volume = lista.find(v => Number(v.id) === num);
+
+      if (!volume) {
+        const titulo = cfg.tituloNaoEncontrado || "Volume não encontrado";
+
+        const detalhe =
+          typeof cfg.textoNaoEncontrado === "function"
+            ? cfg.textoNaoEncontrado(num)
+            : (cfg.textoNaoEncontrado ||
+              "Não existe este volume neste agendamento.");
+
+        Swal.fire(titulo, detalhe, "warning");
+        return;
+      }
+
+      const result = await Swal.fire({
+        title: cfg.tituloConfirm(num),
+        text: tipo === "pallet"
+          ? "Esta ação irá excluir definitivamente o pallet selecionado e devolver todos os itens dele para bipagem."
+          : "Esta ação irá excluir definitivamente a caixa selecionada e devolver todos os itens dela para bipagem.",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#dc3545",
+        cancelButtonColor: "#6c757d",
+        confirmButtonText: "Sim, excluir",
+        cancelButtonText: "Cancelar",
+        focusConfirm: true,
+        allowEnterKey: true
+      });
+
+      if (!result.isConfirmed) return;
+
+      try {
+        btnConfirmarExcluirCaixa.disabled = true;
+        btnConfirmarExcluirCaixa.textContent = "Excluindo...";
+
+        const resp = await fetchJSON("/api/embalar/caixa/excluir", {
+          method: "POST",
+          body: {
+            id_agend_ml: idAgendMl,
+            caixa_num: num,
+            type: tipo
+          }
+        });
+
+        modalExcluirCaixa.hide();
+        btnConfirmarExcluirCaixa.disabled = false;
+        btnConfirmarExcluirCaixa.textContent = "Excluir";
+
+        // Remove do array certo (caixa ou pallet) e ajusta índice ativo
+        const idx = lista.findIndex(v => Number(v.id) === num);
+        if (idx !== -1) {
+          const [removido] = lista.splice(idx, 1);
+          if (removido.element) removido.element.remove();
+
+          if (tipo === "caixa") {
+            if (caixaAtivaIndex === idx) {
+              caixaAtivaIndex = -1;
+            } else if (caixaAtivaIndex > idx) {
+              caixaAtivaIndex -= 1;
+            }
+          } else {
+            if (palletAtivoIndex === idx) {
+              palletAtivoIndex = -1;
+            } else if (palletAtivoIndex > idx) {
+              palletAtivoIndex -= 1;
+            }
+          }
+        }
+
+        // Atualiza bipados na UI conforme o backend devolveu
+        if (Array.isArray(resp.bipados_atualizados)) {
+          resp.bipados_atualizados.forEach(row => {
+            atualizarStatusProduto(row.id_prod_ml, Number(row.bipados || 0));
+          });
+        }
+
+        Swal.fire(
+          cfg.tituloSucesso,
+          cfg.textoSucesso(num),
+          "success"
+        );
+
+        atualizarContadorFinalizados();
+        atualizarPainelEsquerdo();
+      } catch (err) {
+        console.error("Erro ao excluir volume:", err);
+        btnConfirmarExcluirCaixa.disabled = false;
+        btnConfirmarExcluirCaixa.textContent = "Excluir";
+        Swal.fire("Erro", err.message || "Não foi possível excluir.", "error");
+      }
+    });
+  }
+
+  // === Modal de edição de caixa ===
+  const modalEditarCaixaEl = document.getElementById("modalEditarCaixa");
+  const modalEditarCaixa = modalEditarCaixaEl ? new bootstrap.Modal(modalEditarCaixaEl) : null;
+  const inputCaixaEditar = document.getElementById("inputCaixaEditar");
+  const btnEditarCaixa = document.getElementById("btn-editar-caixa");
+  const btnCarregarCaixaEditar = document.getElementById("btnCarregarCaixaEditar");
+  const btnSalvarEdicaoCaixa = document.getElementById("btnSalvarEdicaoCaixa");
+  const tbodyEditarCaixa = document.getElementById("tbodyEditarCaixa");
+  const totalItensEditarEl = document.getElementById("totalItensEditarCaixa");
+
+  let caixaEditando = null;
+
+  function limparModalEditarCaixa() {
+    caixaEditando = null;
+    if (tbodyEditarCaixa) tbodyEditarCaixa.innerHTML = "";
+    if (totalItensEditarEl) totalItensEditarEl.textContent = "0";
+    if (btnSalvarEdicaoCaixa) btnSalvarEdicaoCaixa.disabled = true;
+  }
+
+  function recomputarTotalEditarCaixa() {
+    if (!tbodyEditarCaixa || !totalItensEditarEl) return;
+    let total = 0;
+    tbodyEditarCaixa.querySelectorAll(".input-qtd-editar").forEach((input) => {
+      let v = parseInt(input.value, 10);
+      if (!Number.isFinite(v) || v < 0) v = 0;
+      input.value = v;
+      total += v;
+    });
+    totalItensEditarEl.textContent = String(total);
+    if (btnSalvarEdicaoCaixa) btnSalvarEdicaoCaixa.disabled = !caixaEditando;
+  }
+
+  function montarLinhasEditarCaixa(itens) {
+    if (!tbodyEditarCaixa) return;
+    tbodyEditarCaixa.innerHTML = "";
+
+    (itens || []).forEach((it) => {
+      const tr = document.createElement("tr");
+      tr.dataset.sku = it.sku;
+      tr.innerHTML = `
+        <td><code>${esc(it.sku)}</code></td>
+        <td>
+          <input type="number"
+                 class="form-control form-control-sm input-qtd-editar"
+                 min="0"
+                 step="1"
+                 value="${esc(it.quantidade)}">
+        </td>
+      `;
+      tbodyEditarCaixa.appendChild(tr);
+    });
+
+    tbodyEditarCaixa
+      .querySelectorAll(".input-qtd-editar")
+      .forEach((input) => {
+        // recalcula total ao digitar
+        input.addEventListener("input", recomputarTotalEditarCaixa);
+
+        // Enter dentro de "Quantidade na caixa" => Salvar alterações
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            btnSalvarEdicaoCaixa?.click();
+          }
+        });
+      });
+
+    recomputarTotalEditarCaixa();
+    if (btnSalvarEdicaoCaixa) btnSalvarEdicaoCaixa.disabled = false;
+  }
+
+  if (btnEditarCaixa && modalEditarCaixa) {
+    btnEditarCaixa.addEventListener("click", () => {
+      // Verifica qual aba está ativa
+      const abaAtiva = tabBtnPallets?.classList.contains("active") ? "pallet" : "caixa";
+
+      if (abaAtiva === "caixa") {
+        if (!caixas.length) {
+          Swal.fire("Nenhuma caixa", "Não há caixas para editar neste agendamento.", "info");
+          return;
+        }
+
+        limparModalEditarCaixa();
+
+        const ativa = (caixaAtivaIndex !== -1 && caixas[caixaAtivaIndex]) ? caixas[caixaAtivaIndex] : null;
+        if (inputCaixaEditar) {
+          inputCaixaEditar.value = ativa && ativa.id ? ativa.id : "";
+          setTimeout(() => inputCaixaEditar?.focus(), 200);
+        }
+
+        modalEditarCaixa.show();
+      } else {
+        // Lógica para editar PALLET
+        if (!pallets.length) {
+          Swal.fire(
+            "Nenhum pallet localizado",
+            "Ainda não houve pallets neste agendamento.",
+            "info"
+          );
+          return;
+        }
+
+        limparModalEditarCaixa();
+
+        const ativo = (palletAtivoIndex !== -1 && pallets[palletAtivoIndex]) ? pallets[palletAtivoIndex] : null;
+        if (inputCaixaEditar) {
+          inputCaixaEditar.value = ativo && ativo.id ? ativo.id : "";
+          setTimeout(() => inputCaixaEditar?.focus(), 200);
+        }
+
+        modalEditarCaixa.show();
+      }
+    });
+  }
+
+  if (btnCarregarCaixaEditar) {
+    // Enter no input do número da caixa => clica em "Carregar"
+    if (inputCaixaEditar) {
+      inputCaixaEditar.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          btnCarregarCaixaEditar.click();
+        }
+      });
+    }
+
+    btnCarregarCaixaEditar.addEventListener("click", async () => {
+      if (!inputCaixaEditar) return;
+      const num = parseInt(inputCaixaEditar.value, 10);
+      if (!num || num <= 0) {
+        Swal.fire("Número inválido", "Informe um número válido.", "warning");
+        return;
+      }
+
+      // Verifica qual aba está ativa
+      const abaAtiva = tabBtnPallets?.classList.contains("active") ? "pallet" : "caixa";
+
+      if (abaAtiva === "caixa") {
+        const caixaLocal = caixas.find(c => Number(c.id) === num);
+        if (!caixaLocal) {
+          Swal.fire(
+            "Caixa não encontrada",
+            `Não existe a caixa número ${num} neste agendamento.`,
+            "warning"
+          );
+          return;
+        }
+
+        try {
+          btnCarregarCaixaEditar.disabled = true;
+          btnCarregarCaixaEditar.textContent = "Carregando...";
+
+          const resp = await fetchJSON(`/api/embalar/caixa/${idAgendMl}/${num}?type=caixa`);
+
+          if (!resp || resp.ok === false) {
+            throw new Error(resp?.error || "Falha ao buscar dados da caixa.");
+          }
+
+          caixaEditando = {
+            caixa_num: resp.caixa_num ?? num,
+            codigo: resp.codigo_unico_caixa || caixaLocal.codigo || null,
+            tipo: "caixa"
+          };
+
+          montarLinhasEditarCaixa(resp.itens || []);
+        } catch (err) {
+          console.error("Erro ao carregar caixa para edição:", err);
+          Swal.fire("Erro", err.message || "Não foi possível carregar os itens da caixa.", "error");
+        } finally {
+          btnCarregarCaixaEditar.disabled = false;
+          btnCarregarCaixaEditar.textContent = "Carregar";
+        }
+      } else {
+        // Carrega PALLET
+        const palletLocal = pallets.find(p => Number(p.id) === num);
+        if (!palletLocal) {
+          Swal.fire(
+            "Pallet não encontrado",
+            `Não existe o pallet número ${num} neste agendamento.`,
+            "warning"
+          );
+          return;
+        }
+
+        try {
+          btnCarregarCaixaEditar.disabled = true;
+          btnCarregarCaixaEditar.textContent = "Carregando...";
+
+          const resp = await fetchJSON(`/api/embalar/caixa/${idAgendMl}/${num}?type=pallet`);
+
+          if (!resp || resp.ok === false) {
+            throw new Error(resp?.error || "Falha ao buscar dados do pallet.");
+          }
+
+          caixaEditando = {
+            caixa_num: resp.caixa_num ?? num,
+            codigo: resp.codigo_unico_caixa || palletLocal.codigo || null,
+            tipo: "pallet"
+          };
+
+          montarLinhasEditarCaixa(resp.itens || []);
+        } catch (err) {
+          console.error("Erro ao carregar pallet para edição:", err);
+          Swal.fire("Erro", err.message || "Não foi possível carregar os itens do pallet.", "error");
+        } finally {
+          btnCarregarCaixaEditar.disabled = false;
+          btnCarregarCaixaEditar.textContent = "Carregar";
+        }
+      }
+    });
+  }
+
+  if (btnSalvarEdicaoCaixa) {
+    btnSalvarEdicaoCaixa.addEventListener("click", async () => {
+      if (!caixaEditando) {
+        Swal.fire(
+          "Selecione um volume",
+          "Carregue primeiro a caixa ou pallet que deseja editar.",
+          "info"
+        );
+        return;
+      }
+      if (!tbodyEditarCaixa) return;
+
+      const isPallet = caixaEditando.tipo === "pallet";
+      const nomeVolume = isPallet ? "pallet" : "caixa";
+      const NomeVolume = isPallet ? "Pallet" : "Caixa";
+
+      const itens = [];
+      let totalNovo = 0;
+
+      tbodyEditarCaixa.querySelectorAll("tr").forEach((tr) => {
+        const sku = tr.dataset.sku;
+        const input = tr.querySelector(".input-qtd-editar");
+        if (!sku || !input) return;
+        let v = parseInt(input.value, 10);
+        if (!Number.isFinite(v) || v < 0) v = 0;
+        totalNovo += v;
+        itens.push({ sku, quantidade: v });
+      });
+
+      if (!itens.length) {
+        Swal.fire(
+          "Sem itens",
+          isPallet
+            ? "O pallet não pode ficar completamente vazio. Se quiser devolver tudo para bipagem, use a opção de excluir pallet."
+            : "A caixa não pode ficar completamente vazia. Se quiser devolver tudo para bipagem, use a opção de excluir caixa.",
+          "warning"
+        );
+        return;
+      }
+
+      const confirm = await Swal.fire({
+        title: "Confirmar alterações?",
+        html: isPallet
+          ? `Você está ajustando as quantidades deste pallet.<br><br><strong>Total no pallet após a edição:</strong> ${totalNovo} item(ns).`
+          : `Você está ajustando as quantidades desta caixa.<br><br><strong>Total na caixa depois da edição:</strong> ${totalNovo} item(ns).`,
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonText: "Salvar",
+        cancelButtonText: "Cancelar",
+        focusConfirm: true,
+        allowEnterKey: true
+      });
+      if (!confirm.isConfirmed) return;
+
+      try {
+        btnSalvarEdicaoCaixa.disabled = true;
+        btnSalvarEdicaoCaixa.textContent = "Salvando...";
+
+        const payload = {
+          id_agend_ml: idAgendMl,
+          caixa_num: caixaEditando.caixa_num,
+          itens,
+          // 👇 aqui garantimos type correto pra API
+          type: isPallet ? "pallet" : "0"
+        };
+
+        const resp = await fetchJSON("/api/embalar/caixa/editar", {
+          method: "POST",
+          body: payload
+        });
+
+        // Aplica no front na lista correta (caixa ou pallet)
+        aplicarEdicaoCaixa({
+          caixa_num: resp.caixa_num ?? caixaEditando.caixa_num,
+          tipo: isPallet ? "pallet" : "caixa",
+          itens: resp.itens || [],
+          bipados_atualizados: resp.bipados_atualizados || []
+        });
+
+        Swal.fire("Sucesso", `${NomeVolume} atualizado com sucesso.`, "success");
+        modalEditarCaixa.hide();
+      } catch (err) {
+        console.error("Erro ao salvar edição de volume:", err);
+        Swal.fire(
+          "Erro",
+          err.message || `Não foi possível salvar as alterações do ${nomeVolume}.`,
+          "error"
+        );
+      } finally {
+        btnSalvarEdicaoCaixa.disabled = false;
+        btnSalvarEdicaoCaixa.textContent = "Salvar alterações";
+      }
+    });
+  }
 
   // Outra função que também será descontinuada
   // Utilize sempre a função imprimirEtiqueta(zpl, tipo) (UNIVERSAL)
@@ -556,85 +1081,433 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   const bodyConfirme = document.getElementById("modalConfirmeAnuncioBody");
   const btnConfirmar = document.getElementById("btnConfirmarAnuncio");
   const caixasContainer = document.getElementById("caixas-container");
-  // NOVO: Container dos botões e caixas
+  // NOVO: container específico para pallets (fica dentro da aba "Pallets")
+  const palletsContainer = document.getElementById("pallets-container");
+  // NOVO: Container dos botões de ação (Nova caixa / Novo pallet / Finalizar)
   const caixaActionsContainer = document.getElementById("caixa-actions-container");
   const contadorFinalizadosEl = document.getElementById("finalizadosP");
   const listaPrincipalEl = document.getElementById("lista-anuncios");
+
+  // Delegação de clique para o botão de reabrir caixa
+  if (caixasContainer) {
+    caixasContainer.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".caixa-reabrir-btn");
+      if (!btn) return;
+      const num = btn.dataset.caixaNum;
+      if (!num) return;
+      handleReabrirCaixa(num);
+    });
+  }
+
+  // Delegação de clique para o botão de reabrir pallet
+  if (palletsContainer) {
+    palletsContainer.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".pallet-reabrir-btn");
+      if (!btn) return;
+      const num = btn.dataset.palletNum;
+      if (!num) return;
+      handleReabrirPallet(num);
+    });
+  }
   const templateNovaCaixa = document.getElementById("template-nova-caixa");
   // NOVO: Template do botão finalizar
   const templateFinalizar = document.getElementById("template-finalizar-embalagem");
 
+  // Abas para alternar entre lista de Caixas e Pallets
+  const tabBtnCaixas = document.getElementById("tab-btn-caixas");
+  const tabBtnPallets = document.getElementById("tab-btn-pallets");
+  const tabPaneCaixas = document.getElementById("tab-caixas");
+  const tabPanePallets = document.getElementById("tab-pallets");
+
+  function ativarAbaVolumes(tipo) {
+    const isCaixa = tipo === "caixa";
+
+    if (tabBtnCaixas && tabBtnPallets) {
+      tabBtnCaixas.classList.toggle("is-active", isCaixa);
+      tabBtnCaixas.classList.toggle("active", isCaixa);
+      tabBtnPallets.classList.toggle("is-active", !isCaixa);
+      tabBtnPallets.classList.toggle("active", !isCaixa);
+
+      tabBtnCaixas.setAttribute("aria-selected", isCaixa ? "true" : "false");
+      tabBtnPallets.setAttribute("aria-selected", !isCaixa ? "true" : "false");
+    }
+
+    if (tabPaneCaixas && tabPanePallets) {
+      tabPaneCaixas.classList.toggle("is-active", isCaixa);
+      tabPaneCaixas.classList.toggle("active", isCaixa);
+      tabPanePallets.classList.toggle("is-active", !isCaixa);
+      tabPanePallets.classList.toggle("active", !isCaixa);
+    }
+  }
+
+  if (tabBtnCaixas && tabBtnPallets) {
+    // Clique na aba CAIXAS sempre liberado
+    tabBtnCaixas.addEventListener("click", () => ativarAbaVolumes("caixa"));
+
+    // Clique na aba PALLETS só é liberado para Mercado Livre
+    tabBtnPallets.addEventListener("click", (ev) => {
+      if (!isMercadoLivre()) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        assertPalletAllowedOrWarn();
+        return;
+      }
+      ativarAbaVolumes("pallet");
+    });
+
+    // Se não for Mercado Livre, já marca a aba de pallets como desativada visualmente
+    if (!isMercadoLivre()) {
+      tabBtnPallets.classList.add("disabled");
+      tabBtnPallets.setAttribute("aria-disabled", "true");
+    }
+
+    // estado inicial: sempre começa em "Caixas"
+    ativarAbaVolumes("caixa");
+  }
+
+  // Carrega volumes salvos (caixas e pallets) do backend
   async function carregarCaixasSalvas() {
     try {
-      const caixasData = await fetchJSON(`/api/embalar/caixa/${idAgendMl}`);
-      caixasData.forEach(box => {
-        const num = box.caixa_num;
-        const totalItens = box.itens.reduce((s, i) => s + Number(i.quantidade || 0), 0);
+      // 🔹 Busca CAIXAS e PALLETS em paralelo
+      const [caixasData, palletsData] = await Promise.all([
+        fetchJSON(`/api/embalar/caixa/${idAgendMl}?type=caixa`),
+        fetchJSON(`/api/embalar/caixa/${idAgendMl}?type=pallet`),
+      ]);
 
-        const idx = caixas.length;
-        caixas.push({
+      // Garante que sempre teremos arrays
+      const volumesData = [
+        ...(Array.isArray(caixasData) ? caixasData : []),
+        ...(Array.isArray(palletsData) ? palletsData : []),
+      ];
+
+      volumesData.forEach(box => {
+        const num = box.caixa_num;
+        const tipo = box.tipo || "caixa"; // "caixa" | "pallet"
+        const totalItens = (box.itens || []).reduce(
+          (s, i) => s + Number(i.quantidade || 0),
+          0
+        );
+
+        // Mapa sku -> quantidade
+        const mapaItens = (box.itens || []).reduce(
+          (acc, i) => ({
+            ...acc,
+            [i.sku]: Number(i.quantidade || 0),
+          }),
+          {}
+        );
+
+        // =========================
+        // 1) VOLUME DO TIPO "CAIXA"
+        // =========================
+        if (tipo === "caixa") {
+          const idx = caixas.length;
+
+          caixas.push({
+            id: num,
+            codigo: box.codigo_unico_caixa || null,
+            itens: mapaItens,
+            fechada: true,
+            persisted: true,
+            element: null,
+          });
+
+          const caixaDiv = document.createElement("div");
+          caixaDiv.className = "card caixa-card caixa-fechada";
+          caixaDiv.innerHTML = `
+          <div class="card-header jp-card-caixa__header">
+            <div class="caixa-header-title">
+              Caixa ${esc(num)} - (${totalItens} ${totalItens > 1 ? "itens" : "item"})
+            </div>
+            <button
+              type="button"
+              class="caixa-reabrir-btn"
+              title="Reabrir esta caixa para edição"
+              data-caixa-num="${num}"
+            ></button>
+          </div>
+          <div class="card-body">
+            <ul class="list-unstyled mb-0"></ul>
+          </div>`;
+
+          caixas[idx].element = caixaDiv;
+          caixasContainer?.prepend(caixaDiv);
+
+          const ul = caixaDiv.querySelector("ul");
+          (box.itens || []).forEach(i => {
+            const li = document.createElement("li");
+            li.className = "d-flex justify-content-between p-1";
+
+            // 👇 chave para evitar duplicação ao bipar novamente
+            li.dataset.etiqueta = i.sku;
+
+            li.innerHTML = `
+              <span>${esc(i.sku)}</span>
+              <span class="fw-bold">Unidades: ${esc(i.quantidade)}</span>
+            `;
+            ul.appendChild(li);
+          });
+
+          // já tratou como caixa, pula para o próximo volume
+          return;
+        }
+
+        // ==========================
+        // 2) VOLUME DO TIPO "PALLET"
+        // ==========================
+        const idxPallet = pallets.length;
+
+        pallets.push({
           id: num,
           codigo: box.codigo_unico_caixa || null,
-          itens: box.itens.reduce((acc, i) => ({ ...acc, [i.sku]: Number(i.quantidade || 0) }), {}),
+          itens: mapaItens,
           fechada: true,
           persisted: true,
-          element: null
+          element: null,
         });
 
-        const caixaDiv = document.createElement("div");
-        caixaDiv.className = "card caixa-card caixa-fechada";
-        caixaDiv.innerHTML = `
-        <div class="card-header">Caixa ${esc(num)} - (${totalItens} ${totalItens > 1 ? 'itens' : 'item'})</div>
-        <div class="card-body">
-          <ul class="list-unstyled mb-0"></ul>
-        </div>`;
-        caixas[idx].element = caixaDiv;
-        caixasContainer.prepend(caixaDiv);
+        if (!palletsContainer) {
+          console.warn(
+            "Elemento #pallets-container não encontrado para montar pallet salvo."
+          );
+          return;
+        }
 
-        const ul = caixaDiv.querySelector("ul");
-        box.itens.forEach(i => {
+        const palletDiv = document.createElement("div");
+        palletDiv.className = "card pallet-card pallet-fechada";
+        palletDiv.innerHTML = `
+  <div class="card-header jp-card-pallet__header">
+    <div class="pallet-header-title">
+      Pallet ${esc(num)} - (${totalItens} ${totalItens > 1 ? "itens" : "item"})
+    </div>
+    <button
+      type="button"
+      class="pallet-reabrir-btn"
+      title="Reabrir este pallet para edição"
+      data-pallet-num="${num}"
+    ></button>
+  </div>
+  <div class="card-body">
+    <ul class="list-unstyled mb-0 pallet-itens-list"></ul>
+  </div>`;
+        pallets[idxPallet].element = palletDiv;
+        palletsContainer.prepend(palletDiv);
+
+        const ulPallet = palletDiv.querySelector(".pallet-itens-list");
+        (box.itens || []).forEach(i => {
           const li = document.createElement("li");
           li.className = "d-flex justify-content-between p-1";
-          li.innerHTML = `<span>${esc(i.sku)}</span><span class="fw-bold">Unidades: ${esc(i.quantidade)}</span>`;
-          ul.appendChild(li);
+          li.dataset.etiqueta = i.sku;
+          li.innerHTML = `
+            <span>${esc(i.sku)}</span>
+            <span class="fw-bold">Unidades: ${esc(i.quantidade)}</span>
+          `;
+          ulPallet.appendChild(li);
         });
       });
+
+      // Nenhuma caixa nem pallet começa como “ativa”
       caixaAtivaIndex = -1;
+      palletAtivoIndex = -1;
       verificarModoEtiqueta();
     } catch (error) {
-      console.error("Erro ao carregar caixas salvas:", error);
+      console.error("Erro ao carregar volumes salvos (caixas/pallets):", error);
     }
   }
 
   function atualizarPainelEsquerdo() {
     const totalProdutos = produtos.length;
-    const produtosConcluidos = listaPrincipalEl.querySelectorAll(".produto-concluido").length;
-    const existeCaixaAberta = caixaAtivaIndex !== -1 && !caixas[caixaAtivaIndex].fechada;
+    const produtosConcluidos =
+      listaPrincipalEl.querySelectorAll(".produto-concluido").length;
 
-    const btnNovaCaixa = document.getElementById('btn-nova-caixa');
-    const btnFinalizar = document.getElementById('btn-finalizar-embalagem');
-    if (btnNovaCaixa) btnNovaCaixa.remove();
-    if (btnFinalizar) btnFinalizar.remove();
+    const existeCaixaAberta =
+      caixaAtivaIndex !== -1 &&
+      caixas[caixaAtivaIndex] &&
+      !caixas[caixaAtivaIndex].fechada;
 
+    const existePalletAberto =
+      palletAtivoIndex !== -1 &&
+      pallets[palletAtivoIndex] &&
+      !pallets[palletAtivoIndex].fechada;
+
+    const existeVolumeAberto = existeCaixaAberta || existePalletAberto;
+
+    // 1) Remove TODAS as linhas de ação antigas (incluindo vazias)
+    if (caixaActionsContainer) {
+      caixaActionsContainer
+        .querySelectorAll(".box-actions-row")
+        .forEach(row => row.remove());
+    }
+
+    // 2) Remove qualquer botão de finalizar que tenha ficado solto
+    const btnFinalizarExistente =
+      document.getElementById("btn-finalizar-embalagem");
+    if (btnFinalizarExistente) btnFinalizarExistente.remove();
+
+    // 3) Decide o que mostrar
     if (totalProdutos === produtosConcluidos && totalProdutos > 0) {
-      // Agora abre o modal (se houver caixa aberta) e não reabre se já estiver aberto
+      // Se ainda existe algum volume aberto, não mostra "Finalizar Embalagem"
       if (existeCaixaAberta) {
+        // caixa aberta: mantém fluxo atual usando o modal de fechamento
         if (!isFecharModalOpen) abrirModalFecharCaixa();
         return;
       }
-      // Se não há caixa aberta, mostra o botão "Finalizar Embalagem"
-      const clone = templateFinalizar.content.cloneNode(true);
-      const botaoFinalizar = clone.querySelector('#btn-finalizar-embalagem');
-      botaoFinalizar.addEventListener('click', handleFinalizarEmbalagem);
-      caixaActionsContainer.prepend(clone);
+
+      if (existePalletAberto) {
+        // pallet aberto: aguarda fechamento manual antes de finalizar
+        return;
+      }
+
+      // Sem volume aberto: mostra o botão "Finalizar Embalagem"
+      if (templateFinalizar && caixaActionsContainer) {
+        const clone = templateFinalizar.content.cloneNode(true);
+        const botaoFinalizar =
+          clone.querySelector("#btn-finalizar-embalagem");
+        if (botaoFinalizar) {
+          botaoFinalizar.addEventListener(
+            "click",
+            handleFinalizarEmbalagem
+          );
+        }
+        caixaActionsContainer.prepend(clone);
+      }
     } else {
-      const algumProdutoProntoParaEmbalar = produtos.some(p => p.bipados !== undefined);
-      if (algumProdutoProntoParaEmbalar && !existeCaixaAberta) {
+      const algumProdutoProntoParaEmbalar = produtos.some(
+        p => p.bipados !== undefined
+      );
+
+      // Só mostra "Nova Caixa / Novo Pallet" se houver produto iniciado
+      // e nenhum volume (caixa ou pallet) estiver aberto
+      if (
+        algumProdutoProntoParaEmbalar &&
+        !existeVolumeAberto &&
+        templateNovaCaixa &&
+        caixaActionsContainer
+      ) {
         const clone = templateNovaCaixa.content.cloneNode(true);
         caixaActionsContainer.prepend(clone);
-        document.getElementById('btn-nova-caixa').addEventListener('click', abrirNovaCaixa);
+
+        const btnNovaCaixa = document.getElementById("btn-nova-caixa");
+        if (btnNovaCaixa) {
+          btnNovaCaixa.addEventListener("click", abrirNovaCaixa);
+        }
+
+        const btnNovoPallet = document.getElementById("btn-novo-pallet");
+        if (btnNovoPallet) {
+          if (isMercadoLivre()) {
+            // Mercado Livre: fluxo normal de criação de pallet
+            btnNovoPallet.addEventListener("click", abrirNovoPallet);
+          } else {
+            // Outros marketplaces: bloqueia clique e mostra alerta
+            btnNovoPallet.classList.add("disabled");
+            btnNovoPallet.setAttribute("aria-disabled", "true");
+            btnNovoPallet.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              assertPalletAllowedOrWarn();
+            });
+          }
+        }
       }
     }
+  }
+
+  // Aplica no front o resultado da edição de um volume (caixa ou pallet)
+  // Espera um objeto no formato:
+  // {
+  //   caixa_num: 2,          // número do volume
+  //   tipo: "caixa"|"pallet",
+  //   itens: [{ sku: "JPTESTE1", quantidade: 4 }, ...],
+  //   bipados_atualizados: [{ id_prod_ml: 123, bipados: 9 }, ...]
+  // }
+  function aplicarEdicaoCaixa({ caixa_num, tipo = "caixa", itens, bipados_atualizados }) {
+    const num = Number(caixa_num);
+    const lista = tipo === "pallet" ? pallets : caixas;
+
+    if (!Array.isArray(lista)) {
+      console.warn("Lista de volumes não encontrada para tipo:", tipo);
+      return;
+    }
+
+    const idx = lista.findIndex((v) => Number(v.id) === num);
+
+    if (idx === -1) {
+      console.warn(
+        (tipo === "pallet" ? "Pallet" : "Caixa") + " não encontrado(a) para edição:",
+        caixa_num
+      );
+      return;
+    }
+
+    const volume = lista[idx];
+
+    // ---------- 1) Atualiza o estado interno (mapa sku -> quantidade) ----------
+    const novoMapa = {};
+    let total = 0;
+
+    (itens || []).forEach((item) => {
+      const sku =
+        item.sku ||
+        item.SKU ||
+        item.sku_prod ||
+        item.etiqueta ||
+        item.cod_barras ||
+        "";
+
+      if (!sku) return;
+
+      const qtd = Number(
+        item.quantidade ??
+        item.qtd ??
+        item.quantidade_caixa ??
+        0
+      );
+
+      if (!Number.isFinite(qtd) || qtd <= 0) return;
+
+      novoMapa[sku] = qtd;
+      total += qtd;
+    });
+
+    volume.itens = novoMapa;
+
+    // ---------- 2) Reconstrói a UL do volume (limpa antes!) ----------
+    const ul = volume.element?.querySelector("ul");
+    if (ul) {
+      ul.innerHTML = "";
+
+      Object.entries(novoMapa).forEach(([sku, qtd]) => {
+        const li = document.createElement("li");
+        li.className = "d-flex justify-content-between p-1";
+        li.dataset.etiqueta = sku;
+        li.innerHTML = `
+        <span>${esc(sku)}</span>
+        <span class="fw-bold">Unidades: ${esc(qtd)}</span>
+      `;
+        ul.appendChild(li);
+      });
+    }
+
+    // ---------- 3) Atualiza o badge de total na “header” do volume ----------
+    const badgeTotal = volume.element?.querySelector(".badge-total-unidades");
+    if (badgeTotal) {
+      badgeTotal.textContent = total;
+    }
+
+    // ---------- 4) Atualiza bipados (lista de anúncios à direita) ----------
+    if (Array.isArray(bipados_atualizados) && bipados_atualizados.length > 0) {
+      bipados_atualizados.forEach((row) => {
+        if (!row) return;
+        atualizarStatusProduto(
+          row.id_prod_ml,
+          Number(row.bipados || 0)
+        );
+      });
+    }
+
+    // ---------- 5) Recalcula contadores gerais ----------
+    atualizarContadorFinalizados();
+    atualizarPainelEsquerdo();
   }
 
   function abrirModalConfirmacao(prod) {
@@ -738,24 +1611,286 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   // LÓGICA DE GERENCIAMENTO DAS CAIXAS
   // ===================================================================
 
-  function verificarModoEtiqueta() {
-    const algumProdutoProntoParaEmbalar = produtos.some(p => p.bipados !== undefined);
-    const existeCaixaAberta = caixaAtivaIndex !== -1 && !caixas[caixaAtivaIndex].fechada;
-    const btnNovaCaixa = document.getElementById('btn-nova-caixa');
+  // Reabrir uma caixa já fechada (erro humano / F5 etc.)
+  async function handleReabrirCaixa(numCaixa) {
+    const numero = Number(numCaixa);
+    if (!numero || numero <= 0) return;
 
-    if (algumProdutoProntoParaEmbalar && !existeCaixaAberta && !btnNovaCaixa) {
-      const clone = templateNovaCaixa.content.cloneNode(true);
-      caixaActionsContainer.prepend(clone);
-      document.getElementById('btn-nova-caixa').addEventListener('click', abrirNovaCaixa);
-    } else if ((!algumProdutoProntoParaEmbalar || existeCaixaAberta) && btnNovaCaixa) {
-      btnNovaCaixa.remove();
+    const idx = caixas.findIndex(c => Number(c.id) === numero);
+    if (idx === -1) {
+      Swal.fire(
+        "Caixa não encontrada",
+        `Não existe a caixa número ${numero} neste agendamento.`,
+        "warning"
+      );
+      return;
+    }
+
+    const caixa = caixas[idx];
+
+    if (!caixa.fechada) {
+      Swal.fire(
+        "Caixa já aberta",
+        "Esta caixa já está aberta para edição.",
+        "info"
+      );
+      return;
+    }
+
+    // Garante que não exista outra caixa aberta ao mesmo tempo
+    const outraAberta = caixas.find((c, i) => !c.fechada && i !== idx);
+    if (outraAberta) {
+      Swal.fire(
+        "Caixa já aberta",
+        `Já existe a caixa ${outraAberta.id} aberta. Feche ou finalize-a antes de reabrir a caixa ${numero}.`,
+        "warning"
+      );
+      return;
+    }
+
+    // NOVO: bloqueia reabertura de caixa se houver pallet aberto
+    const palletAberto =
+      palletAtivoIndex !== -1 &&
+      pallets[palletAtivoIndex] &&
+      !pallets[palletAtivoIndex].fechada;
+
+    if (palletAberto) {
+      const palletAtual = pallets[palletAtivoIndex];
+      Swal.fire(
+        "Pallet aberto",
+        `Já existe o pallet ${palletAtual.id || palletAtivoIndex + 1
+        } aberto. Feche o pallet antes de reabrir uma caixa.`,
+        "warning"
+      );
+      return;
+    }
+
+    const confirm = await Swal.fire({
+      title: `Reabrir a caixa ${numero}?`,
+      html: "Ela voltará para o estado de edição e os itens poderão ser ajustados novamente.",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Reabrir",
+      cancelButtonText: "Cancelar",
+      focusConfirm: true,
+      allowEnterKey: true
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    try {
+      // Chama o backend para reabrir a caixa no banco
+      await fetchJSON("/api/embalar/caixa/reabrir", {
+        method: "POST",
+        body: {
+          id_agend_ml: idAgendMl,
+          caixa_num: numero
+        }
+      });
+
+      // Atualiza estado local
+      caixa.fechada = false;
+      caixa.endTime = null;
+      caixaAtivaIndex = idx;
+
+      if (caixa.element) {
+        caixa.element.classList.remove("caixa-fechada");
+        caixa.element.classList.add("caixa-aberta");
+
+        const headerTitle =
+          caixa.element.querySelector(".caixa-header-title");
+        if (headerTitle) {
+          const totalItens = Object.values(caixa.itens || {}).reduce(
+            (sum, v) => sum + Number(v || 0),
+            0
+          );
+          headerTitle.textContent =
+            `Caixa ${caixa.id} - (${totalItens} ${totalItens === 1 ? "item" : "itens"})`;
+        }
+      }
+
+      Swal.fire(
+        "Caixa reaberta",
+        `A caixa ${numero} foi reaberta e está ativa para bipagem.`,
+        "success"
+      );
+
+      atualizarPainelEsquerdo();
+    } catch (err) {
+      console.error("Erro ao reabrir caixa:", err);
+      Swal.fire(
+        "Erro",
+        err.message || "Não foi possível reabrir a caixa.",
+        "error"
+      );
     }
   }
 
+  async function handleReabrirPallet(numPallet) {
+    const numero = Number(numPallet);
+    if (!numero || numero <= 0) return;
+
+    const idx = pallets.findIndex(p => Number(p.id) === numero);
+    if (idx === -1) {
+      Swal.fire(
+        "Pallet não encontrado",
+        `Não existe o pallet número ${numero} neste agendamento.`,
+        "warning"
+      );
+      return;
+    }
+
+    const pallet = pallets[idx];
+
+    if (!pallet.fechada) {
+      Swal.fire(
+        "Pallet já aberto",
+        "Este pallet já está aberto para edição.",
+        "info"
+      );
+      return;
+    }
+
+    // Garante que não exista outro pallet aberto ao mesmo tempo
+    const outroAberto = pallets.find((p, i) => !p.fechada && i !== idx);
+    if (outroAberto) {
+      Swal.fire(
+        "Pallet já aberto",
+        `Já existe o pallet ${outroAberto.id} aberto. Feche ou finalize-o antes de reabrir o pallet ${numero}.`,
+        "warning"
+      );
+      return;
+    }
+
+    // Bloqueia reabertura de pallet se houver caixa aberta
+    const caixaAberta =
+      caixaAtivaIndex !== -1 &&
+      caixas[caixaAtivaIndex] &&
+      !caixas[caixaAtivaIndex].fechada;
+
+    if (caixaAberta) {
+      const caixaAtual = caixas[caixaAtivaIndex];
+      Swal.fire(
+        "Caixa aberta",
+        `Já existe a caixa ${caixaAtual.id || caixaAtivaIndex + 1
+        } aberta. Feche a caixa antes de reabrir um pallet.`,
+        "warning"
+      );
+      return;
+    }
+
+    const confirm = await Swal.fire({
+      title: `Reabrir o pallet ${numero}?`,
+      html: "Ele voltará para o estado de edição e os itens poderão ser ajustados novamente.",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Reabrir",
+      cancelButtonText: "Cancelar",
+      focusConfirm: true,
+      allowEnterKey: true
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    try {
+      // Chama o backend para reabrir o pallet no banco
+      await fetchJSON("/api/embalar/caixa/reabrir", {
+        method: "POST",
+        body: {
+          id_agend_ml: idAgendMl,
+          caixa_num: numero,
+          type: "pallet"
+        }
+      });
+
+      // Atualiza estado local
+      pallet.fechada = false;
+      pallet.endTime = null;
+      palletAtivoIndex = idx;
+
+      if (pallet.element) {
+        pallet.element.classList.remove("pallet-fechada");
+        pallet.element.classList.add("pallet-aberto");
+
+        const headerTitle =
+          pallet.element.querySelector(".pallet-header-title");
+        if (headerTitle) {
+          const totalItens = Object.values(pallet.itens || {}).reduce(
+            (sum, v) => sum + Number(v || 0),
+            0
+          );
+          headerTitle.textContent =
+            `Pallet ${pallet.id} - (${totalItens} ${totalItens === 1 ? "item" : "itens"})`;
+        }
+      }
+
+      // Muda para a aba de Pallets
+      ativarAbaVolumes("pallet");
+
+      Swal.fire(
+        "Pallet reaberto",
+        `O pallet ${numero} foi reaberto e está ativo para bipagem.`,
+        "success"
+      );
+
+      atualizarPainelEsquerdo();
+    } catch (err) {
+      console.error("Erro ao reabrir pallet:", err);
+      Swal.fire(
+        "Erro",
+        err.message || "Não foi possível reabrir o pallet.",
+        "error"
+      );
+    }
+  }
+  function verificarModoEtiqueta() {
+    // Toda a lógica de quando mostrar "Nova Caixa / Novo Pallet / Finalizar"
+    // está centralizada em atualizarPainelEsquerdo.
+    atualizarPainelEsquerdo();
+  }
+
   async function abrirNovaCaixa() {
+    const caixaAberta =
+      caixaAtivaIndex !== -1 &&
+      caixas[caixaAtivaIndex] &&
+      !caixas[caixaAtivaIndex].fechada;
+
+    const palletAberto =
+      palletAtivoIndex !== -1 &&
+      pallets[palletAtivoIndex] &&
+      !pallets[palletAtivoIndex].fechada;
+
+    if (palletAberto) {
+      const palletAtual = pallets[palletAtivoIndex];
+      Swal.fire(
+        "Pallet aberto",
+        `Já existe o pallet ${palletAtual.id || palletAtivoIndex + 1
+        } aberto. Feche o pallet antes de abrir uma nova caixa.`,
+        "warning"
+      );
+      return;
+    }
+
+    if (caixaAberta) {
+      const caixaAtual = caixas[caixaAtivaIndex];
+      Swal.fire(
+        "Caixa aberta",
+        `Já existe a caixa ${caixaAtual.id || caixaAtivaIndex + 1
+        } aberta. Feche a caixa atual antes de abrir outra.`,
+        "warning"
+      );
+      return;
+    }
+
+    // Ao abrir uma nova CAIXA, garante que a aba "Caixas" esteja ativa
+    ativarAbaVolumes("caixa");
+
     // índice da nova caixa
     caixaAtivaIndex = caixas.length;
-    document.getElementById('input-embalar').focus(); // Move o foco para o input, assim o usuário não precisa clicar para bipar uma caixa
+
+    if (inputSku) {
+      inputSku.focus(); // usuário já pode bipar
+    }
 
     // objeto base
     const caixaObj = {
@@ -771,33 +1906,146 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
 
     // cria visual no DOM
     const numeroTemporario = caixas.length;
-    const caixaDiv = document.createElement('div');
-    caixaDiv.className = 'card caixa-card caixa-aberta';
+    const caixaDiv = document.createElement("div");
+    caixaDiv.className = "card caixa-card caixa-aberta";
     caixaDiv.innerHTML = `
-    <div class="card-header">Caixa ${numeroTemporario}</div>
-    <div class="card-body"><ul class="list-unstyled mb-0"></ul></div>`;
+      <div class="card-header jp-card-caixa__header">
+        <div class="caixa-header-title">
+          Caixa ${numeroTemporario}
+        </div>
+        <button
+          type="button"
+          class="caixa-reabrir-btn"
+          title="Reabrir esta caixa para edição"
+          data-caixa-num="${numeroTemporario}"
+        ></button>
+      </div>
+      <div class="card-body">
+        <ul class="list-unstyled mb-0"></ul>
+      </div>`;
     caixaObj.element = caixaDiv;
     caixasContainer.prepend(caixaDiv);
 
     // cria imediatamente no servidor (evita “abrir sem id”)
     try {
-      const { caixa_num, codigo_unico_caixa } = await fetchJSON('/api/embalar/caixa', {
-        method: 'POST',
-        body: { id_agend_ml: idAgendMl }
-      });
+      const { caixa_num, codigo_unico_caixa } = await fetchJSON(
+        "/api/embalar/caixa",
+        {
+          method: "POST",
+          body: { id_agend_ml: idAgendMl }
+        }
+      );
       caixaObj.id = caixa_num;
       caixaObj.codigo = codigo_unico_caixa;
       caixaObj.persisted = true;
-      caixaDiv.querySelector('.card-header').textContent = `Caixa ${caixaObj.id}`;
+
+      const header =
+        caixaDiv.querySelector(".caixa-header-title") ||
+        caixaDiv.querySelector(".card-header");
+
+      if (header) {
+        header.textContent = `Caixa ${caixaObj.id}`;
+      }
     } catch (err) {
       console.error(err);
-      Swal.fire("Erro", "Não foi possível criar a caixa no servidor.", "error");
+      Swal.fire(
+        "Erro",
+        "Não foi possível criar a caixa no servidor.",
+        "error"
+      );
       // volta estado
       caixas.pop();
       caixaAtivaIndex = -1;
       caixaDiv.remove();
       return;
     }
+
+    atualizarPainelEsquerdo();
+  }
+
+  // NOVO: abertura de Pallet (agora preparado para receber itens)
+  function abrirNovoPallet() {
+    const caixaAberta =
+      caixaAtivaIndex !== -1 &&
+      caixas[caixaAtivaIndex] &&
+      !caixas[caixaAtivaIndex].fechada;
+
+    const palletAberto =
+      palletAtivoIndex !== -1 &&
+      pallets[palletAtivoIndex] &&
+      !pallets[palletAtivoIndex].fechada;
+
+    if (caixaAberta) {
+      const caixaAtual = caixas[caixaAtivaIndex];
+      Swal.fire(
+        "Caixa aberta",
+        `Já existe a caixa ${caixaAtual.id || caixaAtivaIndex + 1
+        } aberta. Feche a caixa antes de abrir um pallet.`,
+        "warning"
+      );
+      return;
+    }
+
+    if (palletAberto) {
+      const palletAtual = pallets[palletAtivoIndex];
+      Swal.fire(
+        "Pallet aberto",
+        `Já existe o pallet ${palletAtual.id || palletAtivoIndex + 1
+        } aberto.`,
+        "info"
+      );
+      return;
+    }
+
+    // Ao abrir um PALLET, garante que a aba "Pallets" esteja ativa
+    ativarAbaVolumes("pallet");
+
+    palletAtivoIndex = pallets.length;
+
+    if (inputSku) {
+      inputSku.focus();
+    }
+
+    const palletObj = {
+      id: pallets.length + 1, // backend pode sobrescrever depois
+      codigo: null,
+      itens: {},
+      fechada: false,
+      persisted: false,
+      element: null
+    };
+    palletObj.startTime = new Date();
+    pallets.push(palletObj);
+
+    if (!palletsContainer) {
+      console.warn(
+        "Elemento #pallets-container não encontrado. Crie o container na aba 'Pallets'."
+      );
+      return;
+    }
+
+    const palletDiv = document.createElement("div");
+    palletDiv.className = "card pallet-card pallet-aberto";
+    palletDiv.innerHTML = `
+  <div class="card-header jp-card-pallet__header">
+    <div class="pallet-header-title">
+      Pallet ${palletObj.id}
+    </div>
+    <button
+      type="button"
+      class="pallet-reabrir-btn"
+      title="Reabrir este pallet para edição"
+      data-pallet-num="${palletObj.id}"
+    ></button>
+  </div>
+  <div class="card-body">
+    <p class="text-muted mb-1 pallet-hint">
+      Pallet aberto. Os itens adicionados aparecerão abaixo.
+    </p>
+    <ul class="list-unstyled mb-0 pallet-itens-list"></ul>
+  </div>`;
+    palletObj.element = palletDiv;
+    palletsContainer.prepend(palletDiv);
 
     atualizarPainelEsquerdo();
   }
@@ -887,7 +2135,124 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     imprimirEtiqueta(zpl, 'caixa');
   }
 
+  // === NOVO: etiqueta simples de PALLET do Mercado Livre ===
+  function gerarEtiquetaPalletML(palletRef) {
+    // Só faz sentido em agendamento Mercado Livre e que não seja COLETA
+    if (!assertCanPrintMLOrWarn()) return;
 
+    let pallet = null;
+
+    // Aceita tanto o número quanto o próprio objeto
+    if (typeof palletRef === "number" || typeof palletRef === "string") {
+      const idNum = Number(palletRef);
+      pallet =
+        (Array.isArray(pallets)
+          ? (pallets.find(p => Number(p.id) === idNum) || pallets[idNum - 1])
+          : null) || null;
+    } else if (palletRef && typeof palletRef === "object") {
+      pallet = palletRef;
+    }
+
+    if (!pallet) {
+      console.error("Pallet não encontrado para referência:", palletRef);
+      Swal.fire("Erro", `Pallet ${palletRef} não encontrado.`, "error");
+      return;
+    }
+
+    const numeroPallet = pallet.id;
+
+    // Nome da empresa (1 = Jaú Pesca, 2 = Jaú Fishing, 3 = L.T. Sports)
+    const nomeEmpresaMap = {
+      1: "Jaú Pesca",
+      2: "Jaú Fishing",
+      3: "L.T. Sports",
+    };
+    const empresaId = parseInt(
+      headerBar?.dataset?.empresa ?? agendamentoCompleto.empresa ?? "0",
+      10
+    ) || 0;
+    const nomeEmpresa = nomeEmpresaMap[empresaId] || "Empresa";
+    const numeroAgendamento = agendamentoCompleto.id_agend_ml;
+    const centroDistribuicao = agendamentoCompleto.centro_distribuicao || "NOT FOUND";
+    const logoML = "^FO20,10^GFA,800,800,10,,:::::::::::O0FF,M07JFE,L07FC003FE,K07EL07E,J01EN078,J07P0E,I01CP038,I07R0E,001CK01FK038,003L0IFK0C,0078J03803CJ0E,0187J06I07I01D8,0300F00F8J0FEFE0C,02003IFK01J06,04I01C6P02,08K0401FM01,1L08060CM083K0100C02M0C2M01001M046K0306I0CL064K0198I02L024Q01L02CR08K03CR04K03FR02K03FFQ01J07!C1FQ0C007E3C03EP0203F03C0078O010F003CI0EF1N0F8003CI070C4M06I03CI02003CL02I03CI02P02I036I03N0106I066I01J08J0C4I067J0EI08J078I0E38I03I0E00406I01C3CI01800100204I01C3CJ0FI080118I03C1EJ03800801FJ0780FK0C008018J0F,078J07C0823J01F,07EJ01C1C36J07E,03FK031C3K0FC,01FCJ01E18J01F8,00FER07F,007F8P01FE,003FFP0FFC,I0FFEN07FF,I03FFCL03FFC,J0IFCJ03IF,J07PFE,K0PF,K01NF8,L01LF8,N0JF,,:::::::::::^FS";
+    const logoFull = "^FO560,20^GFA,1584,1584,24,,:::::::::::::L03IFC,L07IFC,:L07IF8,L0JF8,L0JF,K01JFM0JFE007C001FI0FK07C,K01JFM0JFE007C001F001FK07C,K03IFEM0JFE007C001F001FK078,K03IFCM0JFE0078001E001FK0F8,K03IFCL01F8K0F8003E001EK0F8,K07IF8L01FL0F8003E003EK0F8,:K07IF8L01EL0F8003E003EK0F,K0JFM01EL0FI03C003EK0F,K0JFM03EK01FI03C007EJ01F,K0JFM03EK01FI07C007CJ01F,K0MFJ03EK01FI07C007CJ01F,J01MFJ03IFE001FI07C007CJ01E,J01LFEJ03IFE001EI07800FCJ01E,J03LFCJ07IFE003EI0F800FCJ03E,J03LF8J07IFE003EI0F800F8J03E,J03LFK07CK03EI0F800F8J03E,J07KFEK0FCK07E001F800F8J03E,J07KFCK0F8K07E001F001FK07C,M01FFCK0F8K07E001F001FK07C,N0FF8K0F8K07E001F001FK07C,N0FFL0F8K07E003E001FK07C,M01FEK01F8K07E007E001FK0FC,M01FCK01FL03F80FC001F8J0FC,M01F8K01FL01JF8003JF80JFE,M03FL01FM0JFI03JF80JFE,M03FL01EM07FFEI03JF00JFC,M03EV0FF,M07C,M078,M07,M0E,:M0C,L018,L01,,:::::::::^FS";
+    const logoPalletProdUnico = "^FO610,930^GFA,2288,2288,22,,::::K0UF003TFC,:::::K0FE007F803FC007F003F800FF00FF001FC,K0FC003F803F8003F003FI0FE007FI0FC,K0FC003F803F8003F003FI07E007EI0FC,:::::K0FC003F803F8003F003FI07E00FEI0FC,K0FC003FC07F8003F003FI07F01FEI0FC,K0FC003KF8003F003FI07JFEI0FC,:::K0FC003KF8003F003FI0LFI0FC,K0FC003KF8003F003FI07KFI0FC,K0FCQ03F003FI04J04I0FC,K0FCQ03F003FR0FC,::::::::::::::::::::K0FCQ07F003F8Q0FC,K0FFQ0FF003FCP03FC,K0UF003TFC,::::Y02001,,:::::::::::03gYF,::::::L0FFQ03FCQ0FF,L0FEQ01FCQ07E,L0FEQ01F8Q07E,L0FEQ01FCQ07E,::::::L0FEQ01F8Q07E,:L0FEQ01FCQ0FE,L0FFQ03FCQ0FF,03gYF,:::::01gXFE,,::::::^FS";
+
+    const jsonQrCode = {
+      id: `${numeroAgendamento}/PPI${numeroPallet}`,
+      reference_id: `${numeroAgendamento}/PPI${numeroPallet}`,
+      t: "inb",
+      ops_data: {
+        source: "seller",
+        container_type: "ppi"
+      }
+    };
+
+    const centro = String(centroDistribuicao || '').toUpperCase();
+    const centroKey = (centro === 'BRSP06') ? 'SP06' : centro; // normaliza
+
+    // Configuração por centro
+    const centerConfig = {
+      BRSP11: {
+        text: '(Endere_C3_A7o correto: Rua Concretex_2C 800 Galp_C3_A3o H_2C Cumbica_2C Guarulhos)_2C Centro log_C3_ADstico Guarulhos - BRSP11',
+        y: 965
+      },
+      BRRC02: {
+        text: 'Centro log_C3_ADstico Sumar_C3_A9 - BRRC02',
+        y: 970
+      },
+      BRRC01: {
+        text: 'Centro log_C3_ADstico Perus - BRRC01',
+        y: 970
+      },
+      BRSP10: {
+        text: 'Centro log_C3_ADstico SP10 - BRSP10',
+        y: 970
+      },
+      SP06: {
+        text: 'Centro log_C3_ADstico Ara_C3_A7ariguama - BRSP06',
+        y: 970
+      }
+    };
+    const cfg = centerConfig[centroKey] || {
+      text: `Centro log_C3_ADstico ${centro}`,
+      y: 970
+    };
+
+    const zpl = [
+      '^XA',
+      '^MCY',
+      '^CI28',
+      '^LH5,15',
+      '^FX  HEADER  ^FS',
+      '^FX Logo_Meli ^FS',
+      logoML,
+      `^FO120,30^A0N,24,24^FH^FD#${sellerIdMap[empresaId]}^FS`,
+      logoFull,
+      `^FO120,60^A0N,24,24^FH^FB550,2,0,L^FDEnvio: ${numeroAgendamento}/PPI${numeroPallet}^FS`,
+      '^FO300,150^GB500,45,3^FS',
+      '^FO325,163^A0N,27,27^FB460,1,0,C^FR^FH^FDENTREGAR NA FULL^FS',
+      '^FO325,210^A0N,27,27^FB460,1,0,C^FR^FH^FDN_c3_83O V_c3_81LIDA PARA COLETA^FS',
+      '^FO400,235^GB127,0,2^FS',
+      '^FX  QR Code  ^FS',
+      `^FO280,320^BY2,2,1^BQN,2,6^FDLA,${JSON.stringify(jsonQrCode)}^FS`,
+      `^FO0,590^A0N,35,35^FB800,1,0,C^FD${numeroAgendamento}/PPI${numeroPallet}^FS`,
+      `^FO0,670^A0N,150,150^FB810,1,0,C^FD${centroDistribuicao}^FS`,
+      '^FX  END CUSTOM_DATA  ^FS',
+      '^FO0,900^GB800,0,2^FS',
+      logoPalletProdUnico,
+      '^FO30,930^A0N,30,30^FB551,2,0,L^FH^FDPALLET DOS MESMOS PRODUTOS^FS',
+      `^FO30,${cfg.y}^A0N,30,30^FB550,3,5,L^FH^FD${cfg.text}^FS`,
+      `^FO30,1070^A0N,30,30^FH^FDEnvio: ${numeroAgendamento}/PPI${numeroPallet}^FS`,
+      '^FX  END_FOOTER  ^FS',
+      '^PQ4', //? Imprime 4 cópias
+      '^XZ'
+    ].join("\n");
+
+    console.log(zpl);
+    // Usa a mesma impressora configurada para "caixa" (volume)
+    imprimirEtiqueta(zpl, "caixa");
+  }
 
   window.addEventListener('keydown', (e) => {
     if (!['F1', 'F2', 'F3', 'F4', 'Enter'].includes(e.key)) return;
@@ -912,39 +2277,105 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     // Se QUALQUER outro modal Bootstrap estiver aberto, ignora atalhos
     if (document.body.classList.contains('modal-open')) return;
 
-    // ===== Fluxo rápido fora do modal: F1–F4 fecham a caixa ativa e imprimem =====
+    // ===== Fluxo rápido fora do modal: F1–F4 fecham o VOLUME aberto (caixa OU pallet) =====
     if (!['F1', 'F2', 'F3', 'F4'].includes(e.key)) return;
     e.preventDefault();
 
-    const idx = caixaAtivaIndex;
-    const caixa = caixas[idx];
-    if (!caixa || caixa.fechada) {
-      Swal.fire("Atenção", "Nenhuma caixa aberta para fechar.", "warning");
+    const caixaAberta =
+      caixaAtivaIndex !== -1 &&
+      caixas[caixaAtivaIndex] &&
+      !caixas[caixaAtivaIndex].fechada;
+
+    const palletAberto =
+      palletAtivoIndex !== -1 &&
+      pallets[palletAtivoIndex] &&
+      !pallets[palletAtivoIndex].fechada;
+
+    let tipoVolume = null;
+    let volumeAtual = null;
+
+    // Por segurança: se houver pallet aberto, prioriza pallet;
+    // caso contrário usa caixa aberta.
+    if (palletAberto) {
+      tipoVolume = "pallet";
+      volumeAtual = pallets[palletAtivoIndex];
+    } else if (caixaAberta) {
+      tipoVolume = "caixa";
+      volumeAtual = caixas[caixaAtivaIndex];
+    }
+
+    if (!volumeAtual) {
+      Swal.fire("Atenção", "Nenhuma caixa ou pallet aberto para fechar.", "warning");
       return;
     }
 
-    // 🔒 Bloqueio: se NÃO for ML e usuário tentou F1 ou F2, impedir
-    const wantsML = (e.key === 'F1' || e.key === 'F2');
+    const wantsML = (e.key === "F1" || e.key === "F2");
+
+    // Bloqueia F1/F2 quando a etiqueta ML não é permitida
     if (wantsML && !assertCanPrintMLOrWarn()) {
-      return; // não fecha a caixa, não imprime
+      return; // não fecha, não imprime
     }
 
-    // 1) fecha a caixa (sem imprimir)
-    fecharCaixaAtiva();
+    if (tipoVolume === "caixa") {
+      // ===== CAIXA (comportamento original) =====
+      const caixa = volumeAtual;
 
-    // 2) imprime conforme a tecla
-    if (e.key === 'F1') {
-      gerarEtiquetaCustom(caixa.id);    // ML + JP
-      gerarEtiquetaCaixa(caixa.id);
-    } else if (e.key === 'F2') {    // só ML
-      gerarEtiquetaCustom(caixa.id);
-    } else if (e.key === 'F3') {    // só JP
-      gerarEtiquetaCaixa(caixa.id);
-    } else if (e.key === 'F4') {
-      // nenhuma
+      fecharCaixaAtiva();
+
+      if (e.key === "F1") {
+        // ML + JP
+        gerarEtiquetaCustom(caixa.id);
+        gerarEtiquetaCaixa(caixa.id);
+      } else if (e.key === "F2") {
+        // só ML
+        gerarEtiquetaCustom(caixa.id);
+      } else if (e.key === "F3") {
+        // só JP
+        gerarEtiquetaCaixa(caixa.id);
+      } else if (e.key === "F4") {
+        // apenas fecha a caixa
+      }
+    } else if (tipoVolume === "pallet") {
+      // ===== PALLET (apenas Mercado Livre) =====
+
+      if (!isMercadoLivre()) {
+        Swal.fire(
+          "Ação indisponível",
+          "Pallets são utilizados apenas para agendamentos do Mercado Livre.",
+          "info"
+        );
+        return;
+      }
+
+      const pallet = volumeAtual;
+
+      // Para pallet:
+      // - F2: imprime APENAS etiqueta do pallet (Mercado Livre)
+      // - F4: fecha sem imprimir
+      // - F1 e F3: bloqueados (não imprime nada, não fecha)
+      if (e.key === "F1" || e.key === "F3") {
+        Swal.fire(
+          "Atalho indisponível para pallet",
+          "Para pallet, use apenas:\n\n" +
+          "<b>F2</b> = Imprimir etiqueta do pallet (Mercado Livre)\n" +
+          "<b>F4</b> = Fechar pallet sem imprimir",
+          "info"
+        );
+        return;
+      }
+
+      // A partir daqui só chega F2 ou F4
+      fecharPalletAtivo();
+
+      if (e.key === "F2") {
+        // Só etiqueta do pallet (Mercado Livre)
+        gerarEtiquetaPalletML(pallet.id);
+      } else if (e.key === "F4") {
+        // Apenas fecha o pallet, sem imprimir
+      }
     }
 
-    // 3) atualiza UI
+    // Atualiza botões / painel
     atualizarPainelEsquerdo();
   });
 
@@ -1046,22 +2477,223 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     caixaEl.classList.add('caixa-fechada');
 
     // 2) atualiza o header com número e total de itens
-    const header = caixaEl.querySelector('.card-header');
-    header.textContent = `Caixa ${caixa.id} - (${totalItens} ${totalItens > 1 ? 'itens' : 'item'})`;
+    const headerTitle = caixaEl.querySelector('.caixa-header-title');
+    const textoHeader = `Caixa ${caixa.id} - (${totalItens} ${totalItens > 1 ? 'itens' : 'item'})`;
+
+    if (headerTitle) {
+      headerTitle.textContent = textoHeader;
+    } else {
+      const header = caixaEl.querySelector('.card-header');
+      if (header) header.textContent = textoHeader;
+    }
 
     // 3) registra o timestamp de término
     caixa.endTime = new Date();
 
-    // 4) “desativa” a caixa atual antes de gerar a etiqueta
+    // 4) “desativa” a caixa atual
     caixaAtivaIndex = -1;
 
-    // 5) gera uma ZPL só para esta caixa (use o startTime que você já setou em abrirNovaCaixa)
+    // 5) atualiza botões / painel
+    atualizarPainelEsquerdo();
+  }
 
-    // 6) atualiza botões (“Nova Caixa” / “Finalizar”) conforme o estado
+  // === NOVO: fechar pallet ativo (F1–F4 quando o volume aberto é pallet) ===
+  function fecharPalletAtivo() {
+    if (
+      palletAtivoIndex === -1 ||
+      !pallets[palletAtivoIndex] ||
+      pallets[palletAtivoIndex].fechada
+    ) {
+      return;
+    }
+
+    const pallet = pallets[palletAtivoIndex];
+    const palletEl = pallet.element;
+    const totalItens = Object.values(pallet.itens || {}).reduce(
+      (sum, count) => sum + Number(count || 0),
+      0
+    );
+
+    if (totalItens === 0) {
+      Swal.fire({
+        icon: "warning",
+        title: "Ação inválida",
+        text: "Você não pode fechar um pallet vazio."
+      });
+      return;
+    }
+
+    // 1) marca o pallet como fechado
+    pallet.fechada = true;
+
+    if (palletEl) {
+      palletEl.classList.remove("pallet-aberto");
+      palletEl.classList.add("pallet-fechada");
+
+      const headerTitle =
+        palletEl.querySelector(".pallet-header-title") ||
+        palletEl.querySelector(".card-header");
+
+      const textoHeader = `Pallet ${pallet.id} - (${totalItens} ${totalItens > 1 ? "itens" : "item"})`;
+
+      if (headerTitle) {
+        headerTitle.textContent = textoHeader;
+      } else if (palletEl.querySelector(".card-header")) {
+        palletEl.querySelector(".card-header").textContent = textoHeader;
+      }
+    }
+
+    // 2) registra fim
+    pallet.endTime = new Date();
+
+    // 3) desativa pallet atual
+    palletAtivoIndex = -1;
+
+    // 4) atualiza painel
     atualizarPainelEsquerdo();
   }
 
   let scanBusy = false; // trava simples contra double-enter
+  // ====== NOVO: adicionar item no volume (caixa OU pallet) ======
+  async function adicionarItemNoVolume(etiqueta) {
+    const caixaAberta =
+      caixaAtivaIndex !== -1 &&
+      caixas[caixaAtivaIndex] &&
+      !caixas[caixaAtivaIndex].fechada;
+
+    const palletAberto =
+      palletAtivoIndex !== -1 &&
+      pallets[palletAtivoIndex] &&
+      !pallets[palletAtivoIndex].fechada;
+
+    if (!caixaAberta && !palletAberto) {
+      Swal.fire("Atenção", "Nenhuma caixa ou pallet aberto. Crie um volume antes.", "warning");
+      throw new Error("Nenhuma caixa ou pallet aberto.");
+    }
+
+    if (caixaAberta) {
+      return adicionarItemNaCaixa(etiqueta);
+    }
+
+    // se chegou aqui, é porque o pallet está aberto
+    return adicionarItemNoPallet(etiqueta);
+  }
+
+  // ====== NOVO: adicionar item no PALLET (usando /api/embalar/caixa + /api/embalar/scan) ======
+  async function adicionarItemNoPallet(etiqueta) {
+    // Garantia: precisa ter pallet aberto
+    if (
+      palletAtivoIndex === -1 ||
+      !pallets[palletAtivoIndex] ||
+      pallets[palletAtivoIndex].fechada
+    ) {
+      Swal.fire("Atenção", "Nenhum pallet aberto. Crie um pallet antes.", "warning");
+      throw new Error("Nenhum pallet aberto.");
+    }
+
+    if (scanBusy) return;
+    scanBusy = true;
+
+    const pallet = pallets[palletAtivoIndex];
+
+    // 1) Se ainda não existe no BD, cria via /api/embalar/caixa com type="pallet"
+    if (!pallet.persisted) {
+      try {
+        const {
+          caixa_num,
+          codigo_unico_caixa,
+          tipo
+        } = await fetchJSON("/api/embalar/caixa", {
+          method: "POST",
+          body: {
+            id_agend_ml: idAgendMl,
+            type: "pallet",
+          },
+        });
+
+        // No back o nome continua "caixa_num" / "codigo_unico_caixa", mas aqui é pallet
+        pallet.id = caixa_num;
+        pallet.codigo = codigo_unico_caixa;
+        pallet.persisted = true;
+
+        const headerTitle =
+          pallet.element.querySelector(".pallet-header-title") ||
+          pallet.element.querySelector(".card-header");
+        if (headerTitle) {
+          headerTitle.textContent = `Pallet ${pallet.id}`;
+        }
+      } catch (err) {
+        scanBusy = false;
+        console.error(err);
+        Swal.fire("Erro", "Não foi possível criar o pallet no servidor.", "error");
+        return;
+      }
+    }
+
+    // 2) Bipagem atômica: /api/embalar/scan com type="pallet"
+    try {
+      const resp = await fetchJSON("/api/embalar/scan", {
+        method: "POST",
+        body: {
+          id_agend_ml: idAgendMl,
+          id_prod_ml: etiqueta,           // etiqueta do anúncio
+          sku: etiqueta,                  // SKU gravado na tabela de itens
+          codigo_unico_caixa: pallet.codigo,
+          caixa_num: pallet.id,
+          type: "pallet",                 // <- chave para usar as tabelas de pallet
+        },
+      });
+
+      if (resp.ok === false) {
+        throw new Error(resp.error || "Falha ao bipar no pallet.");
+      }
+
+      // No back vem quantidade_caixa mesmo para pallet
+      const quantidade =
+        Number(resp.quantidade_caixa ?? resp.quantidade ?? 0) || 0;
+
+      pallet.itens[etiqueta] = quantidade;
+
+      const body = pallet.element.querySelector(".card-body");
+      let ul = pallet.element.querySelector(".pallet-itens-list");
+      const hint = pallet.element.querySelector(".pallet-hint");
+
+      if (!ul) {
+        ul = document.createElement("ul");
+        ul.className = "list-unstyled mb-0 pallet-itens-list";
+        if (body) body.appendChild(ul);
+      }
+
+      if (hint) hint.remove();
+
+      let li = ul.querySelector(`li[data-etiqueta="${etiqueta}"]`);
+      if (!li) {
+        li = document.createElement("li");
+        li.dataset.etiqueta = etiqueta;
+        li.className = "d-flex justify-content-between p-1";
+        ul.appendChild(li);
+      }
+
+      li.innerHTML = `<span>${esc(etiqueta)}</span><span class="fw-bold">Unidades: ${esc(
+        quantidade
+      )}</span>`;
+      li.classList.add("item-caixa-novo");
+      setTimeout(() => li.classList.remove("item-caixa-novo"), 700);
+
+      // Atualiza também o card da direita (produto) se o back mandar bipados
+      if (resp.id_prod_ml !== undefined && resp.bipados !== undefined) {
+        atualizarStatusProduto(resp.id_prod_ml, resp.bipados);
+      }
+
+      return resp;
+    } catch (err) {
+      console.error("Erro ao bipar no pallet:", err);
+      Swal.fire("Erro", err.message || "Falha ao bipar no pallet", "error");
+    } finally {
+      scanBusy = false;
+    }
+  }
+
   async function adicionarItemNaCaixa(etiqueta) {
     if (caixaAtivaIndex === -1 || caixas[caixaAtivaIndex].fechada) {
       Swal.fire("Atenção", "Nenhuma caixa aberta. Crie uma nova caixa antes.", "warning");
@@ -1265,10 +2897,12 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
         Swal.fire({ icon: "info", title: "Anúncio já finalizado!", timer: 1800, showConfirmButton: false });
         return;
       }
-      // chama a função atômica (já atualiza UI)
+      // chama a função atômica no VOLUME (caixa OU pallet)
       try {
-        await adicionarItemNaCaixa(valor);
-      } catch { /* erros já tratados internamente */ }
+        await adicionarItemNoVolume(valor);
+      } catch {
+        // erros já tratados internamente (Swal + logs)
+      }
       return;
     }
 

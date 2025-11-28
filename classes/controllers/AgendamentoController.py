@@ -375,7 +375,7 @@ class AgendamentoController:
         if not id_tiny:
             return ""
         resp_details = self.caller.make_call(f"produtos/{id_tiny}")
-        time.sleep(1.25)
+        time.sleep(0.85)
 
         # DEBUG
         logger.debug("[IMG] detalhes(%s) tipo: %s", id_tiny, type(resp_details).__name__)
@@ -392,7 +392,7 @@ class AgendamentoController:
     def get_prod_data_tiny(self, agendamento:Agendamento = None):
         for produto in agendamento.produtos:
             resp = self.caller.make_call('produtos', params_add={'codigo': produto.sku})
-            time.sleep(1.25)
+            time.sleep(0.85)
 
             # DEBUG
             if isinstance(resp, dict):
@@ -449,7 +449,7 @@ class AgendamentoController:
         composicoes_dict = self.get_all_composicoes_grouped(agendamento)
         for id_tiny in composicoes_dict:
             resp = self.caller.make_call(f'produtos/{id_tiny}')
-            time.sleep(1.25)
+            time.sleep(0.85)
 
             if not isinstance(resp, dict):
                 logger.warning("AVISO: Falha ao buscar dados da composição com id_tiny %s. Resposta: %s", id_tiny, resp)
@@ -688,6 +688,118 @@ class AgendamentoController:
         except Exception as e:
             return False, f"Erro ao atualizar agendamento: {str(e)}"
 
+    def update_excel_agendamento(
+        self,
+        id_bd: int,
+        colaborador: str,
+        empresa: int,
+        id_mktp: int,
+        id_tipo: int,
+        excel_path: str,
+        centro_distribuicao: Optional[str] = None,
+    ):
+        """
+        Atualiza um agendamento (Shopee / Excel) a partir de uma nova planilha,
+        mantendo o mesmo número de pedido (id_agend_ml) já existente no banco.
+        """
+        try:
+            # 1) Carrega agendamentos do BD em memória
+            self.create_agendamento_from_bd_data()
+            agendamento_original = self.search_agendamento("id_bd", str(id_bd))
+
+            if not agendamento_original:
+                return False, f"Agendamento com id_bd={id_bd} não encontrado."
+
+            # 2) Mantém o número de pedido original
+            original_id_agend_ml = agendamento_original.id_agend_ml
+
+            # 3) Atualiza meta-dados em memória (SEM trocar o número do pedido)
+            agendamento_original.colaborador = colaborador
+            agendamento_original.empresa = empresa
+            agendamento_original.id_mktp = id_mktp
+            agendamento_original.id_tipo = id_tipo
+
+            centro_final = (
+                centro_distribuicao
+                if centro_distribuicao is not None
+                else agendamento_original.centro_distribuicao
+            )
+            agendamento_original.centro_distribuicao = centro_final
+
+            # 4) Limpa produtos e composições antigos no BD
+            self.db_controller.delete_composicoes_by_agendamento(id_bd)
+            self.db_controller.delete_produtos_by_agendamento(id_bd)
+
+            # 5) Recria o agendamento EM MEMÓRIA a partir do Excel
+            #    Usando o mesmo número de pedido original (original_id_agend_ml)
+            novo = self.create_agendamento_from_excel(
+                excel_path=excel_path,
+                id_tipo=id_tipo,
+                empresa=empresa,
+                id_mktp=id_mktp,
+                colaborador=colaborador,
+                upload_uuid=original_id_agend_ml,
+            )
+
+            # Garante que centro/campos estejam consistentes
+            novo.centro_distribuicao = centro_final
+
+            # Usa o MESMO id_bd do agendamento original
+            self.set_id_bd_for_all(novo, id_bd)
+
+            # 6) Recarrega dados do Tiny (id_tiny, composições, etc.)
+            self.get_prod_data_tiny(novo)
+            self.get_comp_tiny(novo)
+            self.get_comp_data_tiny(novo)
+
+            # 7) Insere produtos novos no BD
+            self.insert_produto_in_bd(novo)
+
+            # 8) Recarrega produtos do BD e mapeia id_bd <-> objetos em memória (por SKU)
+            produtos_bd = self.return_all_produtos_from_agendamento(novo)
+
+            mapa_produtos_memoria: dict[str, list[Produto]] = {}
+            for prod in novo.produtos:
+                mapa_produtos_memoria.setdefault(prod.sku, []).append(prod)
+
+            # Re-mapeia produtos do BD para objetos em memória usando o MESMO índice de SKU
+            # usado no fluxo de criação (tpl[4] = sku_prod).
+            for tpl in produtos_bd:
+                # precisa ter ao menos 5 colunas: [0]=id_prod, [1]=id_agend, [2]=id_tiny, [3]=nome, [4]=sku
+                if len(tpl) < 5:
+                    continue
+
+                id_prod_bd = tpl[0]   # id_produto no BD
+                sku_prod_bd = tpl[4]  # sku_prod no BD (mesmo índice do fluxo de criação)
+
+                if sku_prod_bd in mapa_produtos_memoria and mapa_produtos_memoria[sku_prod_bd]:
+                    produto_obj = mapa_produtos_memoria[sku_prod_bd].pop(0)
+                    # agora o Produto em memória passa a ter o id_bd correto
+                    produto_obj.set_id_bd(id_prod_bd)
+                    # e esta chamada propaga o id_prod_bd para todas as composições (id_prod_comp)
+                    produto_obj.set_id_bd_for_composicoes()
+
+            # 9) Insere composições e flags de erro
+            self.insert_composicao_in_bd(novo)
+            self.set_error_flags_composicoes(novo)
+
+            # 10) Atualiza as informações do agendamento no BD
+            self.db_controller.update_agendamento(
+                id_agend_bd=agendamento_original.id_bd,
+                id_agend_ml=agendamento_original.id_agend_ml,  # MESMO número de pedido
+                id_agend_tipo=agendamento_original.id_tipo,
+                empresa=agendamento_original.empresa,
+                id_mktp=agendamento_original.id_mktp,
+                colaborador=agendamento_original.colaborador,
+                centro_distribuicao=agendamento_original.centro_distribuicao,
+            )
+
+            return True, "Agendamento atualizado com sucesso (Excel)."
+
+        except Exception as e:
+            print(f"Erro ao atualizar agendamento (Excel): {e}")
+            return False, f"Erro ao atualizar agendamento: {e}"
+
     def get_comp_tiny(self, agendamento: Agendamento = None):
         """
         Busca as composições (kits) dos produtos do agendamento no Tiny.
@@ -714,7 +826,7 @@ class AgendamentoController:
             # 1) Tenta endpoint oficial de kit
             try:
                 resp_kit = self.caller.make_call(f"produtos/{produto.id_tiny}/kit")
-                time.sleep(1.25)
+                time.sleep(0.85)
                 if isinstance(resp_kit, list):
                     itens_norm = resp_kit
                 elif isinstance(resp_kit, dict) and isinstance(resp_kit.get("itens"), list):
@@ -726,7 +838,7 @@ class AgendamentoController:
             if not itens_norm:
                 try:
                     resp_det = self.caller.make_call(f"produtos/{produto.id_tiny}")
-                    time.sleep(1.25)
+                    time.sleep(0.85)
                     data = resp_det.get("produto", resp_det) if isinstance(resp_det, dict) else {}
 
                     # a) Novo modelo: 'composicoes' -> [{ item_composicao: {..., quantidade } }]
@@ -814,7 +926,7 @@ class AgendamentoController:
             # Etapa 1: Buscar o ID do produto pelo SKU, considerando apenas produtos ativos
             params = {'codigo': sku, 'situacao': 'A'}
             resp_sku = self.caller.make_call("produtos", params_add=params)
-            time.sleep(1.25)
+            time.sleep(0.85)
 
             if resp_sku.get('itens') and len(resp_sku['itens']) > 0:
                 id_tiny = resp_sku['itens'][0].get('id')
@@ -822,7 +934,7 @@ class AgendamentoController:
                 if id_tiny:
                     # Etapa 2: Buscar os detalhes do produto pelo ID
                     resp_details = self.caller.make_call(f"produtos/{id_tiny}")
-                    time.sleep(1.25)
+                    time.sleep(0.85)
                     
                     # Etapa 3: Extrair a URL do primeiro anexo, se existir
                     data = resp_details.get('produto', resp_details) if isinstance(resp_details, dict) else {}

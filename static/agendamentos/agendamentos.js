@@ -165,17 +165,57 @@ function setFiltros() {
     });
 }
 
-// Upload (PDF/Excel)
+// Upload (PDF/Excel) – Novo agendamento
 function abrirModalUpload() {
     const colaborador = $('#nome_colaborador').val();
 
-    // lê do <select> com fallback para os hiddens (fluxo por botões)
-    const empresa = $('#nome_empresa').val() || $('#inp_nome_emp').val();
-    const marketplace = $('#nome_marketplace').val() || $('#inp_mktp_pedido').val();
-    const tipo = $('#nome_tipo').val() || $('#inp_tipo_pedido').val();
+    // Sempre zera o id_bd quando for "Novo agendamento"
+    $('#upload_id_bd').val('');
 
-    // só grava centro se for Meli; caso contrário, zera
-    const centro = (String(marketplace) === '1') ? ($('#nome_centro_distribuicao').val() || '') : '';
+    // =========================
+    // 1) Empresa
+    // =========================
+    // Primeiro: o que veio do modal "Selecionar empresa"
+    let empresa = $('#nome_empresa').val() || $('#inp_nome_emp').val() || '';
+
+    // Se ainda não tiver nada, tenta aproveitar o filtro da barra
+    if (!empresa) {
+        const empFiltro = $('#inp_emp_pedido').val();
+        if (empFiltro && /^\d+$/.test(empFiltro)) {
+            empresa = empFiltro; // só usa se for numérico
+        }
+    }
+
+    // =========================
+    // 2) Marketplace
+    // =========================
+    // Já é definido em abrirModalAgendamento() pelo select do modal
+    let marketplace = $('#nome_marketplace').val() || $('#inp_mktp_pedido').val() || '';
+
+    if (!marketplace) {
+        const mktFiltro = $('#inp_mktp_pedido').val();
+        if (mktFiltro && /^\d+$/.test(mktFiltro)) {
+            marketplace = mktFiltro;
+        }
+    }
+
+    // =========================
+    // 3) Tipo de agendamento
+    // =========================
+    let tipo = $('#nome_tipo').val() || '';
+
+    // Preenche os hiddens do form de upload
+    $('#upload_empresa').val(empresa);
+    $('#upload_marketplace').val(marketplace);
+    $('#upload_tipo').val(tipo);
+
+    // Centro de distribuição só faz sentido para Mercado Livre (1)
+    let centro = '';
+    if (String(marketplace) === '1') {
+        centro = $('#nome_centro_distribuicao').val()
+            || $('#inp_centro_distribuicao').val()
+            || '';
+    }
     $('#inp_centro_distribuicao').val(centro);
 
     const form = $('#form_upload_pdf');
@@ -184,12 +224,13 @@ function abrirModalUpload() {
     const label = $('#modalUploadPdfLabel');
     const helpText = $('#upload_help_text');
 
-    if (marketplace === '2' || marketplace === '3') {
+    // Regra: somente Mercado Livre (1) usa PDF; demais marketplaces usam Excel
+    if (marketplace && marketplace !== '1') {
         form.attr('action', '/upload-excel');
         fileInput.attr({ name: 'file', accept: '.xlsx,.xls,.csv' });
         btn.text('Enviar Excel');
         label.text('Upload do Excel');
-        helpText.text('Selecione o arquivo Excel (.xlsx) do pedido:');
+        helpText.text('Selecione o arquivo Excel (.xlsx, .xls ou .csv) do pedido:');
     } else {
         form.attr('action', '/upload-pdf');
         fileInput.attr({ name: 'path', accept: 'application/pdf' });
@@ -199,9 +240,6 @@ function abrirModalUpload() {
     }
 
     $('#upload_colaborador').val(colaborador);
-    $('#upload_empresa').val(empresa);
-    $('#upload_marketplace').val(marketplace);
-    $('#upload_tipo').val(tipo);
 
     const modalTipo = bootstrap.Modal.getInstance(document.getElementById('modalTipoAgendamento'));
     if (modalTipo) modalTipo.hide();
@@ -210,7 +248,6 @@ function abrirModalUpload() {
         new bootstrap.Modal(document.getElementById('modalUploadPdf')).show();
     }, 300);
 }
-
 
 // Loader no submit do upload (com guard)
 (() => {
@@ -246,10 +283,26 @@ window.addEventListener("load", () => {
     const clearQS = () => window.history.replaceState({}, document.title, window.location.pathname);
 
     if (upload === "ok_excel") {
-        Swal.fire({ icon: 'success', title: 'Excel processado!', text: 'O agendamento foi criado com sucesso.', confirmButtonText: 'OK' })
-            .then(clearQS);
+        Swal.fire({
+            icon: 'success',
+            title: 'Excel processado!',
+            text: 'O agendamento foi criado com sucesso.',
+            confirmButtonText: 'OK'
+        }).then(clearQS);
         return;
     }
+
+    // usado quando o back-end redirecionar com ?upload=ok_excel_update
+    if (upload === "ok_excel_update") {
+        Swal.fire({
+            icon: 'success',
+            title: 'Excel atualizado!',
+            text: 'O agendamento foi atualizado com sucesso.',
+            confirmButtonText: 'OK'
+        }).then(clearQS);
+        return;
+    }
+
     if (upload === "ok_pdf") {
         Swal.fire({ icon: 'success', title: 'PDF processado!', text: 'O agendamento foi criado com sucesso.', confirmButtonText: 'OK' })
             .then(clearQS);
@@ -313,38 +366,84 @@ function abrirModalAlteracoes(id) {
 
 function abrirModalAtualizarPDF(id_bd, id_agend_ml) {
     const form = document.getElementById('form_upload_pdf');
-    const modal = new bootstrap.Modal(document.getElementById('modalUploadPdf'));
+    const modalElement = document.getElementById('modalUploadPdf');
+    const modal = new bootstrap.Modal(modalElement);
     const modalLabel = document.getElementById('modalUploadPdfLabel');
     const infoParaUsuario = document.getElementById('info-atualizacao-pdf');
 
-    form.action = '/upload-pdf';
-    if (!document.getElementById('upload_id_bd')) {
-        const hiddenInput = document.createElement('input');
-        hiddenInput.type = 'hidden';
-        hiddenInput.name = 'id_bd';
-        hiddenInput.id = 'upload_id_bd';
-        form.appendChild(hiddenInput);
-    }
-    document.getElementById('upload_id_bd').value = id_bd;
+    const fileInput = form.querySelector('input[type="file"]');
+    const submitButton = form.querySelector('button[type="submit"]');
+    const helpText = document.getElementById('upload_help_text');
 
+    // Garante input hidden para id_bd
+    let hiddenId = document.getElementById('upload_id_bd');
+    if (!hiddenId) {
+        hiddenId = document.createElement('input');
+        hiddenId.type = 'hidden';
+        hiddenId.name = 'id_bd';
+        hiddenId.id = 'upload_id_bd';
+        form.appendChild(hiddenId);
+    }
+    hiddenId.value = id_bd;
+
+    // Recupera o card do agendamento para extrair dados (empresa, marketplace, tipo, centro)
     const botao = document.getElementById(`btn-modal--${id_bd}--`);
-    const card = botao.closest('.agendamento-container');
+    const card = botao ? botao.closest('.agendamento-container') : null;
 
     const getClassValue = (prefix) => {
-        const cls = [...card.classList].find(c => c.startsWith(prefix));
+        if (!card) return '';
+        const cls = Array.from(card.classList).find((c) => c.startsWith(prefix));
         return cls ? cls.replace(prefix, '') : '';
     };
 
-    const centroDistribuicao = card.dataset.centro || '';
+    const centroDistribuicao = card?.dataset.centro || '';
 
-    document.getElementById('upload_colaborador').value = card.querySelector('.text-primary')?.innerText || '';
+    const colaborador = card?.querySelector('.text-primary')?.innerText || '';
+    document.getElementById('upload_colaborador').value = colaborador;
     document.getElementById('upload_empresa').value = getClassValue('emp-');
     document.getElementById('upload_marketplace').value = getClassValue('id_mktp-');
     document.getElementById('upload_tipo').value = getClassValue('tipo-');
-    document.getElementById('inp_centro_distribuicao').value = centroDistribuicao;
 
-    modalLabel.textContent = 'Atualizar PDF do Pedido';
-    infoParaUsuario.innerHTML = `Atualizando o agendamento do pedido: <strong>${id_agend_ml}</strong>`;
+    const marketplace = document.getElementById('upload_marketplace').value;
+
+    // Centro de distribuição só faz sentido para Mercado Livre (PDF)
+    document.getElementById('inp_centro_distribuicao').value =
+        marketplace === '1' ? centroDistribuicao : '';
+
+    // Decide se é PDF (Mercado Livre) ou Excel (demais marketplaces)
+    if (marketplace && marketplace !== '1') {
+        // Excel (Shopee, Magalu, Amazon, etc.)
+        form.action = '/upload-excel';
+        if (fileInput) {
+            fileInput.name = 'file';
+            fileInput.accept = '.xlsx,.xls,.csv';
+        }
+        if (submitButton) {
+            submitButton.textContent = 'Atualizar Excel';
+        }
+        modalLabel.textContent = 'Atualizar Excel do Pedido';
+        if (helpText) {
+            helpText.textContent =
+                'Selecione o arquivo Excel (.xlsx, .xls ou .csv) para atualizar o pedido:';
+        }
+    } else {
+        // Mercado Livre → PDF
+        form.action = '/upload-pdf';
+        if (fileInput) {
+            fileInput.name = 'path';
+            fileInput.accept = 'application/pdf';
+        }
+        if (submitButton) {
+            submitButton.textContent = 'Atualizar PDF';
+        }
+        modalLabel.textContent = 'Atualizar PDF do Pedido';
+        if (helpText) {
+            helpText.textContent = 'Selecione o arquivo PDF do pedido:';
+        }
+    }
+
+    infoParaUsuario.innerHTML =
+        `Você está atualizando o agendamento do pedido: <strong>${id_agend_ml}</strong>`;
     infoParaUsuario.style.display = 'block';
 
     modal.show();
