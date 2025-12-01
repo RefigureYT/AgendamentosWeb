@@ -72,7 +72,7 @@ def bipar_embalagem():
     data = request.get_json() or {}
     id_agend = data.get("id_agend_ml")
     id_prod_ml = data.get("id_prod_ml")
-    if not id_agend or not id_prod_ml: # E verificamos a nova variável
+    if not id_agend or not id_prod_ml:  # E verificamos a nova variável
         return jsonify(error="Parâmetros 'id_agend_ml' e 'id_prod_ml' são obrigatórios."), 400
 
     insert_sql = """
@@ -97,6 +97,38 @@ def bipar_embalagem():
     except Exception as e:
         print(f"Erro em bipar_embalagem: {e}")
         return jsonify(error=str(e)), 500
+
+
+@bp_embalar.route('/api/embalar/iniciar', methods=['POST'])
+def iniciar_embalagem():
+    """
+    Cria um registro para um produto no início da embalagem com 0 bipados.
+    (Usado quando o operador clica em "Iniciar embalagem" para um anúncio.)
+    """
+    data = request.get_json() or {}
+    id_agend = data.get("id_agend_ml")
+    id_prod_ml = data.get("id_prod_ml")
+
+    if not id_agend or not id_prod_ml:
+        return jsonify(error="Parâmetros 'id_agend_ml' e 'id_prod_ml' são obrigatórios."), 400
+    sql = """
+        INSERT INTO embalagem_bipados (id_agend_ml, id_prod_ml, bipados)
+        VALUES (%s, %s, 0)
+        ON DUPLICATE KEY UPDATE bipados = 0
+    """
+
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur = conn.cursor()
+        cur.execute(sql, (id_agend, id_prod_ml))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify(success=True, message="Produto iniciado na embalagem.")
+    except Exception as e:
+        print(f"Erro em iniciar_embalagem: {e}")
+        return jsonify(error=str(e)), 500
+
 
 @bp_embalar.route('/api/embalar/bipados/<id_agend_ml>')
 def api_embalar_bipados(id_agend_ml):

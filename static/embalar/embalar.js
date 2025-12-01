@@ -446,6 +446,9 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   // Adiciona a lista de produtos (que já inclui as composições)
   agendamentoCompleto.produtos = produtos;
 
+  // NOVO: inicializa o painel "Bipados: X / Y" (Y = soma das unidades)
+  atualizarResumoBipados();
+
   // Finalmente, exibe o objeto completo no console
   console.log("Dados do Agendamento (reconstruídos pelo JS):", agendamentoCompleto);
 
@@ -2840,6 +2843,7 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     }
 
     atualizarContadorFinalizados();
+    atualizarResumoBipados();      // NOVO: atualiza "Bipados: X / Y"
     atualizarPainelEsquerdo();
   }
 
@@ -2850,6 +2854,28 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
       contadorFinalizadosEl.innerHTML = `<strong>✅ Finalizados:</strong> ${contagem}`;
     }
     // A chamada para atualizarPainelEsquerdo() foi removida daqui.
+  }
+
+  // NOVO: resumo global de bipagem (Bipados: X / Y)
+  function atualizarResumoBipados() {
+    const bipadosContEl = document.getElementById("bipados-contabilizador");
+    const bipadosTotalEl = document.getElementById("bipados-total");
+
+    if (!bipadosContEl || !bipadosTotalEl) return;
+
+    let totalNecessario = 0;
+    let totalBipados = 0;
+
+    (produtos || []).forEach((p) => {
+      const requerido = Number(p.unidades || 0);
+      const bip = Number(p.bipados ?? 0);
+
+      totalNecessario += requerido;
+      totalBipados += Math.min(bip, requerido);
+    });
+
+    bipadosContEl.textContent = String(totalBipados);
+    bipadosTotalEl.textContent = String(totalNecessario);
   }
 
   // --- [REIMPRIMIR] handler global (delegação) ---
