@@ -9,12 +9,62 @@ body {
 
 .produto-item,
 .produto-item-modal {
+  position: relative;
   background-color: #f8f9fa;
-  border: 1px solid #ccc;
-  padding: 10px;
-  margin-bottom: 6px;
-  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-radius: 10px;
   font-size: 0.95rem;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .06);
+}
+
+/* PENDENTES: controlamos o z-index só aqui */
+#pendentesContainer .produto-item {
+  z-index: 1;
+}
+
+/* quando o usuário interage, esse card vem pra frente dos demais */
+#pendentesContainer .produto-item:hover {
+  z-index: 10;
+}
+
+/* MODAL: os cards ficam acima da coluna da esquerda */
+#modal-editar-produto .produto-item-modal {
+  z-index: 20;
+}
+
+/* quando passar o mouse em QUALQUER card do modal,
+   ele vem pra frente dos outros (incluindo equivalentes) */
+#modal-editar-produto .produto-item-modal:hover {
+  z-index: 30;
+}
+
+/* quando for concluído e você pintar de verde via JS/inline,
+   o card continua com a mesma “estrutura” */
+.produto-item.concluido {
+  border-color: #16a34a;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, .25);
+}
+
+.sku-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 4px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+/* garante que o grupo não estique demais */
+.sku-actions .deposito-select {
+  min-width: 160px;
+  font-size: 0.8rem;
+  padding: 2px 28px 2px 8px;
+  border-radius: 999px;
+  border-color: transparent;
+  background-color: #ffffff;
 }
 
 .header-bar {
@@ -32,6 +82,202 @@ body {
   padding: 10px;
   border-radius: 4px;
   font-size: 0.9rem;
+}
+
+/* ===== Layout específico para produtos concluídos ===== */
+
+#concluidosContainer .produto-item>.d-flex {
+  /* garante quebra organizada em duas “linhas” */
+  flex-wrap: wrap;
+  row-gap: 4px;
+  column-gap: 8px;
+}
+
+/* Nome sempre ocupa a primeira linha inteira */
+#concluidosContainer .produto-item .produto-nome {
+  flex: 1 1 100%;
+}
+
+/* Grupo de ações (lápis, +, depósito) fica à esquerda na segunda linha */
+#concluidosContainer .produto-item .produto-acoes {
+  order: 2;
+}
+
+/* Info (SKU, Bipados) vai para a direita na segunda linha */
+#concluidosContainer .produto-item .produto-info {
+  order: 3;
+  margin-left: auto;
+}
+
+/* ===== Painel de produtos pendentes ===== */
+
+/* container dos pendentes: mais alto e com espaço pro popover do último item */
+#pendentesContainer {
+  max-height: 80vh;      /* antes era 70vh inline */
+  padding-bottom: 40px;  /* espaço extra para o popover do último produto */
+}
+
+#pendentesContainer .produto-item {
+  background-color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #dbeafe;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.08s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+#pendentesContainer .produto-item:hover {
+  background-color: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  transform: translateY(-1px);
+}
+
+/* Layout interno parecido com os concluídos, mas neutro */
+#pendentesContainer .produto-item>.d-flex {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  column-gap: 10px;
+}
+
+/* Nome ocupando a primeira linha inteira */
+#pendentesContainer .produto-item .produto-nome {
+  flex: 1 1 100%;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+/* Grupo de ações (lápis, +, depósito) à esquerda na segunda linha */
+#pendentesContainer .produto-item .produto-acoes {
+  order: 2;
+}
+
+/* Info de SKU/Bipados à direita na segunda linha */
+#pendentesContainer .produto-item .produto-info {
+  order: 3;
+  margin-left: auto;
+  font-size: 0.9rem;
+  color: #374151;
+}
+
+/* Barra de progresso com pill e bem discreta */
+#pendentesContainer .produto-item .progress {
+  margin-top: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background-color: #e5e7eb;
+}
+
+/* ==== "izinho" de imagem nos cards ==== */
+.produto-thumb-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* bolinha azul com "i" */
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: default;
+}
+
+/* popover com a imagem */
+.produto-thumb-popover {
+  position: absolute;
+  top: 120%;
+  right: 0;
+  padding: 8px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25);
+  z-index: 50;
+
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* mostra a imagem ao passar o mouse no izinho */
+.produto-thumb-wrap:hover .produto-thumb-popover {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* imagem dentro do popover */
+.produto-thumb-popover img {
+  max-width: 220px;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+}
+
+/* Variante do popover DENTRO do modal Editar Produto */
+#modal-editar-produto .produto-item-modal .produto-thumb-popover {
+  top: 100%;
+  left: 0;
+  right: auto;
+  margin-top: 6px;
+
+  max-width: 220px;     /* não deixa atravessar o modal todo */
+  z-index: 40;          /* acima da coluna da esquerda */
+}
+
+/* imagem um pouco menor no modal pra caber melhor */
+#modal-editar-produto .produto-item-modal .produto-thumb-popover img {
+  max-width: 180px;
+}
+
+/* ==== ESTILO PARA PRODUTOS CONCLUÍDOS NO PAINEL DE PENDENTES ==== */
+#pendentesContainer .produto-item.concluido {
+  background-color: #ecfdf3;            /* verde bem claro */
+  border-color: #bbf7d0;
+  box-shadow: 0 4px 14px rgba(22, 163, 74, 0.25);
+}
+
+/* grupo lápis / + / depósito continua destacado, mas em verde suave */
+#pendentesContainer .produto-item.concluido .sku-actions {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+/* texto “SKU / Bipados” em verde escuro elegante */
+#pendentesContainer .produto-item.concluido .produto-info {
+  color: #065f46;
+}
+
+/* label de SKU */
+.sku-label {
+  font-weight: 600;
+  color: #065f46;
+}
+
+/* barra de progresso 100% em verde bonito */
+#pendentesContainer .produto-item.concluido .progress {
+  background-color: #bbf7d0;
+}
+
+#pendentesContainer .produto-item.concluido .progress-bar {
+  background-color: #16a34a;  /* verde principal */
+  color: #ecfdf3;
 }
 
 .input-equivalente-off {
@@ -153,88 +399,190 @@ body {
   }
 }
 
-/* ===== Modal custom (não-Bootstrap) ===== */
-/* Overlay */
+/* ===== Modal custom (não-Bootstrap) – Jaú Pesca ===== */
+
+/* Overlay base (usado no Editar Produto e no Adicionar equivalente) */
 .modal {
   display: none;
-  /* começa escondido */
+  /* JS controla visibilidade */
   position: fixed;
   inset: 0;
-  /* top/right/bottom/left: 0 */
-  background: rgba(0, 0, 0, .5);
-  z-index: 10000;
-  /* acima de tudo */
+  z-index: 1085;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 24px;
   overflow: hidden;
 }
 
-/* Caixa */
+/* Caso o JS use alguma classe para abrir, já fica preparado */
+.modal.aberto,
+.modal.is-visible {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Caixa principal do modal */
 .modal-content {
-  background: #fff;
-  color: #000;
-  /* garante contraste */
-  margin: 8% auto;
-  /* centraliza */
-  padding: 20px;
-  border-radius: 8px;
-  width: 90%;
-  height: 70%;
-  max-width: 1000px;
-  max-height: 700px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .3);
+  position: absolute;
+  /* centraliza no meio da tela */
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  width: 100%;
+  max-width: 1040px;
+  max-height: 90vh;
+
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.4);
+  overflow: hidden;
 }
 
-.close {
-  float: right;
-  cursor: pointer;
-  font-size: 24px;
-}
-
-.close:hover {
-  opacity: .7;
-}
-
-/* Grid interno: coluna info (esq) + lista (dir) */
+/* Grid interno do modal de edição:
+   esquerda = master | direita = lista de produtos */
 .modal-grid {
   display: grid;
-  grid-template-columns: 420px 1fr;
-  gap: 20px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+  margin-top: 12px;
 }
 
-/* Coluna direita com rolagem vertical quando exceder */
+/* Coluna esquerda (info do produto master) */
+#conteudoModalEditarProduto {
+  background: #f9fafb;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  padding: 12px 14px;
+}
+
+/* Imagem do produto master */
+#master-img {
+  display: block;
+  margin-top: 10px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25);
+}
+
+/* Coluna direita (lista de produtos do conjunto) */
+#listaProdutos {
+  position: relative;
+  z-index: 10;
+  background: #f9fafb;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  padding: 10px 12px;
+}
+
+/* Scroll da coluna de produtos dentro do modal */
 .produtos-scroll {
   max-height: 600px;
-  /* mesmo alto do painel esquerdo */
   overflow-y: auto;
   padding-right: 6px;
-  /* respiro para a barra */
 }
 
-/* Badge simples (se não estiver usando Bootstrap) */
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #e5e7eb;
-  color: #111827;
-  font-size: 0.8rem;
-  vertical-align: middle;
-}
-
-/* Rodapé do modal com botão fixo/visível */
+/* Rodapé de ações dos modais */
 .modal-actions {
-  position: sticky;
-  bottom: 0;
-  margin: 16px -20px -20px;
-  /* encosta nas bordas do modal-content */
-  padding: 12px 50px;
-  background: linear-gradient(#ffffffcc, #ffffff);
-  /* leve destaque */
+  margin-top: 18px;
+  padding-top: 12px;
   border-top: 1px solid #e5e7eb;
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: flex-end;
   align-items: center;
-  z-index: 1;
+}
+
+/* Botões dentro dos modais – escopo só nos modais custom */
+#modal-editar-produto .modal-actions .btn,
+#modal-equivalente .modal-actions .btn {
+  border-radius: 999px;
+  font-weight: 600;
+  padding: 6px 18px;
+}
+
+/* Botão secundário (Cancelar) */
+#modal-editar-produto .modal-actions .btn.btn-outline,
+#modal-equivalente .modal-actions .btn.btn-outline {
+  border-color: #d1d5db;
+  background-color: #ffffff;
+  color: #374151;
+}
+
+#modal-editar-produto .modal-actions .btn.btn-outline:hover,
+#modal-equivalente .modal-actions .btn.btn-outline:hover {
+  background-color: #f3f4f6;
+}
+
+/* Botão principal (Salvar / Adicionar) com azul Jaú Pesca */
+#modal-editar-produto .modal-actions .btn.btn-primary,
+#modal-equivalente .modal-actions .btn.btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 30%, #1e40af 100%);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.35);
+  transition: transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+#modal-editar-produto .modal-actions .btn.btn-primary:hover,
+#modal-equivalente .modal-actions .btn.btn-primary:hover {
+  filter: brightness(1.02);
+  transform: translateY(-1px);
+  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.5);
+}
+
+/* Modal “Adicionar equivalente” mais enxuto */
+#modal-equivalente .modal-content {
+  max-width: 720px;
+  /* modal menor só para o equivalente */
+}
+
+#modal-equivalente .info-box {
+  background: #f9fafb;
+  border-radius: 12px;
+  border-color: #e5e7eb;
+}
+
+/* Input do equivalente com visual de pill */
+#modal-equivalente #eq-input {
+  border-radius: 999px;
+  padding-left: 14px;
+  padding-right: 14px;
+  height: 40px;
+}
+
+/* Responsivo */
+@media (max-width: 992px) {
+  .modal {
+    padding: 16px;
+  }
+
+  .modal-content {
+    max-width: 100%;
+    padding-inline: 16px;
+  }
+
+  .modal-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .produtos-scroll {
+    max-height: 260px;
+  }
+}
+
+@media (max-width: 576px) {
+  .modal-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .modal-actions .btn {
+    width: 100%;
+  }
 }
 
 /* ===== Botões básicos (se não estiver usando Bootstrap) ===== */
@@ -350,23 +698,35 @@ body {
 .spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid rgba(0,0,0,.12);
+  border: 3px solid rgba(0, 0, 0, .12);
   border-left-color: currentColor;
   border-radius: 50%;
   animation: spin .8s linear infinite;
   margin: 0 auto;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .skeleton {
-  background: linear-gradient(90deg, rgba(0,0,0,.06) 25%, rgba(0,0,0,.12) 37%, rgba(0,0,0,.06) 63%);
+  background: linear-gradient(90deg, rgba(0, 0, 0, .06) 25%, rgba(0, 0, 0, .12) 37%, rgba(0, 0, 0, .06) 63%);
   background-size: 400% 100%;
   animation: shimmer 1.2s ease-in-out infinite;
 }
+
 @keyframes shimmer {
-  0% { background-position: 100% 0; }
-  100% { background-position:   0% 0; }
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: 0% 0;
+  }
 }
+
 .img-skeleton {
   width: 120px;
   height: 120px;
@@ -376,39 +736,51 @@ body {
   justify-content: center;
 }
 
-/* === BOTÕES ICONIZADOS (lápis e +) === */
+/* === BOTÕES ICONIZADOS (lápis e +) – versão “chip” === */
 .btn-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #fff;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04);
-  transition: transform .06s ease, box-shadow .1s ease, background .2s ease;
+  transition: background .15s ease, transform .04s ease;
 }
-.btn-icon:hover { box-shadow: 0 4px 10px rgba(0,0,0,.08); transform: translateY(-1px); }
-.btn-icon:active { transform: translateY(0); }
 
-.btn-pencil { border-color: #94a3b8; }
-.btn-pencil:hover { background: #f1f5f9; }
+.btn-icon svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
 
+/* lápis: borda clara, ícone cinza-azulado */
+.btn-pencil {
+  color: #64748b;
+}
+
+.btn-pencil:hover {
+  background: rgba(148, 163, 184, .15);
+}
+
+.btn-pencil:active {
+  transform: translateY(1px);
+}
+
+/* botão de adicionar: chip verde mais “macio” */
 .btn-add {
   background: #16a34a;
   color: #fff;
-  border-color: #16a34a;
 }
+
 .btn-add:hover {
   background: #15803d;
-  border-color: #15803d;
 }
-.btn-icon svg {
-  width: 18px;
-  height: 18px;
-  pointer-events: none;
+
+.btn-add:active {
+  transform: translateY(1px);
 }
 
 /* overlay "Carregando..." dentro de modais */
@@ -418,46 +790,75 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255,255,255,.7);
+  background: rgba(255, 255, 255, .7);
   font-weight: 600;
   border-radius: 12px;
 }
 
 /* garante que o modal fique por cima do backdrop do Bootstrap */
-#modal-equivalente { z-index: 1085; }
-.modal-backdrop.show { z-index: 1080; }
-
-/* overlay de confirmação dentro do modal */
-#modal-equivalente .eq-confirm-overlay{
-  position: absolute;
-  inset: 0;
-  background: #fff;
-  border-radius: .5rem;
-  padding: 16px;
-  overflow: auto;
-  box-shadow: 0 10px 30px rgba(0,0,0,.2);
+#modal-equivalente {
+  z-index: 1085;
 }
 
-/* garante que o overlay absoluto “ancore” no content do modal */
-#modal-equivalente .modal-content {
-  position: relative; /* novo */
+.modal-backdrop.show {
+  z-index: 1080;
+}
+
+/* overlay de confirmação dentro do modal-equivalente */
+/* aqui só mexemos na VARIAÇÃO "confirming" */
+#modal-equivalente .modal-content.confirming {
+  /* mantém a mesma largura base (definida acima em 720px) */
+  height: 70vh;
+  /* agora o modal ganha altura real */
+  max-height: 90vh;
+  /* ainda respeita a viewport */
 }
 
 /* overlay por cima de QUALQUER coisa do modal (inclusive .modal-actions) */
-#modal-equivalente .eq-confirm-overlay{
+#modal-equivalente .eq-confirm-overlay {
   position: absolute;
   inset: 0;
   background: #fff;
-  border-radius: .5rem;
-  padding: 16px;
+  border-radius: 18px;
+  padding: 18px 20px 16px;
   overflow: auto;
-  box-shadow: 0 10px 30px rgba(0,0,0,.2);
-  z-index: 5;           /* novo: fica acima da .modal-actions (z-index:1) */
-  pointer-events: auto; /* explícito */
+  /* scroll interno, se precisar */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
+  z-index: 25;
+
+  display: flex;
+  flex-direction: column;
 }
 
-/* quando a confirmação estiver aberta, esconda as ações do modal de “Adicionar” */
+/* imagem da confirmação: centralizada, sem esticar demais */
+#modal-equivalente .eq-confirm-img {
+  max-width: 380px;      /* limite "humano" dentro do modal */
+  width: 100%;
+  height: auto;
+  display: block;
+  margin: 12px auto 18px;
+  object-fit: contain;
+}
+
+/* footer fixo com Voltar / Confirmar */
+#modal-equivalente .eq-confirm-footer {
+  margin-top: auto;                /* empurra pro fundo do overlay */
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+
+  position: sticky;                /* fica visível mesmo com scroll */
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    #ffffff 70%,
+    rgba(255, 255, 255, 0.96) 100%
+  );
+}
+
+/* quando a confirmação estiver aberta, esconda os botões do rodapé */
 #modal-equivalente .modal-content.confirming .modal-actions {
-  display: none; /* novo */
+  display: none;
 }
-

@@ -5,6 +5,7 @@
 {% endblock %}
 
 {% block content %}
+<!-- DEBUG RETIRADA v3 -->
 <br>
 <div class="container">
   <!-- Header -->
@@ -75,24 +76,36 @@
 
     <!-- Lista de produtos pendentes -->
     <div class="col-md-7">
-      <div id="pendentesContainer" class="overflow-auto" style="max-height: 70vh;">
+      <div id="pendentesContainer" class="overflow-auto">
         {% for composicao in dados %}
         <div class="produto-item d-flex flex-column mb-3 me-2"
              data-sku="{{ composicao.sku }}"
              data-total="{{ composicao.unidades_totais }}"
              data-bipados="0">
-          <div class="d-flex justify-content-between align-items-center">
-            <span class="text-truncate d-inline-block w-100" style="max-width: 400px;" title="{{ composicao.nome }}">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <!-- Nome do produto -->
+            <span class="produto-nome text-truncate d-inline-block flex-grow-1"
+                  style="max-width: 400px;"
+                  title="{{ composicao.nome }}">
               {{ composicao.comp_origem[0].nome }}
             </span>
 
+              <!-- Wrapper do izinho + popover de imagem -->
+              <div class="produto-thumb-wrap" data-sku="{{ composicao.sku }}">
+                <span class="info-icon" aria-label="Ver imagem do produto">i</span>
+                <div class="produto-thumb-popover">
+                  <img
+                    src="{{ composicao.imagem_url or url_for('static', filename='resources/sem_img.webp') }}"
+                    alt="Imagem do produto {{ composicao.sku }}">
+                </div>
+              </div>
 
-            <div class="sku-actions">
+            <!-- Grupo: lápis, + e depósito -->
+            <div class="sku-actions produto-acoes d-flex align-items-center gap-2 flex-shrink-0">
               <button class="btn-icon btn-pencil" type="button" aria-label="Editar produto"
                       onclick="editarProdutoCompLapis('{{ composicao.sku }}')">
-                <!-- ícone lápis (SVG) -->
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 20h9"/>
                   <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
                 </svg>
@@ -101,17 +114,26 @@
               <button id="btnEquivalente-{{ composicao.sku }}"
                       class="btn-icon btn-add" type="button" aria-label="Adicionar equivalente"
                       onclick="adicionarEquivalente('{{ composicao.sku }}')">
-
-                <!-- ícone plus (SVG) -->
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 5v14M5 12h14"/>
                 </svg>
               </button>
+
+              <select class="form-select form-select-sm deposito-select"
+                      data-sku="{{ composicao.sku }}"
+                      onchange="onChangeDepositoBipagem('original', this)">
+                <option value="785301556" selected>Depósito 151</option>
+                <option value="894837591">Depósito Mesanino</option>
+                <option value="905539821">Depósito Edícula</option>
+                <option value="905539832">Depósito 171</option>
+                <option value="894837619">Depósito 177</option>
+              </select>
             </div>
 
-            <div class="d-flex align-items-center gap-3">
-              <span class="text-success">{{ composicao.sku }}</span>
+            <!-- Info: SKU, bipados e "izinho" de imagem -->
+            <div class="produto-info d-flex align-items-center gap-3 flex-shrink-0">
+              <span class="sku-label">{{ composicao.sku }}</span>
               <span class="bipados text-nowrap">Bipados: 0</span>
             </div>
           </div>

@@ -472,7 +472,11 @@ def api_bipagem_detalhe():
             LIMIT 1
         """
         sql_bipagem = """
-            SELECT id_agend_ml, sku, bipados
+            SELECT
+                id_agend_ml,
+                sku,
+                bipados,
+                id_dep_origem
             FROM agendamento_produto_bipagem
             WHERE id_agend_ml = %s AND sku = %s
             LIMIT 1
@@ -484,6 +488,7 @@ def api_bipagem_detalhe():
                 sku_original,
                 gtin_original,
                 id_tiny_original,
+                id_dep_origem,
                 nome_equivalente,
                 sku_bipado,
                 gtin_bipado,
@@ -810,6 +815,167 @@ def api_equiv_add_unidades():
     except Exception as e:
         app.logger.exception("Erro em /api/equiv/add-unidades")
         return jsonify(error=str(e)), 500
+
+@bp_retirado.route('/api/dep-origem', methods=['POST'])
+@rate_limit(300, 60)  # segue o padrão das outras rotas de bipagem
+def api_definir_dep_origem():
+    """
+    Define/atualiza o id_dep_origem de um item de bipagem
+    (tanto original quanto equivalente), sem alterar o restante
+    da estrutura de payload já usada pelo front.
+
+    Body JSON (exemplos):
+
+      # Produto original (bipagem direta)
+      {
+        "tipo": "original",
+        "id_agend": 123,
+        "sku": "APIFILHO2",
+        "id_dep_origem": 905539821
+      }
+
+      # Produto equivalente
+      {
+        "tipo": "equivalente",
+        "id_equiv": 456,
+        "id_dep_origem": 894837619
+      }
+
+    Regras:
+      - tipo: "original" ou "equivalente"
+      - id_dep_origem: inteiro > 0
+      - original   -> exige id_agend + sku
+      - equivalente-> exige id_equiv (id da tabela agendamento_produto_bipagem_equivalentes)
+    """
+    data = request.get_json(silent=True) or {}
+
+    tipo = (data.get('tipo') or '').strip().lower()
+
+    # valida id_dep_origem
+    try:
+        id_dep_origem = int(data.get('id_dep_origem'))
+    except (TypeError, ValueError):
+        return jsonify(error="Campo 'id_dep_origem' deve ser inteiro"), 400
+
+    if id_dep_origem <= 0:
+        return jsonify(error="'id_dep_origem' deve ser > 0"), 400
+
+    # ----- CASO: PRODUTO ORIGINAL -----
+    if tipo == 'original':
+        id_agend_raw = data.get('id_agend')
+        sku = (data.get('sku') or '').strip()
+
+        if not id_agend_raw or not sku:
+            return jsonify(
+                error="Para 'tipo=original', os campos 'id_agend' e 'sku' são obrigatórios"
+            ), 400
+
+        try:
+            id_agend = int(id_agend_raw)
+        except (TypeError, ValueError):
+            return jsonify(error="'id_agend' deve ser inteiro"), 400
+
+        # 1) Primeiro tenta atualizar (caso o registro já exista)
+        upd_sql = """
+            UPDATE agendamento_produto_bipagem
+               SET id_dep_origem = %s
+             WHERE id_agend_ml = %s
+               AND sku = %s
+             LIMIT 1
+        """
+
+        # 2) Se não existir, cria um registro mínimo com bipados = 0 +
+        #    id_dep_origem já definido.
+        ins_sql = """
+            INSERT INTO agendamento_produto_bipagem
+                (id_agend_ml, sku, bipados, id_dep_origem)
+            VALUES (%s, %s, 0, %s)
+        """
+
+        try:
+            conn = mysql.connector.connect(**_db_config)
+            cur  = conn.cursor()
+
+            # tenta atualizar
+            cur.execute(upd_sql, (id_dep_origem, id_agend, sku))
+            conn.commit()
+            afetados = cur.rowcount
+
+            if afetados == 0:
+                # não havia linha ainda -> cria com bipados = 0
+                cur.execute(ins_sql, (id_agend, sku, id_dep_origem))
+                conn.commit()
+                afetados = cur.rowcount
+
+                if afetados == 0:
+                    raise RuntimeError(
+                        "Falha ao inserir registro de bipagem (original) para este agendamento/sku"
+                    )
+
+            cur.close()
+            conn.close()
+
+            return jsonify(
+                ok=True,
+                tipo="original",
+                id_agend=id_agend,
+                sku=sku,
+                id_dep_origem=id_dep_origem
+            )
+        except Exception as e:
+            app.logger.exception("Erro em /api/dep-origem (original)")
+            return jsonify(error=str(e)), 500
+
+    # ----- CASO: PRODUTO EQUIVALENTE -----
+    elif tipo == 'equivalente':
+        # aceito tanto "id_equiv" quanto "id" por conveniência
+        id_equiv_raw = data.get('id_equiv') or data.get('id')
+
+        if not id_equiv_raw:
+            return jsonify(
+                error="Para 'tipo=equivalente', o campo 'id_equiv' (ou 'id') é obrigatório"
+            ), 400
+
+        try:
+            id_equiv = int(id_equiv_raw)
+        except (TypeError, ValueError):
+            return jsonify(error="'id_equiv' deve ser inteiro"), 400
+
+        upd_sql = """
+            UPDATE agendamento_produto_bipagem_equivalentes
+               SET id_dep_origem = %s
+             WHERE id = %s
+             LIMIT 1
+        """
+
+        try:
+            conn = mysql.connector.connect(**_db_config)
+            cur  = conn.cursor()
+            cur.execute(upd_sql, (id_dep_origem, id_equiv))
+            conn.commit()
+            afetados = cur.rowcount
+            cur.close(); conn.close()
+
+            if afetados == 0:
+                return jsonify(
+                    error="Registro de bipagem equivalente não encontrado para este id_equiv"
+                ), 404
+
+            return jsonify(
+                ok=True,
+                tipo="equivalente",
+                id_equiv=id_equiv,
+                id_dep_origem=id_dep_origem
+            )
+        except Exception as e:
+            app.logger.exception("Erro em /api/dep-origem (equivalente)")
+            return jsonify(error=str(e)), 500
+
+    # ----- tipo inválido -----
+    else:
+        return jsonify(
+            error="Campo 'tipo' deve ser 'original' ou 'equivalente'"
+        ), 400
 
 @bp_retirado.route('/api/bipados/<id_agend>')
 def api_bipados_agend(id_agend):
@@ -2784,22 +2950,36 @@ def api_agendamento_completo(id_agend_ml: int):
 
         # 2) Bipagem "direta" por SKU (baseada no item de COMPOSIÇÃO)
         #    Somamos por segurança caso haja mais de um registro do mesmo SKU.
+        #    Aqui também trazemos o id_dep_origem (quando houver) para cada SKU.
         sql_dir = """
-            SELECT sku, SUM(COALESCE(bipados,0)) AS bipados
+            SELECT
+                sku,
+                SUM(COALESCE(bipados,0)) AS bipados,
+                MAX(id_dep_origem)       AS id_dep_origem
               FROM agendamento_produto_bipagem
              WHERE id_agend_ml = %s
              GROUP BY sku
         """
         cur.execute(sql_dir, (id_agend_ml,))
         diretos_rows = cur.fetchall() or []
-        diretos_map = { (r.get("sku") or "").strip().lower(): int(r.get("bipados") or 0)
-                        for r in diretos_rows }
+
+        # mapas: bipagem direta (obrigatório) e depósito de origem (opcional)
+        diretos_map = {}
+        dep_origem_map = {}
+        for r in diretos_rows:
+            key = (r.get("sku") or "").strip().lower()
+            diretos_map[key] = int(r.get("bipados") or 0)
+            # id_dep_origem pode ser NULL se ainda não foi preenchido
+            if "id_dep_origem" in r and r.get("id_dep_origem") is not None:
+                dep_origem_map[key] = r.get("id_dep_origem")
+
 
         # 3) Equivalentes deste agendamento (vamos indexar por sku/id_tiny/gtin do "original")
         sql_eq = """
             SELECT
                 id, id_agend_ml,
                 sku_original, gtin_original, id_tiny_original,
+                id_dep_origem,
                 nome_equivalente,
                 sku_bipado, gtin_bipado, id_tiny_equivalente,
                 COALESCE(bipados,0) AS bipados,
@@ -2852,12 +3032,16 @@ def api_agendamento_completo(id_agend_ml: int):
             gtin_comp = str(c.get("gtin_prod") or "").strip()
 
             # Diretos por SKU da composição
-            bipados_diretos = int(diretos_map.get(_norm(sku_comp), 0))
+            sku_norm = _norm(sku_comp)
+            bipados_diretos = int(diretos_map.get(sku_norm, 0))
+
+            # Depósito de origem associado a este SKU (se mapeado)
+            id_dep_origem = dep_origem_map.get(sku_norm)
 
             # Equivalentes que casam por (sku OR id_tiny OR gtin) do ORIGINAL
             # Dedupe por 'id' do equivalente.
             eq_pool = {}
-            for e in eq_by_sku.get(_norm(sku_comp), []):
+            for e in eq_by_sku.get(sku_norm, []):
                 eq_pool[e["id"]] = e
             if tiny_comp:
                 for e in eq_by_tiny.get(tiny_comp, []):
@@ -2878,7 +3062,9 @@ def api_agendamento_completo(id_agend_ml: int):
                 "bipagem": {                          # nunca null
                     "id_agend_ml": id_agend_ml,
                     "sku": sku_comp,
-                    "bipados": bipados_diretos
+                    "bipados": bipados_diretos,
+                    # novo campo opcional: id do depósito de origem
+                    "id_dep_origem": id_dep_origem
                 },
                 "equivalentes": eqs_match,            # somente equivalentes que pertencem ao item
                 "totais": {

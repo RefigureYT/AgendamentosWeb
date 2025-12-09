@@ -11,6 +11,25 @@ const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 const PLACEHOLDER_IMG = "/static/resources/sem_img.webp";
 const _compImageCache = new Map();
 
+// Atualiza a imagem do "izinho" do produto com base no value do select de depósito
+function atualizarThumbPorSelect(selectEl) {
+  if (!selectEl) return;
+
+  const codigo = String(selectEl.value || '').trim();
+  if (!codigo) return;
+
+  // sobe até o card do produto (lista principal OU modal)
+  const card = selectEl.closest('.produto-item-modal, .produto-item');
+  if (!card) return;
+
+  // pega a imagem dentro do popover daquele card
+  const img = card.querySelector('.produto-thumb-popover img');
+  if (!img) return;
+
+  // monta o caminho da imagem no /static/resources
+  img.src = `/static/resources/${codigo}.png`;
+}
+
 // Pausa o auto-refresh da lista quando o usuário está interagindo (modal aberto / input aberto)
 window.pauseAutoRefresh = false;
 
@@ -204,36 +223,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let obj = [];
 
-  //! ISSO AQUI NÃO PODE SER DELETADO, ELE DETERMINA OS PRODUTOS QUE SERÃO USADOS NA TRANSFERÊNCIA DE ESTOQUE
-  //? No caso ele usa TODOS os produtos (por isso só funciona quando o agendamento está finalizado)
-  //* Então lembre-se de alterar todo o agendamento antes de finalizar, se não ele vai transferir errado.
-  // produtos.forEach(p => {
-  //   console.log(p);
-  //   const composicoes = p.composicoes;
-  //   composicoes.forEach(c => {
-  //     console.log(c);
-  //     if (c.sku === "JP12324") {
-  //       let produto = {
-  //         nome: c.nome,
-  //         sku: c.sku,
-  //         id_tiny: c.id_tiny,
-  //         gtin: c.gtin,
-  //         unidades_de_kits: c.unidades_de_kits,
-  //         unidades_por_kit: c.unidades_por_kit,
-  //         unidades_totais: c.unidades_totais
-  //       }
-  //       obj.push(produto);
-  //     }
-  //   });
-  // });
-  // console.log('>', obj);
-
   const resultado = produtos.filter(p =>
     p.composicoes.some(c => c.sku === "JP12324")
   );
 
   // // console.log('Esse aqui é o resultado askdaldkajsdl >', resultado); // TODO REMOVER DEPOIS (DEBUG)
+  preencherDepositosIniciais();
+
+  // ─── Pausar auto-refresh ao interagir com os selects de depósito nos PENDENTES ──
+  const pendentesContainer = document.getElementById('pendentesContainer');
+  if (pendentesContainer) {
+    // quando focar/clicar em um <select> de depósito -> pausa auto-refresh
+    pendentesContainer.addEventListener('focusin', (e) => {
+      if (e.target && e.target.matches('.deposito-select')) {
+        window.pauseAutoRefresh = true;
+      }
+    });
+
+    // quando sair do <select> -> libera auto-refresh novamente
+    pendentesContainer.addEventListener('focusout', (e) => {
+      if (e.target && e.target.matches('.deposito-select')) {
+        window.pauseAutoRefresh = false;
+      }
+    });
+  }
 });
+
+function defineImgDepositos() {
+  // Atualiza tanto os selects da lista principal quanto os do modal
+  document
+    .querySelectorAll('.deposito-select, .deposito-select-modal')
+    .forEach(sel => atualizarThumbPorSelect(sel));
+}
 
 // ─── busca estado no servidor e atualiza UI ─────────────────────
 async function carregarProgressoServer() {
@@ -272,12 +293,19 @@ function atualizarUI(item, bip) {
   barra.setAttribute('aria-valuenow', bip);
   barra.textContent = `${Math.round(pct)}%`;
 
+  // tira qualquer sujeira antiga de bg-success/text-white (bootstrap)
+  item.classList.remove('bg-success', 'text-white');
+
   if (bip >= total) {
-    item.classList.add('bg-success', 'text-white');
-    barra.classList.replace('bg-warning', 'bg-success');
+    // produto concluído: usa a classe própria de estilo
+    item.classList.add('concluido');
+    barra.classList.remove('bg-warning');
+    barra.classList.add('bg-success');
   } else {
-    item.classList.remove('bg-success', 'text-white');
-    barra.classList.replace('bg-success', 'bg-warning');
+    // produto ainda em andamento/pendente
+    item.classList.remove('concluido');
+    barra.classList.remove('bg-success');
+    barra.classList.add('bg-warning');
   }
 }
 
@@ -446,15 +474,21 @@ function atualizarContadores() {
 function voltarTodosPendentes() {
   const pend = document.getElementById('pendentesContainer');
   const concl = document.getElementById('concluidosContainer');
+
   Array.from(concl.querySelectorAll('.produto-item')).forEach(item => {
-    // reset de estilo
+    // mantém visual de concluído (bordas/verdes, barra verde)
+    item.classList.add('concluido');
     item.classList.remove('bg-success', 'text-white');
+
     const barra = item.querySelector('.progress-bar');
-    barra.classList.replace('bg-success', 'bg-warning');
+    if (barra) {
+      barra.classList.remove('bg-warning');
+      barra.classList.add('bg-success');
+    }
+
     pend.appendChild(item);
   });
 }
-
 
 // ─── checa se tudo foi bipado, mostra botão e retorna um flag ─────────────────────
 function verificarSeFinalizouTudo() {
@@ -1270,10 +1304,10 @@ async function confirmaProdutoEquivalente(prod, skuOriginal) {
     <h3 class="titulo-vermelho" style="margin:0 0 .5rem;">Confirmar equivalente</h3>
     <p><strong>${prod.descricao}</strong></p>
     <p style="margin:-2px 0 8px;">SKU: <b>${prod.sku}</b> · GTIN: <b>${prod.gtin || '—'}</b></p>
-    <img alt="Imagem do produto" src="${imgUrl}" style="max-width:100%;max-height:260px;display:block;margin:6px 0 14px;">
+    <img alt="Imagem do produto" src="${imgUrl}" class="eq-confirm-img">
     <p>Adicionar este item como equivalente de <b>${skuOriginal}</b>${comp?.nome ? ' — ' + comp.nome : ''}?</p>
     <input id="eq-obs" class="form-control" placeholder="Observação (opcional)">
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+    <div class="eq-confirm-footer">
       <button id="eq-confirm-no" class="btn btn-outline-secondary" type="button">Voltar</button>
       <button id="eq-confirm-yes" class="btn btn-primary" type="button">Confirmar</button>
     </div>
@@ -1390,121 +1424,134 @@ function groupPkList(rows) {
 //? Ajuste esses IDs conforme seu mapeamento atual (ou traga do expedicao.js para 1 fonte só)
 //? const DEPOSITO_ORIGEM = 785301556; //* Estoque (151) 
 //? const DEPOSITO_DESTINO = 822208355; //* Produção (141)
-async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_ORIGEM = 785301556, DEPOSITO_DESTINO = 822208355) {
-  // // console.log('Função de transferencia chamada...'); // TODO REMOVER DEPOIS (DEBUG)
+
+//! DEPÓSITO | ID DEPÓSITO
+//? 151             = 785301556
+//? 1511 (Mesanino) = 894837591
+//? 161 (Edícula)   = 905539821
+//? 171             = 905539832
+//? 177             = 894837619
+
+async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_DESTINO = 822208355) {
+  // console.log('Função de transferencia chamada...'); // TODO REMOVER DEPOIS (DEBUG)
+  // ! Como eu estou modificando para o ID de origem vir a partir de cada produto (vindo do DB)
+  // ! Não será mais necessário esse "DEPOSITO_ORIGEM" é igual ao depósito destino, pois agora só será possível enviar ao banco valores pré definidos.
   // // * Apenas um guardinha de trânsito... Não é para acontecer, mas vai que o depósito origem e destino são iguais né...
   // if (DEPOSITO_ORIGEM === DEPOSITO_DESTINO) {
   //   throw new Error('Depósitos iguais — operação inválida.');
   // }
 
-  // //? Busca a bipagem no banco
-  // const url = `/api/agendamento/${idAgend}/completo`;
-  // const resp = await fetch(url, { credentials: 'include' });
-  // if (!resp.ok) { //! Se deu algum erro na requisição ele ignora e não faz a transferência de *NADA*
-  //   throw new Error(`Erro: ${resp.status} \n${resp.statusText}`);
-  // }
+  //? Busca a bipagem no banco
+  const url = `/api/agendamento/${idAgend}/completo`;
+  const resp = await fetch(url, { credentials: 'include' });
+  if (!resp.ok) { //! Se deu algum erro na requisição ele ignora e não faz a transferência de *NADA*
+    throw new Error(`Erro: ${resp.status} \n${resp.statusText}`);
+  }
 
-  // // * Se deu tudo certo então define bipagemCompleta
-  // const bipagemCompleta = await resp.json();
-  // let listaObjPrincipal = []; //? Cria uma lista de objetos principal, ele será colocado dentro de "movimentos" no payload...
-  // //? Ele que será enviado para a rota fazer a transferência, ele basicamente avisa quais produtos devem ser transferidos, quantos e em qual depósito.
-  // // console.log('bipagemCompleta (DEBUG) >', bipagemCompleta); // TODO REMOVER DEPOIS (DEBUG)
-  // // console.log(bipagemCompleta.produtos.length); // TODO REMOVER DEPOIS (DEBUG)
-  // // console.log('Tipo de bipagemCompleta.produtos >', typeof bipagemCompleta.produtos); // TODO REMOVER DEPOIS (DEBUG)
-  // // console.log('É um array? >', Array.isArray(bipagemCompleta.produtos)); // TODO REMOVER DEPOIS (DEBUG)
-  // // ? Inicia um Looping onde esse looping serve para poder capturar os produtos do Agendamento e criar um objeto, a
-  // for (const prod of bipagemCompleta.produtos) {
-  //   // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
-  //   const p = prod.produto_original; // * Para facilitar na construção do Objeto
-  //   // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', p); // TODO REMOVER DEPOIS (DEBUG)
-  //   // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
-  //   //! Eu não tinha pensado nisso... Mas também é possível que não vá NADA do produto original!
-  //   //! Exemplo: Produto original = Vara azul | Mas não vai vara azul, vai a vara verde, adiciona como equivalente apenas!
-  //   const bipadosOriginal = prod.bipagem.bipados || 0; // ? Quantidade bipada do produto original (Caso não tenha nada, define como 0)
-  //   // console.log('Quantidade bipada do produto original >', bipadosOriginal); // TODO REMOVER DEPOIS (DEBUG)
-  //   if (bipadosOriginal > 0) { //! Sendo assim, caso aconteça de não ser enviado nada do produto original apenas não faça o objeto do produto original no Payload!
-  //     // console.log('Produto original que será processado (DEBUG) >', p); // TODO REMOVER DEPOIS (DEBUG)
-  //     const objProdOriginal = { // ? Cira o objeto para o produto original
-  //       // * NEW
-  //       equivalente: false, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
-  //       etapa: 'conf', // TODO "conf" || "exp" (Isso define a coluna que é feita a transferência)
-  //       pk: p.id_comp, // ? ID do produto (Database) que vai ser transferido (Original)
-  //       // * NEW
-  //       sku: p.sku_prod, // ? SKU do produto que vai ser transferido (Original)
-  //       id_produto: p.id_prod_tiny, // ? ID do produto que vai ser transferido (Original)
-  //       de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
-  //       para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
-  //       unidades: prod.bipagem.bipados, // ? Quantidade que foi bipado do produto (Original)
-  //       preco_unitario: 0 // * Isso daqui é opicional...
-  //     }
-  //     // console.log('Objeto do produto original criado (DEBUG) >', objProdOriginal); // TODO REMOVER DEPOIS (DEBUG)
-  //     listaObjPrincipal.push(objProdOriginal); // ? Adiciona o objeto criado na lista de objetos
-  //   }
+  // * Se deu tudo certo então define bipagemCompleta
+  const bipagemCompleta = await resp.json();
+  let listaObjPrincipal = []; //? Cria uma lista de objetos principal, ele será colocado dentro de "movimentos" no payload...
+  //? Ele que será enviado para a rota fazer a transferência, ele basicamente avisa quais produtos devem ser transferidos, quantos e em qual depósito.
+  // console.log('bipagemCompleta (DEBUG) >', bipagemCompleta); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log(bipagemCompleta.produtos.length); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Tipo de bipagemCompleta.produtos >', typeof bipagemCompleta.produtos); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('É um array? >', Array.isArray(bipagemCompleta.produtos)); // TODO REMOVER DEPOIS (DEBUG)
+  // ? Inicia um Looping onde esse looping serve para poder capturar os produtos do Agendamento e criar um objeto, a
+  // console.log('bipagem completa >', bipagemCompleta);
 
-  //   if (prod.equivalentes.length > 0) { //! Existe a possibilidadde de não haver produtos equivalentes, nesse caso apenas ignora
-  //     for (const equiv of prod.equivalentes) {
-  //       if (equiv.bipados <= 0) continue; //! Existe a possibilidade de haver produtos equivalentes porém sem ter sido bipado nenhuma unidade! Nesse caso, apenas ignore.
-  //       // console.log('Produto equivalente que será processado (DEBUG) >', equiv); // TODO REMOVER DEPOIS (DEBUG)
-  //       const objProdEquiv = { // ? Cira o objeto para o produto equivalente
-  //         // equivalente: true, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
-  //         sku: equiv.sku_bipado, // ? SKU do produto que vai ser transferido (Equivalente)
-  //         id_produto: equiv.id_tiny_equivalente, // ? ID do produto que vai ser transferido (Equivalente)
-  //         de: DEPOSITO_ORIGEM, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
-  //         para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
-  //         unidades: equiv.bipados, // ? Quantidade que foi bipado do produto (Equivalente)
-  //         preco_unitario: 0, // * Isso daqui é opicional...
-  //         // **** NEW ****
-  //         equivalente: true,
-  //         etapa: 'conf',
-  //         pk: equiv.id,
-  //         // **** NEW ****
-  //       }
-  //       // console.log('Objeto do produto equivalente criado (DEBUG) >', objProdEquiv); // TODO REMOVER DEPOIS (DEBUG)
-  //       listaObjPrincipal.push(objProdEquiv); // ? Adiciona o objeto criado na lista de objetos
-  //     }
-  //   } else { continue }
-  // }
+  for (const prod of bipagemCompleta.produtos) {
+    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
+    const p = prod.produto_original; // * Para facilitar na construção do Objeto
 
-  // // ! Não sei se isso é uma possibilidade, mas é bom evitar...
-  // // ! Caso aconteça de não ter nada a transferir, retorna erro.
-  // if (listaObjPrincipal.length <= 0) throw new Error('Nada para transferir (bipagem total = 0).');
-  // // console.log('Objeto Principal (DEBUG) >', listaObjPrincipal); // TODO REMOVER DEPOIS (DEBUG)
+    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', p); // TODO REMOVER DEPOIS (DEBUG)
+    // console.log('Antes de verificar se vai pular ou não, essa é a variavel >', prod.bipagem.bipados); // TODO REMOVER DEPOIS (DEBUG)
+    //! Eu não tinha pensado nisso... Mas também é possível que não vá NADA do produto original!
+    //! Exemplo: Produto original = Vara azul | Mas não vai vara azul, vai a vara verde, adiciona como equivalente apenas!
+    const bipadosOriginal = prod.bipagem.bipados || 0; // ? Quantidade bipada do produto original (Caso não tenha nada, define como 0)
+    // console.log('Quantidade bipada do produto original >', bipadosOriginal); // TODO REMOVER DEPOIS (DEBUG)
+    if (bipadosOriginal > 0) { //! Sendo assim, caso aconteça de não ser enviado nada do produto original apenas não faça o objeto do produto original no Payload!
+      // console.log('Maior que 0 >', prod);
+      // console.log('Produto original que será processado (DEBUG) >', p); // TODO REMOVER DEPOIS (DEBUG)
+      const objProdOriginal = { // ? Cira o objeto para o produto original
+        // * NEW
+        equivalente: false, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
+        etapa: 'conf', // TODO "conf" || "exp" (Isso define a coluna que é feita a transferência)
+        pk: p.id_comp, // ? ID do produto (Database) que vai ser transferido (Original)
+        // * NEW
+        sku: p.sku_prod, // ? SKU do produto que vai ser transferido (Original)
+        id_produto: p.id_prod_tiny, // ? ID do produto que vai ser transferido (Original)
+        de: prod?.bipagem?.id_dep_origem || 785301556, // ? ID do depósito que vai ser debitado o valor bipado (Tiny) em caso de null o default é 785301556 (151)
+        para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
+        unidades: prod.bipagem.bipados, // ? Quantidade que foi bipado do produto (Original)
+        preco_unitario: 0 // * Isso daqui é opicional...
+      }
+      // console.log('Objeto do produto original criado (DEBUG) >', objProdOriginal); // TODO REMOVER DEPOIS (DEBUG)
+      listaObjPrincipal.push(objProdOriginal); // ? Adiciona o objeto criado na lista de objetos
+    }
+    if (prod.equivalentes.length > 0) { //! Existe a possibilidadde de não haver produtos equivalentes, nesse caso apenas ignora
+      for (const equiv of prod.equivalentes) {
+        if (equiv.bipados <= 0) continue; //! Existe a possibilidade de haver produtos equivalentes porém sem ter sido bipado nenhuma unidade! Nesse caso, apenas ignore.
+        // console.log('Produto equivalente que será processado (DEBUG) >', equiv); // TODO REMOVER DEPOIS (DEBUG)
+        const objProdEquiv = { // ? Cira o objeto para o produto equivalente
+          // equivalente: true, // TODO DEBUG (Mas possivelmente pode acabar ficando posteriormente... Tinha pensado numa lógica, mas já esqueci '-' )
+          sku: equiv.sku_bipado, // ? SKU do produto que vai ser transferido (Equivalente)
+          id_produto: equiv.id_tiny_equivalente, // ? ID do produto que vai ser transferido (Equivalente)
+          de: equiv.id_dep_origem, // ? ID do depósito que vai ser debitado o valor bipado (Tiny)
+          para: DEPOSITO_DESTINO, // ? ID do depósito que vai ser creditado o valor bipado (Tiny)
+          unidades: equiv.bipados, // ? Quantidade que foi bipado do produto (Equivalente)
+          preco_unitario: 0, // * Isso daqui é opicional...
+          // **** NEW ****
+          equivalente: true,
+          etapa: 'conf',
+          pk: equiv.id,
+          // **** NEW ****
+        }
+        // console.log('Objeto do produto equivalente criado (DEBUG) >', objProdEquiv); // TODO REMOVER DEPOIS (DEBUG)
+        listaObjPrincipal.push(objProdEquiv); // ? Adiciona o objeto criado na lista de objetos
+      }
+    } else { continue }
+  }
 
-  // // ? Definindo variáveis para OBS (Tiny)
-  // const empresa = { 1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports" }
-  // const info = document.getElementById("infoAgend")?.dataset || {};
-  // const empresaId = parseInt(info.empresa, 10);
-  // const numAg = info.agendamento;
-  // const mktp = info.marketplace;
+  // ! Não sei se isso é uma possibilidade, mas é bom evitar...
+  // ! Caso aconteça de não ter nada a transferir, retorna erro.
+  if (listaObjPrincipal.length <= 0) throw new Error('Nada para transferir (bipagem total = 0).');
+  // console.log('Objeto Principal (DEBUG) >', listaObjPrincipal); // TODO REMOVER DEPOIS (DEBUG)
 
-  // // Definindo Usuário que fez a transferência
-  // let user = ((await whoAmI())?.nome_display_usuario || "Indefinido");
+  // ? Definindo variáveis para OBS (Tiny)
+  const empresa = { 1: "Jaú Pesca", 2: "Jaú Fishing", 3: "L.T. Sports" }
+  const info = document.getElementById("infoAgend")?.dataset || {};
+  const empresaId = parseInt(info.empresa, 10);
+  const numAg = info.agendamento;
+  const mktp = info.marketplace;
 
-  // listaObjPrincipal = groupPkList(listaObjPrincipal);
+  // Definindo Usuário que fez a transferência
+  let user = ((await whoAmI())?.nome_display_usuario || "Indefinido");
 
-  // // // console.log('User >', user); // TODO REMOVER DEPOIS (DEBUG)
-  // const payload = {
-  //   empresa: empresa[empresaId],             // opcional (futuro: seleção de token)
-  //   observacoes: `Conferência - AgendamentosWeb \nAg.: ${numAg}\nMktp.: ${mktp}\nEmp.: ${empresa[empresaId]}\nCo.: ${user}`,      // opcional
-  //   preco_unitario: 0,               // opcional; default=0
-  //   movimentos: listaObjPrincipal
-  // }
+  listaObjPrincipal = groupPkList(listaObjPrincipal);
 
-  // // console.log('Payload pronto para a transferência >', payload); // TODO REMOVER DEPOIS (DEBUG)
+  // // console.log('User >', user); // TODO REMOVER DEPOIS (DEBUG)
+  const payload = {
+    empresa: empresa[empresaId],             // opcional (futuro: seleção de token)
+    observacoes: `Conferência - AgendamentosWeb \nAg.: ${numAg}\nMktp.: ${mktp}\nEmp.: ${empresa[empresaId]}\nCo.: ${user}`,      // opcional
+    preco_unitario: 0,               // opcional; default=0
+    movimentos: listaObjPrincipal
+  }
 
-  // // console.log('Preparando fetch para transferência de estoque...'); // TODO REMOVER DEPOIS (DEBUG)
+  // console.log('Payload pronto para a transferência >', payload); // TODO REMOVER DEPOIS (DEBUG)
 
-  // const transfReq = await fetch('/estoque/mover', {
-  //   method: 'POST',
-  //   credentials: 'include', // garante cookie de sessão
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(payload)
-  // });
+  // console.log('Preparando fetch para transferência de estoque...'); // TODO REMOVER DEPOIS (DEBUG)
 
-  // if (!transfReq.ok) {
-  //   const txt = await transfReq.text().catch(() => '');
-  //   throw new Error(`Falha na transferência (${transfReq.status} ${transfReq.statusText}) ${txt}`);
-  // }
+  const transfReq = await fetch('/estoque/mover', {
+    method: 'POST',
+    credentials: 'include', // garante cookie de sessão
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!transfReq.ok) {
+    const txt = await transfReq.text().catch(() => '');
+    throw new Error(`Falha na transferência (${transfReq.status} ${transfReq.statusText}) ${txt}`);
+  }
 
   return;
 }
@@ -1515,6 +1562,139 @@ async function whoAmI() {
   if (!r.ok) return null;
   const j = await r.json();
   return j.authenticated ? j.user : null;
+}
+
+//? Essa função serve para toda vez que um select for modificado ele simplesmente altera no banco de dados o depósito de origem conforme selecionado.
+async function onChangeDepositoBipagem(tipo, selectEl) {
+  // tipo: 'original' | 'equivalente'
+  console.log(selectEl);
+  // Atualiza imediatamente a imagem do "izinho" conforme o depósito escolhido
+  atualizarThumbPorSelect(selectEl);
+
+  const codigo = String(selectEl.value || '').trim();
+  const valorDep = Number(codigo);
+  if (Number.isNaN(valorDep) || valorDep <= 0) {
+    console.warn('id_dep_origem inválido em onChangeDepositoBipagem:', valorDep);
+    return;
+  }
+
+  // id do agendamento (sempre vai existir na URL dessa tela)
+  const urlParams = new URLSearchParams(window.location.search);
+  const idAgend = parseInt(urlParams.get('id'), 10);
+
+  let payload = {
+    tipo,
+    id_dep_origem: valorDep,
+  };
+
+  if (tipo === 'original') {
+    const sku = selectEl.dataset.sku;
+    if (!idAgend || !sku) {
+      console.warn('Dados insuficientes para salvar depósito (original):', { idAgend, sku });
+      return;
+    }
+    payload.id_agend = idAgend;
+    payload.sku = sku;
+  } else if (tipo === 'equivalente') {
+    const idEquiv = selectEl.dataset.equivalenteId;
+    if (!idEquiv) {
+      console.warn('Dados insuficientes para salvar depósito (equivalente):', { idEquiv });
+      return;
+    }
+    payload.id_equiv = Number(idEquiv);
+  } else {
+    console.warn('Tipo inválido em onChangeDepositoBipagem:', tipo);
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/dep-origem', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok || data.ok !== true) {
+      console.error('Falha ao atualizar depósito de origem:', data);
+      // aqui dá pra plugar seu toast padrão
+      alert('Falha ao atualizar o depósito de origem.');
+      return;
+    }
+
+    console.log('Depósito de origem atualizado:', data);
+    // se quiser, aqui dá pra disparar um toast bonitão:
+    // notify.success('Depósito de origem atualizado.');
+  } catch (err) {
+    console.error('Erro de rede em onChangeDepositoBipagem:', err);
+    alert('Erro de rede ao atualizar o depósito de origem.');
+  }
+}
+
+async function preencherDepositosIniciais() {
+  try {
+    // pega o id do agendamento pela URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const idAgend = parseInt(urlParams.get('id'), 10);
+
+    if (!idAgend) {
+      console.warn('ID de agendamento não encontrado na URL ao tentar preencher depósitos iniciais.');
+      return;
+    }
+
+    const resp = await fetch(`/api/agendamento/${idAgend}/completo`, {
+      credentials: 'include',
+    });
+
+    if (!resp.ok) {
+      console.error('Falha ao buscar dados completos do agendamento:', resp.status, resp.statusText);
+      return;
+    }
+
+    const data = await resp.json();
+    const produtos = data?.produtos || [];
+
+    if (!Array.isArray(produtos) || produtos.length === 0) {
+      console.warn('Nenhum produto retornado em /api/agendamento/<id>/completo.');
+      return;
+    }
+
+    // para cada produto, ajusta o select correspondente
+    for (const item of produtos) {
+      const prodOrig = item.produto_original || {};
+      const bipagem = item.bipagem || {};
+
+      const sku = (prodOrig.sku_prod || '').trim();
+      if (!sku) continue;
+
+      // se não tiver id_dep_origem definido ainda, usa 785301556 (Depósito 151)
+      const idDepOrigem = bipagem.id_dep_origem ?? 785301556;
+
+      const select = document.querySelector(
+        `.deposito-select[data-sku="${CSS.escape(sku)}"]`
+      );
+      if (!select) continue;
+
+      // seta o valor no select, se existir option correspondente
+      const valorStr = String(idDepOrigem);
+      const optionExiste = Array.from(select.options).some(opt => opt.value === valorStr);
+      if (optionExiste) {
+        select.value = valorStr;
+      } else {
+        console.warn(
+          `Nenhum <option> no select de SKU=${sku} corresponde ao id_dep_origem=${idDepOrigem}.`
+        );
+      }
+    }
+
+    // 🔹 AGORA SIM: depois de todos os selects estarem corretos,
+    // atualiza as imagens dos "izinhos" de acordo com o value atual
+    defineImgDepositos();
+  } catch (err) {
+    console.error('Erro ao preencher depósitos iniciais:', err);
+  }
 }
 
 // // TODO REMOVER DEPOIS (DEBUG)
@@ -1905,7 +2085,7 @@ async function editarProdutoCompLapis(sku) {
     // busca totais do servidor p/ esse SKU original
     const response = await fetch(`/api/bipagem/detalhe?id_agend_ml=${idAgend}&sku=${encodeURIComponent(sku)}`, { credentials: 'include' });
     const data = await response.json();
-
+    console.log('Esse aqui é o data, verifica se tem o id do depósito e onde ele está', data); // TODO [DEBUG]
     let totalBipadosOriginal = (data?.bipagem?.bipados ?? 0);
     const porcento = comp.unidades_totais > 0
       ? Math.min(100, Math.round((totalBipadosOriginal / comp.unidades_totais) * 100))
@@ -1921,6 +2101,9 @@ async function editarProdutoCompLapis(sku) {
     } finally {
       img.classList.remove('img-skeleton', 'skeleton');
     }
+
+    // pega o depósito de origem já retornado pelo backend (ou default 151)
+    const depOrig = Number(data?.bipagem?.id_dep_origem ?? 785301556) || 785301556;
 
     // monta a lista à direita (ORIGINAL + EQUIVALENTES)
     listaProdutos.innerHTML = `
@@ -1947,13 +2130,44 @@ async function editarProdutoCompLapis(sku) {
                aria-valuemax="${compTotal}"></div>
         </div>
 
-        <div class="controls" style="display:flex; align-items:center; gap:8px;">
-          <button id="menos-${sku}" class="btn btn-outline" onclick="removeUnEditarProduto('${sku}');" type="button">−</button>
-          <input id="quantidade-${sku}" type="number" value="${totalBipadosOriginal}" min="0" step="1" style="width:100px;">
-          <button id="mais-${sku}" class="btn btn-outline" onclick="addUnEditarProduto('${sku}');" type="button">+</button>
+        <div class="controls" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <!-- Quantidade ORIGINAL -->
+          <div class="d-flex align-items-center gap-2">
+            <button id="menos-${sku}" class="btn btn-outline" onclick="removeUnEditarProduto('${sku}');" type="button">−</button>
+            <input id="quantidade-${sku}" type="number" value="${totalBipadosOriginal}" min="0" step="1" style="width:100px;">
+            <button id="mais-${sku}" class="btn btn-outline" onclick="addUnEditarProduto('${sku}');" type="button">+</button>
+          </div>
 
-          <div class="ms-auto" style="margin-left:auto; font-size:.85rem; color:#6b7280;">
-            Última ação: <strong id="status-${sku}">—</strong>
+          <!-- Depósito ORIGINAL + izinho (ALINHADO À ESQUERDA, IGUAL EQUIVALENTE) -->
+          <div class="d-flex align-items-center gap-2">
+            <div class="produto-thumb-wrap" data-sku="${sku}">
+              <span class="info-icon" aria-label="Ver imagem do produto">i</span>
+              <div class="produto-thumb-popover">
+                <img
+                  src="${PLACEHOLDER_IMG}"
+                  alt="Imagem do produto ${sku}">
+              </div>
+            </div>
+
+            <label class="form-label mb-0" style="font-size:.8rem; color:#6b7280;">Depósito:</label>
+            <select
+              class="form-select form-select-sm deposito-select-modal"
+              data-role="original"
+              data-sku="${sku}"
+              onchange="onChangeDepositoBipagem('original', this)">
+              <option value="785301556" ${depOrig === 785301556 ? 'selected' : ''}>Depósito 151</option>
+              <option value="894837591" ${depOrig === 894837591 ? 'selected' : ''}>Depósito Mesanino</option>
+              <option value="905539821" ${depOrig === 905539821 ? 'selected' : ''}>Depósito 161 (Edícula)</option>
+              <option value="905539832" ${depOrig === 905539832 ? 'selected' : ''}>Depósito 171</option>
+              <option value="894837619" ${depOrig === 894837619 ? 'selected' : ''}>Depósito 177</option>
+            </select>
+          </div>
+
+          <!-- Última ação ORIGINAL (ancorada à direita, usando o MESMO padrão dos equivalentes) -->
+          <div class="last-action-wrap">
+            <span class="status">
+              Última ação: <strong id="status-${sku}">—</strong>
+            </span>
           </div>
         </div>
       </div>
@@ -1962,8 +2176,11 @@ async function editarProdutoCompLapis(sku) {
     // acrescenta equivalentes
     (data?.equivalentes || []).forEach(p => {
       const porcentoEquiv = comp.unidades_totais > 0
-        ? Math.min(100, Math.round((p.bipados / comp.unidades_totais) * 100))
+        ? Math.min(100, Math.round((p.bipados / compTotal) * 100))
         : 0;
+
+      // depósito de origem do equivalente (ou default 151)
+      const depEquiv = Number(p.id_dep_origem ?? 785301556) || 785301556; //? Aparentemente está certo.
 
       listaProdutos.innerHTML += `
         <div id="produto-EQV-${p.id_tiny_equivalente}" class="produto-item-modal" data-role="equivalente">
@@ -1975,7 +2192,7 @@ async function editarProdutoCompLapis(sku) {
             </div>
             <div class="small" style="font-size:.85rem; color:#6b7280;">
               Bipado: <strong id="bipado-${p.sku_bipado}">${p.bipados}</strong> /
-              Total: <strong id="total-${p.sku_bipado}">${comp.unidades_totais}</strong>
+              Total: <strong id="total-${p.sku_bipado}">${compTotal}</strong>
               (<span id="percent-${p.sku_bipado}">${porcentoEquiv}</span>%)
             </div>
           </div>
@@ -1985,13 +2202,41 @@ async function editarProdutoCompLapis(sku) {
             <div id="progressFill-${p.sku_bipado}" class="progress-bar" role="progressbar"
                  style="width:${porcentoEquiv}%; background:#3b82f6; height:10px;"
                  aria-valuenow="${p.bipados}" aria-valuemin="0"
-                 aria-valuemax="${comp.unidades_totais}"></div>
+                 aria-valuemax="${compTotal}"></div>
           </div>
 
-          <div class="controls" style="display:flex; align-items:center; gap:8px;">
-            <button id="menos-${p.sku_bipado}" onclick="removeUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">−</button>
-            <input id="quantidade-${p.sku_bipado}" type="number" value="${p.bipados}" min="0" step="1" style="width:100px;">
-            <button id="mais-${p.sku_bipado}" onclick="addUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">+</button>
+          <div class="controls" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div class="d-flex align-items-center gap-2">
+              <button id="menos-${p.sku_bipado}" onclick="removeUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">−</button>
+              <input id="quantidade-${p.sku_bipado}" type="number" value="${p.bipados}" min="0" step="1" style="width:100px;">
+              <button id="mais-${p.sku_bipado}" onclick="addUnEditarProduto('${p.sku_bipado}');" type="button" class="btn btn-outline">+</button>
+            </div>
+
+            <!-- Select de depósito do EQUIVALENTE (modal) + izinho -->
+            <div class="d-flex align-items-center gap-2">
+              <!-- Izinho com imagem do depósito -->
+              <div class="produto-thumb-wrap" data-sku="${p.sku_bipado}">
+                <span class="info-icon" aria-label="Ver imagem do produto">i</span>
+                <div class="produto-thumb-popover">
+                  <img
+                    src="${PLACEHOLDER_IMG}"
+                    alt="Imagem do produto ${p.sku_bipado}">
+                </div>
+              </div>
+
+              <label class="form-label mb-0" style="font-size:.8rem; color:#6b7280;">Depósito:</label>
+              <select
+                class="form-select form-select-sm deposito-select-modal"
+                data-role="equivalente"
+                data-equivalente-id="${p.id}"
+                onchange="onChangeDepositoBipagem('equivalente', this)">
+                <option value="785301556" ${depEquiv === 785301556 ? 'selected' : ''}>Depósito 151</option>
+                <option value="894837591" ${depEquiv === 894837591 ? 'selected' : ''}>Depósito Mesanino</option>
+                <option value="905539821" ${depEquiv === 905539821 ? 'selected' : ''}>Depósito 161 (Edícula)</option>
+                <option value="905539832" ${depEquiv === 905539832 ? 'selected' : ''}>Depósito 171</option>
+                <option value="894837619" ${depEquiv === 894837619 ? 'selected' : ''}>Depósito 177</option>
+              </select>
+            </div>
 
             <div class="last-action-wrap">
               <button id="excluir-${p.sku_bipado}" class="btn-icon"
@@ -2020,6 +2265,10 @@ async function editarProdutoCompLapis(sku) {
     notify.error('Falha ao carregar informações do produto.');
     fecharModal();
   }
+
+  // depois de montar ORIGINAL + EQUIVALENTES, atualiza os izinhos
+  defineImgDepositos();
+
   document.getElementById('modal-editar-produto').style.display = 'block';
   // remove o overlay de loading, se ainda existir
   document.getElementById('modal-edit-loading')?.remove();
