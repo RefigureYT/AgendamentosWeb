@@ -12,6 +12,10 @@ from exceptions import ParametroInvalido, MetodoInvalido, LimiteRequests, Arquiv
 # Remova SocketIO se não for usar agora:
 # from flask_socketio import SocketIO, join_room, emit
 
+from psycopg2.pool import SimpleConnectionPool # Para PostgreSQL
+PG_DSN = "postgresql://postgres:fa02a5fc917ea31de761c22fc956a0b2@192.168.15.121:5432/api"
+
+
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"pdf", "csv", "xlsx"}
 
@@ -20,6 +24,12 @@ CORS(app)
 
 app.secret_key = "test_key"  # TODO: mover para variável de ambiente
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+app.config["PG_POOL"] = SimpleConnectionPool(
+    minconn=1,
+    maxconn=10,
+    dsn=PG_DSN,
+)
 
 # -------------------------------
 # Proteção de rotas por login
@@ -99,7 +109,7 @@ from rotas import *
 
 if __name__ == "__main__":
     # debug opcional; ajuste a gosto
-    app.run(host='0.0.0.0', port=8345, debug=False)
+    app.run(host='0.0.0.0', port=8345, debug=True)
     
 # -----------------------------------------------------------------------------
 # SOBRE O USO DE SocketIO (opcional)

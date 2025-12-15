@@ -2214,6 +2214,10 @@ def tiny_composicao_auto():
     - Retorna: { ok: true, origem: "gtin"|"sku", id_tiny, kit: [...] }
       Onde kit = [] se for produto simples (não é kit).
     """
+    from flask import current_app
+    from psycopg2.extras import RealDictCursor
+    import re
+
     if 'id_usuario' not in session:
         return jsonify(ok=False, error='Não autenticado'), 401
 
@@ -2222,61 +2226,97 @@ def tiny_composicao_auto():
         return jsonify(ok=False, error='Parâmetro "valor" é obrigatório'), 400
 
     try:
-        ag_ctrl = app.config['AG_CTRL']
-        # Normaliza EAN/GTIN (mantendo só dígitos)
-        ean_digits = re.sub(r'\D+', '', valor)
+        ag_ctrl = current_app.config['AG_CTRL']
+
+        def _digits(v):
+            return re.sub(r'\D+', '', str(v or ''))
+
+        ean_digits = _digits(valor)
         candidato = None
         origem = None
 
-        # Helper local para chamar Tiny e extrair itens
         def _buscar_produtos(params: dict):
             resp = ag_ctrl.caller.make_call('produtos', params_add=params)
             if isinstance(resp, dict):
                 return resp.get('itens') or []
+            if isinstance(resp, list):
+                return resp
             return []
 
-        # 1) TENTA POR GTIN/EAN (se o input "parece" um EAN/GTIN)
+        def _unwrap_item(i):
+            if isinstance(i, dict) and isinstance(i.get('produto'), dict):
+                return i['produto']
+            return i if isinstance(i, dict) else {}
+
+        def _gtin_from(prod: dict) -> str:
+            for k in ('gtin', 'gtin_ean', 'gtinEan', 'ean', 'codigo_barras', 'codigoDeBarras'):
+                v = prod.get(k)
+                if v:
+                    return _digits(v)
+            return ''
+
+        def _id_from(prod: dict):
+            for k in ('id', 'id_produto', 'idProduto'):
+                v = prod.get(k)
+                if v:
+                    return v
+            return None
+
+        # 1) TENTA POR GTIN/EAN via Tiny (sem usar filtro gtin pra não tomar 400)
         if len(ean_digits) >= 8:
-            # a) tenta por gtin (quando suportado pela API)
-            itens = _buscar_produtos({'gtin': ean_digits, 'situacao': 'A'})
-            candidato = next((i for i in itens if re.sub(r'\D+', '', str(i.get('gtin', ''))) == ean_digits), None)
+            itens = _buscar_produtos({'pesquisa': ean_digits, 'situacao': 'A'})
+            for i in itens:
+                prod = _unwrap_item(i)
+                if _gtin_from(prod) == ean_digits:
+                    candidato = prod
+                    origem = 'gtin'
+                    break
 
-            # b) fallback: pesquisa genérica (quando gtin não filtra)
-            if not candidato:
-                itens = _buscar_produtos({'pesquisa': ean_digits})
-                candidato = next((i for i in itens if re.sub(r'\D+', '', str(i.get('gtin', ''))) == ean_digits), None)
+        # 2) SE NÃO ACHOU NO TINY, FALLBACK NO POSTGRES (tiny.produtos.gtin_ean)
+        id_tiny = None
+        if not candidato and len(ean_digits) >= 8:
+            pool = current_app.config.get("PG_POOL")
+            if not pool:
+                raise RuntimeError("PG_POOL não configurado no main.py")
 
-            # c) ainda não achou? última tentativa: procurar exato no campo de código
-            if not candidato:
-                itens = _buscar_produtos({'codigo': valor, 'situacao': 'A'})
-                # aqui não dá pra cravar o match por EAN; se vier 1 item ativo, usamos
-                candidato = itens[0] if itens else None
+            conn = pool.getconn()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM tiny.produtos
+                        WHERE gtin_ean = %s
+                        LIMIT 1
+                        """,
+                        (ean_digits,)
+                    )
+                    row = cur.fetchone()
+                    if row and row.get("id"):
+                        id_tiny = row["id"]
+                        origem = 'gtin'
+            finally:
+                pool.putconn(conn)
 
-            if candidato:
-                origem = 'gtin'
-
-        # 2) SE NÃO ENCONTROU POR GTIN/EAN, TENTA POR SKU (codigo)
-        if not candidato:
+        # 3) SE NÃO ENCONTROU POR GTIN, TENTA POR SKU (codigo) no Tiny
+        if not candidato and not id_tiny:
             itens = _buscar_produtos({'codigo': valor, 'situacao': 'A'})
-            candidato = itens[0] if itens else None
+            candidato = _unwrap_item(itens[0]) if itens else None
             if candidato:
                 origem = 'sku'
 
-        if not candidato:
+        if candidato and not id_tiny:
+            id_tiny = _id_from(candidato)
+
+        if not id_tiny:
             return jsonify(ok=False, error='Produto não encontrado por GTIN/EAN nem por SKU'), 404
 
-        id_tiny = candidato.get('id')
-        if not id_tiny:
-            return jsonify(ok=False, error='Produto encontrado, mas sem id Tiny'), 502
-
-        # 3) Busca composição (kit) pelo ID
-        # Mantemos o mesmo padrão já usado no projeto:
+        # 4) Busca composição (kit) pelo ID
         resp_kit = ag_ctrl.caller.make_call(f'produtos/{id_tiny}/kit')
 
-        # Normaliza: kit pode vir como lista ou dentro de "itens"
         if isinstance(resp_kit, list):
             kit = resp_kit
-        elif isinstance(resp_kit, dict) and 'itens' in resp_kit:
+        elif isinstance(resp_kit, dict):
             kit = resp_kit.get('itens') or []
         else:
             kit = []
@@ -2284,9 +2324,9 @@ def tiny_composicao_auto():
         return jsonify(ok=True, origem=origem, id_tiny=id_tiny, kit=kit), 200
 
     except Exception as e:
-        app.logger.exception("Falha em /api/tiny/composicao-auto")
+        current_app.logger.exception("Falha em /api/tiny/composicao-auto")
         return jsonify(ok=False, error=str(e)), 500
-    
+
 @bp_retirado.get("/api/retirado/composicao/<int:id_comp>/imagem")
 def api_retirado_composicao_imagem(id_comp: int):
     """
