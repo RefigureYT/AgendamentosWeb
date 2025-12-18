@@ -2,6 +2,7 @@
 
 document.addEventListener("DOMContentLoaded", () => {
     const API_MARKETPLACES = "/api/despacho/marketplaces";
+    const API_EMPRESAS = "/api/despacho/empresas";
     const API_BIPAR_NFE = "/api/despacho/crossdocking/nfe";
 
     // ===== marca “Despacho” ativo no menu =====
@@ -19,7 +20,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // ===== elementos =====
     const errorPopupEl = document.getElementById("cdErrorPopup");
 
-    const modalEl = document.getElementById("modalSelecionarMarketplace");
+    const modalEmpresaEl = document.getElementById("modalSelecionarEmpresa");
+    const modalMktpEl = document.getElementById("modalSelecionarMarketplace");
+
+    const selEmpresa = document.getElementById("nome_empresa");
     const selMarketplace = document.getElementById("nome_marketplace");
 
     const areaDespacho = document.getElementById("areaDespacho");
@@ -34,6 +38,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let count = 0;
     const nfesBipadas = new Set();
     let marketplaceSelecionadoId = null;
+    let empresaSelecionadaId = null;
     let errorTimer = null;
 
     // ===== helpers =====
@@ -121,8 +126,49 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    if (modalEl && selMarketplace) {
-        modalEl.addEventListener("shown.bs.modal", async () => {
+    async function carregarEmpresasNoSelect() {
+        if (!selEmpresa) return;
+
+        selEmpresa.innerHTML = `<option value="" selected disabled>Carregando...</option>`;
+
+        const res = await fetch(API_EMPRESAS, { method: "GET" });
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok || !json.ok) {
+            throw new Error(json.error || `Falha ao carregar empresas (HTTP ${res.status})`);
+        }
+
+        const items = Array.isArray(json.items) ? json.items : [];
+
+        selEmpresa.innerHTML = `<option value="" selected disabled>Selecione a Empresa</option>`;
+
+        for (const e of items) {
+            // a API já ignora id_emp=0, mas vamos garantir
+            const id = Number(e.id_emp);
+            if (!Number.isFinite(id) || id <= 0) continue;
+
+            const opt = document.createElement("option");
+            opt.value = String(id);
+            opt.textContent = String(e.nome_emp || "").trim() || `Empresa ${id}`;
+            selEmpresa.appendChild(opt);
+        }
+    }
+
+    // Modal 1 (Empresa)
+    if (modalEmpresaEl && selEmpresa) {
+        modalEmpresaEl.addEventListener("shown.bs.modal", async () => {
+            try {
+                await carregarEmpresasNoSelect();
+                selEmpresa.focus();
+            } catch (e) {
+                showErrorPopup(e?.message || "Não foi possível carregar as empresas.");
+            }
+        });
+    }
+
+    // Modal 2 (Marketplace)
+    if (modalMktpEl && selMarketplace) {
+        modalMktpEl.addEventListener("shown.bs.modal", async () => {
             try {
                 await carregarMarketplacesNoSelect();
                 selMarketplace.focus();
@@ -138,6 +184,10 @@ document.addEventListener("DOMContentLoaded", () => {
             if (e.key !== "Enter") return;
             e.preventDefault();
 
+            if (!empresaSelecionadaId) {
+                showErrorPopup("Selecione a empresa antes de bipar");
+                return;
+            }
             if (!marketplaceSelecionadoId) {
                 showErrorPopup("Selecione o marketplace antes de bipar");
                 return;
@@ -167,6 +217,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         id_mktp: Number(marketplaceSelecionadoId),
+                        id_emp: Number(empresaSelecionadaId),
                         chave_acesso_nfe: digits,
                     }),
                 });
@@ -223,7 +274,7 @@ document.addEventListener("DOMContentLoaded", () => {
         `,
                 showConfirmButton: true,
                 confirmButtonText: "OK",
-                confirmButtonColor: "#6c63ff",
+                confirmButtonColor: "#0b5ed7",
                 allowOutsideClick: false,
                 allowEscapeKey: false,
                 timer: countdownSeconds * 1000,
@@ -248,32 +299,85 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // ===== função chamada pelo botão OK do modal =====
+    window.confirmarEmpresaCrossdocking = function () {
+        if (!selEmpresa) {
+            showErrorPopup("Selecione a empresa");
+            return;
+        }
+
+        const empVal = selEmpresa.value;
+        if (!empVal || Number(empVal) <= 0) {
+            showErrorPopup("Selecione uma empresa válida");
+            return;
+        }
+
+        empresaSelecionadaId = empVal;
+
+        // Se trocou empresa, zera marketplace selecionado
+        marketplaceSelecionadoId = null;
+        if (selMarketplace) selMarketplace.value = "";
+
+        if (!modalEmpresaEl || !window.bootstrap) return;
+
+        const inst = bootstrap.Modal.getInstance(modalEmpresaEl) || new bootstrap.Modal(modalEmpresaEl);
+
+        // Só abre o modal 2 depois que o 1 terminar de fechar (evita bug de backdrop/animação)
+        modalEmpresaEl.addEventListener(
+            "hidden.bs.modal",
+            () => {
+                if (modalMktpEl && window.bootstrap) {
+                    const inst2 = bootstrap.Modal.getInstance(modalMktpEl) || new bootstrap.Modal(modalMktpEl);
+                    inst2.show();
+                }
+            },
+            { once: true }
+        );
+
+        inst.hide();
+    };
+
     window.confirmarMarketplaceCrossdocking = function () {
+        if (!empresaSelecionadaId) {
+            showErrorPopup("Selecione a empresa primeiro");
+            return;
+        }
+
         if (!selMarketplace) {
             showErrorPopup("Selecione o marketplace");
             return;
         }
 
-        const val = selMarketplace.value;
-        if (!val) {
+        const mktpVal = selMarketplace.value;
+        if (!mktpVal || Number(mktpVal) <= 0) {
             showErrorPopup("Selecione o marketplace");
             return;
         }
 
-        marketplaceSelecionadoId = val;
-        const txt = selMarketplace.options[selMarketplace.selectedIndex]?.text || "";
+        marketplaceSelecionadoId = mktpVal;
 
-        // fecha modal
-        if (modalEl && window.bootstrap) {
-            const inst = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
-            inst.hide();
-        }
+        const empTxt = selEmpresa?.options?.[selEmpresa.selectedIndex]?.text || "";
+        const mktpTxt = selMarketplace.options[selMarketplace.selectedIndex]?.text || "";
 
-        // prepara UI
-        resetarBipes();
-        if (areaDespacho) areaDespacho.classList.remove("d-none");
-        if (infoMarketplace) infoMarketplace.textContent = `Marketplace selecionado: ${txt}`;
-        if (inpNfeBarcode) setTimeout(() => inpNfeBarcode.focus(), 150);
+        if (!modalMktpEl || !window.bootstrap) return;
+
+        const inst = bootstrap.Modal.getInstance(modalMktpEl) || new bootstrap.Modal(modalMktpEl);
+
+        // Só atualiza a UI depois que o modal fechar (fica mais “liso”)
+        modalMktpEl.addEventListener(
+            "hidden.bs.modal",
+            () => {
+                resetarBipes();
+                if (areaDespacho) areaDespacho.classList.remove("d-none");
+                if (infoMarketplace) {
+                    infoMarketplace.innerHTML =
+                        `Marketplace selecionado: <span class="cd-pill">${mktpTxt}</span> ` +
+                        `Empresa: <span class="cd-pill cd-pill--soft">${empTxt}</span>`;
+                }
+                if (inpNfeBarcode) setTimeout(() => inpNfeBarcode.focus(), 150);
+            },
+            { once: true }
+        );
+
+        inst.hide();
     };
 });

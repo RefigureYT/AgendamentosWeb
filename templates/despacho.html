@@ -20,7 +20,7 @@
             type="button"
             class="btn btn-primary-custom"
             data-bs-toggle="modal"
-            data-bs-target="#modalSelecionarMarketplace"
+            data-bs-target="#modalSelecionarEmpresa"
             >
             Iniciar despacho
             </button>
@@ -78,23 +78,45 @@
             </div>
         </div>
 
-        <!-- MODAL: Selecionar Marketplace -->
-        <div class="modal fade" id="modalSelecionarMarketplace" tabindex="-1">
-            <div class="modal-dialog modal-dialog-centered">
+    <!-- MODAL 1: Selecionar Empresa -->
+    <div class="modal fade" id="modalSelecionarEmpresa" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content text-center">
-                <div class="modal-header">
-                <h5 class="modal-title">Selecione o Marketplace</h5>
+            <div class="modal-header">
+                <h5 class="modal-title">Selecione a Empresa</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                <select id="nome_marketplace" class="form-select mb-3">
-                    <option value="" selected disabled>Selecione o Marketplace</option>
+            </div>
+
+            <div class="modal-body">
+                <select id="nome_empresa" class="form-select mb-3">
+                <option value="" selected disabled>Selecione a Empresa</option>
                 </select>
-                <button class="btn btn-secondary" type="button" onclick="confirmarMarketplaceCrossdocking()">OK</button>
-                </div>
+
+                <button class="btn btn-secondary" type="button" onclick="confirmarEmpresaCrossdocking()">Continuar</button>
             </div>
             </div>
         </div>
+        </div>
+
+        <!-- MODAL 2: Selecionar Marketplace -->
+        <div class="modal fade" id="modalSelecionarMarketplace" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-center">
+            <div class="modal-header">
+                <h5 class="modal-title">Selecione o Marketplace</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <div class="modal-body">
+                <select id="nome_marketplace" class="form-select mb-3">
+                <option value="" selected disabled>Selecione o Marketplace</option>
+                </select>
+
+                <button class="btn btn-secondary" type="button" onclick="confirmarMarketplaceCrossdocking()">OK</button>
+            </div>
+            </div>
+        </div>
+    </div>
 
         </div>
     </div>

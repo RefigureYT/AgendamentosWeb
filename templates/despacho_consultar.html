@@ -45,14 +45,6 @@
 
             <div class="dc-search-row">
                 <div>
-                <label class="form-label fw-bold">Marketplace</label><br>
-                <small class="text-muted">Selecione o Marketplace.</small>
-                <select id="qMarketplace" class="form-select">
-                    <option value="">Todos</option>
-                </select>
-                </div>
-
-                <div>
                 <label class="form-label fw-bold">Chave NF-e (44 dígitos) ou Nº da nota</label><br>
                 <small class="text-muted">Dica: ao colar/digitar 44 dígitos, a busca dispara automaticamente.</small>
                 <input
@@ -92,19 +84,19 @@
             <div class="table-responsive">
                 <table class="table table-striped table-hover align-middle mb-0">
                 <thead>
-                    <tr>
+                <tr>
                     <th>ID</th>
                     <th>Marketplace</th>
-                    <th>ID MKTP</th>
+                    <th>Empresa</th>
                     <th>Chave acesso NF-e</th>
                     <th>Nº Nota</th>
                     <th>Data</th>
                     <th>Hora</th>
-                    </tr>
+                </tr>
                 </thead>
                 <tbody id="resultsBody">
                     <tr>
-                    <td colspan="7" class="text-muted">Nenhuma busca realizada.</td>
+                        <td colspan="7" class="text-muted">Nenhuma busca realizada.</td>
                     </tr>
                 </tbody>
                 </table>
@@ -127,46 +119,53 @@
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
         </div>
 
-        <div class="modal-body">
-            <div class="row g-3">
-            <div class="col-12 col-md-4">
+    <div class="modal-body">
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
                 <label class="form-label fw-bold">Marketplace</label>
                 <select id="fltMarketplace" class="form-select">
-                <option value="">Todos</option>
+                    <option value="">Todos</option>
                 </select>
             </div>
 
-            <div class="col-12 col-md-8">
-                <label class="form-label fw-bold">Chave de acesso (44 dígitos)</label>
-                <input id="fltChave" type="text" class="form-control" inputmode="numeric" placeholder="Somente números ou com máscara" />
+            <div class="col-12 col-md-6">
+                <label class="form-label fw-bold">Empresa</label>
+                <select id="fltEmpresa" class="form-select">
+                    <option value="">Todas</option>
+                </select>
             </div>
 
-            <div class="col-12 col-md-4">
+            <div class="col-12 col-md-6">
                 <label class="form-label fw-bold">Número da nota</label>
                 <input id="fltNumeroNota" type="text" class="form-control" placeholder="Ex: 123456" />
             </div>
 
-            <div class="col-12 col-md-4">
+            <div class="col-12">
+                <label class="form-label fw-bold">Chave de acesso (44 dígitos)</label>
+                <input id="fltChave" type="text" class="form-control" inputmode="numeric" placeholder="Somente números ou com máscara" />
+            </div>
+
+            <div class="col-12 col-md-6">
                 <label class="form-label fw-bold">Data (de)</label>
                 <input id="fltDataDe" type="date" class="form-control" />
             </div>
 
-            <div class="col-12 col-md-4">
+            <div class="col-12 col-md-6">
                 <label class="form-label fw-bold">Data (até)</label>
                 <input id="fltDataAte" type="date" class="form-control" />
             </div>
 
-            <div class="col-6 col-md-4">
+            <div class="col-12 col-md-6">
                 <label class="form-label fw-bold">Hora (de)</label>
                 <input id="fltHoraDe" type="time" class="form-control" step="1" />
             </div>
 
-            <div class="col-6 col-md-4">
+            <div class="col-12 col-md-6">
                 <label class="form-label fw-bold">Hora (até)</label>
                 <input id="fltHoraAte" type="time" class="form-control" step="1" />
             </div>
-            </div>
         </div>
+    </div>
 
         <div class="modal-footer d-flex flex-wrap gap-2">
             <button id="btnLimpar" class="btn btn-outline-secondary" type="button">

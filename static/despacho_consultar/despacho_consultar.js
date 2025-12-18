@@ -1,5 +1,6 @@
 (() => {
     const API_MARKETPLACES = "/api/despacho/marketplaces";
+    const API_EMPRESAS = "/api/despacho/empresas";
     const API_CONSULTAR = "/api/despacho/crossdocking/consultar";
 
     const el = (id) => document.getElementById(id);
@@ -9,11 +10,11 @@
     const resultsBody = el("resultsBody");
     const resultsCount = el("resultsCount");
 
-    const qMarketplace = el("qMarketplace");
     const qInput = el("qInput");
     const qBtnBuscar = el("qBtnBuscar");
 
     const fltMarketplace = el("fltMarketplace");
+    const fltEmpresa = el("fltEmpresa");
     const fltChave = el("fltChave");
     const fltNumeroNota = el("fltNumeroNota");
     const fltDataDe = el("fltDataDe");
@@ -52,33 +53,33 @@
 
         if (!items || items.length === 0) {
             resultsBody.innerHTML = `
-        <tr>
-          <td colspan="7" class="text-muted">Nada encontrado.</td>
-        </tr>
-      `;
+            <tr>
+            <td colspan="7" class="text-muted">Nada encontrado.</td>
+            </tr>`;
             setCount(0);
             return;
         }
 
         const html = items.map((r) => {
-            const nome = r.nome_mktp || "-";
-            const idM = r.id_mktp ?? "-";
+            const marketplace = r.marketplace || "-";
+            const empresa = r.empresa || "-";
             const numNota = (r.numero_nota === null || r.numero_nota === undefined) ? "-" : r.numero_nota;
             const data = r.data_despacho || "-";
             const hora = r.hora_despacho || "-";
 
             return `
-        <tr>
-          <td>${r.id ?? "-"}</td>
-          <td>${nome}</td>
-          <td>${idM}</td>
-          <td class="text-monospace">${r.chave_acesso_nfe || "-"}</td>
-          <td>${numNota}</td>
-          <td>${data}</td>
-          <td>${hora}</td>
-        </tr>
-      `;
+                <tr>
+                <td>${r.id ?? "-"}</td>
+                <td>${marketplace}</td>
+                <td>${empresa}</td>
+                <td class="text-monospace">${r.chave_acesso_nfe || "-"}</td>
+                <td>${numNota}</td>
+                <td>${data}</td>
+                <td>${hora}</td>
+                </tr>
+            `;
         }).join("");
+
 
         resultsBody.innerHTML = html;
         setCount(items.length);
@@ -99,9 +100,26 @@
             return `<option value="${m.id_mktp}">${nome || "Marketplace"}</option>`;
         }).join("");
 
-        // Preenche os dois selects (Pesquisa rápida e Filtros)
-        if (qMarketplace) qMarketplace.insertAdjacentHTML("beforeend", options);
+        // Preenche apenas o select do modal (Filtros avançados)
         if (fltMarketplace) fltMarketplace.insertAdjacentHTML("beforeend", options);
+    }
+
+    async function loadEmpresas() {
+        const res = await fetch(API_EMPRESAS, { method: "GET" });
+        const json = await res.json();
+
+        if (!res.ok || !json.ok) {
+            throw new Error(json.error || "Falha ao carregar empresas");
+        }
+
+        const items = Array.isArray(json.items) ? json.items : [];
+
+        const options = items.map((e) => {
+            const nome = String(e.nome_emp || "").trim();
+            return `<option value="${e.id_emp}">${nome || "Empresa"}</option>`;
+        }).join("");
+
+        if (fltEmpresa) fltEmpresa.insertAdjacentHTML("beforeend", options);
     }
 
     async function consultar(payload) {
@@ -132,17 +150,14 @@
 
     function payloadFromQuick() {
         const q = (qInput?.value || "").trim();
-        const id_mktp = (qMarketplace?.value || "").trim();
-
-        const out = { q };
-        if (id_mktp) out.id_mktp = Number(id_mktp);
-        return out;
+        return { q };
     }
 
     function payloadFromFilters() {
         const out = {};
 
         const id_mktp = (fltMarketplace?.value || "").trim();
+        const id_emp = (fltEmpresa?.value || "").trim();
         const chave = (fltChave?.value || "").trim();
         const numero = (fltNumeroNota?.value || "").trim();
 
@@ -152,6 +167,7 @@
         const hora_ate = (fltHoraAte?.value || "").trim();
 
         if (id_mktp) out.id_mktp = Number(id_mktp);
+        if (id_emp) out.id_emp = Number(id_emp);
         if (chave) out.chave_acesso_nfe = chave;
         if (numero) out.numero_nota = numero;
 
@@ -177,6 +193,7 @@
 
     function clearFilters() {
         if (fltMarketplace) fltMarketplace.value = "";
+        if (fltEmpresa) fltEmpresa.value = "";
         if (fltChave) fltChave.value = "";
         if (fltNumeroNota) fltNumeroNota.value = "";
         if (fltDataDe) fltDataDe.value = "";
@@ -189,8 +206,9 @@
     document.addEventListener("DOMContentLoaded", async () => {
         try {
             await loadMarketplaces();
+            await loadEmpresas();
         } catch (e) {
-            showErr(e?.message || "Não foi possível carregar marketplaces.");
+            showErr(e?.message || "Não foi possível carregar marketplaces/empresas.");
         }
 
         // Pesquisa rápida

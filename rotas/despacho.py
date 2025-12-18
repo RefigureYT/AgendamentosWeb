@@ -11,7 +11,7 @@ def get_sandbox() -> bool:
 SCHEMA = "agendamentosweb"
 TBL_DESPACHO = f"{SCHEMA}.despacho_crossdocking"
 TBL_MKTP = f"{SCHEMA}.marketplace_agend"
-
+TBL_EMP  = f"{SCHEMA}.empresas_agend"
 
 def _digits(v) -> str:
     return re.sub(r"\D+", "", str(v or ""))
@@ -59,6 +59,14 @@ def api_despacho_crossdocking_nfe():
     except Exception:
         return jsonify(ok=False, error='Parâmetro "id_mktp" é obrigatório e deve ser inteiro positivo'), 400
 
+    # valida id_emp (empresa) - deve ser > 0 e existir
+    try:
+        id_emp = int(data.get("id_emp"))
+        if id_emp <= 0:
+            raise ValueError("id_emp precisa ser positivo")
+    except Exception:
+        return jsonify(ok=False, error='Parâmetro "id_emp" é obrigatório e deve ser inteiro positivo'), 400
+
     # valida chave 44 dígitos
     chave_digits = _digits((data.get("chave_acesso_nfe") or "").strip())
     if len(chave_digits) != 44:
@@ -71,20 +79,31 @@ def api_despacho_crossdocking_nfe():
     conn = pool.getconn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # confirma se a empresa existe (e bloqueia id_emp=0)
+            cur.execute(f"SELECT 1 FROM {TBL_EMP} WHERE id_emp = %s AND id_emp > 0", (id_emp,))
+            if not cur.fetchone():
+                return jsonify(ok=False, error="Empresa inválida ou não cadastrada."), 400
+            
+            # confirma se o marketplace existe
+            cur.execute(f"SELECT 1 FROM {TBL_MKTP} WHERE id_mktp = %s", (id_mktp,))
+            if not cur.fetchone():
+                return jsonify(ok=False, error="Marketplace inválido ou não cadastrado."), 400
+
             try:
                 sandbox = get_sandbox()
 
                 cur.execute(
                     f"""
                     INSERT INTO {TBL_DESPACHO}
-                        (id_mktp, chave_acesso_nfe, sandbox)
+                        (id_mktp, id_emp, chave_acesso_nfe, sandbox)
                     VALUES
-                        (%s, %s, %s)
+                        (%s, %s, %s, %s)
                     RETURNING
-                        id, id_mktp, chave_acesso_nfe, numero_nota, data_despacho, hora_despacho, sandbox
+                        id, id_mktp, id_emp, chave_acesso_nfe, numero_nota, data_despacho, hora_despacho, sandbox
                     """,
-                    (id_mktp, chave_digits, sandbox)
+                    (id_mktp, id_emp, chave_digits, sandbox)
                 )
+
                 row = cur.fetchone()
                 conn.commit()
 
@@ -132,6 +151,36 @@ def api_despacho_marketplaces():
     finally:
         pool.putconn(conn)
 
+@bp_despacho.route('/api/despacho/empresas', methods=['GET'])
+def api_despacho_empresas():
+    """
+    GET /api/despacho/empresas
+    Lê de: agendamentosweb.empresas_agend
+    Ignora: id_emp = 0 ("Nenhuma")
+    Retorna: { ok: true, items: [{id_emp, nome_emp}, ...] }
+    """
+    if 'id_usuario' not in session:
+        return jsonify(ok=False, error='Não autenticado'), 401
+
+    pool = current_app.config.get("PG_POOL")
+    if not pool:
+        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 500
+
+    conn = pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT id_emp, nome_emp
+                FROM {TBL_EMP}
+                WHERE id_emp > 0
+                ORDER BY id_emp ASC
+                """
+            )
+            rows = cur.fetchall() or []
+            return jsonify(ok=True, items=rows), 200
+    finally:
+        pool.putconn(conn)
 
 @bp_despacho.route('/api/despacho/crossdocking/consultar', methods=['POST'])
 def api_despacho_crossdocking_consultar():
@@ -160,6 +209,7 @@ def api_despacho_crossdocking_consultar():
 
     q = str(data.get("q") or "").strip()
     id_mktp_raw = data.get("id_mktp", None)
+    id_emp_raw  = data.get("id_emp", None)
     chave_raw = str(data.get("chave_acesso_nfe") or "").strip()
     numero_raw = data.get("numero_nota", None)
 
@@ -192,6 +242,16 @@ def api_despacho_crossdocking_consultar():
                 raise ValueError()
         except Exception:
             return jsonify(ok=False, error='Filtro "id_mktp" deve ser inteiro positivo'), 400
+
+    # normaliza id_emp (opcional)
+    id_emp = None
+    if id_emp_raw not in (None, "", "null"):
+        try:
+            id_emp = int(id_emp_raw)
+            if id_emp <= 0:
+                raise ValueError()
+        except Exception:
+            return jsonify(ok=False, error='Filtro "id_emp" deve ser inteiro positivo'), 400
 
     # normaliza numero_nota (opcional)
     numero_nota = None
@@ -245,6 +305,11 @@ def api_despacho_crossdocking_consultar():
         where.append("d.id_mktp = %s")
         params.append(id_mktp)
 
+    # empresa
+    if id_emp is not None:
+        where.append("d.id_emp = %s")
+        params.append(id_emp)
+
     # chave
     if chave_digits:
         where.append("d.chave_acesso_nfe = %s")
@@ -292,8 +357,8 @@ def api_despacho_crossdocking_consultar():
                 f"""
                 SELECT
                     d.id,
-                    d.id_mktp,
-                    m.nome_mktp,
+                    COALESCE(m.nome_mktp, '-') AS marketplace,
+                    COALESCE(e.nome_emp, '-')  AS empresa,
                     d.chave_acesso_nfe,
                     d.numero_nota,
                     d.data_despacho,
@@ -301,6 +366,8 @@ def api_despacho_crossdocking_consultar():
                 FROM {TBL_DESPACHO} d
                 LEFT JOIN {TBL_MKTP} m
                        ON m.id_mktp = d.id_mktp
+                LEFT JOIN {TBL_EMP} e
+                       ON e.id_emp = d.id_emp
                 {where_sql}
                 ORDER BY
                     d.data_despacho DESC NULLS LAST,
