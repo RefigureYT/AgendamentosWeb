@@ -9,21 +9,12 @@
 {% block content %}
 <div class="container pt-4">
 
-<div class="panel-control mb-4">
-    <div class="panel-title">
-    <h5 class="mb-0">Despacho • Crossdocking</h5>
-    </div>
+    <div class="panel-control mb-4">
 
-    <!-- POPUP DE ERRO (não bloqueia o sistema) -->
-    <div id="cdErrorPopup" class="cd-error-popup d-none" aria-live="assertive"></div>
-
-        <div class="panel-content">
-        <p class="text-muted mb-3">
-            Crossdocking (simples): escolha o marketplace, depois bipe a NF-e.
-        </p>
+        <div class="panel-title d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        <h5 class="mb-0">Despacho • Crossdocking</h5>
 
         <div class="cd-actions d-flex flex-wrap gap-2">
-            <!-- 1) Iniciar despacho -->
             <button
             id="btnIniciarDespacho"
             type="button"
@@ -34,77 +25,77 @@
             Iniciar despacho
             </button>
 
-            <!-- 2) Consultar pedidos -->
-            <a
-            class="btn btn-outline-secondary"
-            href="{{ url_for('despacho.despacho_consultar') }}"
-            >
+            <a class="btn btn-outline-secondary" href="{{ url_for('despacho.despacho_consultar') }}">
             Consultar pedidos
             </a>
         </div>
+        </div>
 
-            <div id="areaDespacho" class="cd-scan position-relative d-none mt-4">
+        <!-- POPUP DE ERRO (não bloqueia o sistema) -->
+        <div id="cdErrorPopup" class="cd-error-popup d-none" aria-live="assertive"></div>
+
+        <div class="panel-content">
+        <p class="text-muted mb-3">
+            Crossdocking (simples): escolha o marketplace, depois bipe a NF-e.
+        </p>
+
+        <div id="areaDespacho" class="cd-scan position-relative d-none mt-2">
             <div class="cd-scan-header mb-2">
-                <div class="cd-scan-title">Bipe o código de barras da nota fiscal presente na etiqueta do produto embalado</div>
-                <div id="cdMarketplaceInfo" class="cd-scan-sub text-muted"></div>
+            <div class="cd-scan-title">Bipe o código de barras da nota fiscal presente na etiqueta do produto embalado</div>
+            <div id="cdMarketplaceInfo" class="cd-scan-sub text-muted"></div>
             </div>
 
             <div class="cd-scan-row">
-                <input
+            <input
                 id="inpNfeBarcode"
                 class="form-control"
                 type="text"
                 inputmode="numeric"
                 autocomplete="off"
                 placeholder="Aguardando leitura… (44 dígitos)"
-                />
+            />
 
-                <div class="cd-counter" title="Total de produtos bipados">
+            <div class="cd-counter" title="Total de produtos bipados">
                 <div id="cdCounter" class="cd-counter-number">0</div>
                 <div class="cd-counter-label">Bipados</div>
-                </div>
+            </div>
             </div>
 
             <small class="text-muted d-block mt-2">Dica: o leitor geralmente envia e dá ENTER sozinho.</small>
 
-            <!-- Lista de bipes -->
             <div id="cdBipesList" class="cd-bipes-list mt-3"></div>
 
-            <!-- Botão concluir (canto inferior direito do painel) -->
             <div class="cd-footer position-absolute end-0 bottom-0 m-3">
-                <button
+            <button
                 id="btnConcluir"
                 type="button"
                 class="btn btn-primary-custom"
                 data-redirect-url="{{ url_for('agendamentos', acao='ver') }}"
                 data-countdown="5"
-                >
+            >
                 Concluir
-                </button>
-            </div>
+            </button>
             </div>
         </div>
 
         <!-- MODAL: Selecionar Marketplace -->
         <div class="modal fade" id="modalSelecionarMarketplace" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content text-center">
-            <div class="modal-header">
+                <div class="modal-header">
                 <h5 class="modal-title">Selecione o Marketplace</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
+                </div>
+                <div class="modal-body">
                 <select id="nome_marketplace" class="form-select mb-3">
-                <option selected disabled>Selecione o Marketplace</option>
-                <option value="4">Amazon</option>
-                <option value="2">Magalu</option>
-                <option value="1">Mercado Livre</option>
-                <option value="3">Shopee</option>
+                    <option value="" selected disabled>Selecione o Marketplace</option>
                 </select>
                 <button class="btn btn-secondary" type="button" onclick="confirmarMarketplaceCrossdocking()">OK</button>
+                </div>
             </div>
             </div>
         </div>
+
         </div>
     </div>
 

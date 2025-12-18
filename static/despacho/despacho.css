@@ -1,18 +1,34 @@
-/* static/expedicao/expedicao_crossdocking.css */
+/* static/despacho/despacho.css */
 
+/* ===== Tokens (padrão Jaú Pesca) ===== */
 :root {
-    --jp-bg: #f4f7fb;
+    --jp-bg: #eef4fb;
     --jp-surface: #ffffff;
-    --jp-border: #dbe6f3;
+    --jp-surface-2: #f7fbff;
 
     --jp-text: #0f172a;
-    --jp-muted: #475569;
+    --jp-muted: #64748b;
 
-    /* cor de destaque (puxa pro “verde/azul” do logo) */
-    --jp-accent: #0f766e;
-    --jp-accent-2: #115e59;
+    --jp-border: #dbe6f3;
+    --jp-border-strong: #c7d9ef;
 
-    --jp-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+    /* Azul Jaú Pesca (padrão do projeto) */
+    --jp-accent: #0b5ed7;
+    /* principal */
+    --jp-accent-2: #084298;
+    /* hover/darker */
+    --jp-accent-3: #052c65;
+    /* active */
+    --jp-accent-rgb: 11, 94, 215;
+
+    --jp-danger: #b91c1c;
+
+    --jp-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+
+    --jp-radius: 18px;
+    --jp-radius-sm: 14px;
+
+    --jp-control-h: 44px;
 }
 
 /* fundo geral */
@@ -21,42 +37,20 @@ body {
     color: var(--jp-text);
 }
 
-/* ===== NAV: destaque do item ativo (JS adiciona .is-active) ===== */
-.navbar .nav-link.is-active {
-    color: var(--jp-accent) !important;
-    font-weight: 700;
-    position: relative;
-}
-
-.navbar .nav-link.is-active::after {
-    content: "";
-    position: absolute;
-    left: 10px;
-    right: 10px;
-    bottom: -8px;
-    height: 3px;
-    border-radius: 99px;
-    background: var(--jp-accent);
-    opacity: 0.9;
-}
-
 /* ===== painel ===== */
 .panel-control {
     background: var(--jp-surface);
     color: var(--jp-text);
     border: 1px solid var(--jp-border);
-    border-radius: 14px;
+    border-radius: var(--jp-radius);
     padding: 22px;
     box-shadow: var(--jp-shadow);
 }
 
-/* garante que nada force branco dentro do painel */
-.panel-control,
-.panel-control div,
-.panel-control p,
-.panel-control span,
-.panel-control small {
-    color: inherit;
+@media (max-width: 576px) {
+    .panel-control {
+        padding: 16px;
+    }
 }
 
 .panel-title {
@@ -70,11 +64,10 @@ body {
 
 .panel-title h5 {
     margin: 0;
-    font-weight: 800;
+    font-weight: 850;
     letter-spacing: 0.2px;
 }
 
-/* “bar” do título */
 .panel-title::before {
     content: "";
     width: 10px;
@@ -90,66 +83,157 @@ body {
 /* cards */
 .panel-control .card {
     border: 1px solid var(--jp-border);
-    border-radius: 14px;
-    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+    border-radius: var(--jp-radius);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
 }
 
-.panel-control .card-title {
-    font-weight: 800;
-    color: var(--jp-text);
+/* inputs */
+.panel-control .form-control,
+.panel-control .form-select {
+    height: var(--jp-control-h);
+    border-radius: var(--jp-radius-sm);
+    border-color: var(--jp-border-strong);
 }
 
-.panel-control .card-text {
-    color: var(--jp-muted);
+.panel-control .form-control:focus,
+.panel-control .form-select:focus {
+    border-color: rgba(var(--jp-accent-rgb), 0.55);
+    box-shadow: 0 0 0 4px rgba(var(--jp-accent-rgb), 0.14);
 }
 
-/* botões */
+/* ===== Botões (corrige contraste e briga com Bootstrap) ===== */
+
 .btn-primary-custom {
-    background-color: var(--jp-accent);
-    border-color: var(--jp-accent);
-    color: #fff;
-    font-weight: 700;
-    border-radius: 12px;
-    padding: 10px 14px;
+    height: var(--jp-control-h);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+
+    background: var(--jp-accent);
+    border: 1px solid var(--jp-accent);
+    color: #fff !important;
+
+    font-weight: 800;
+    border-radius: var(--jp-radius-sm);
+    padding: 0 16px;
 }
 
 .btn-primary-custom:hover {
-    background-color: var(--jp-accent-2);
+    background: var(--jp-accent-2);
     border-color: var(--jp-accent-2);
+    color: #fff !important;
+    /* impede Bootstrap de escurecer o texto */
+}
+
+.btn-primary-custom:active {
+    background: var(--jp-accent-3);
+    border-color: var(--jp-accent-3);
+    color: #fff !important;
+}
+
+.btn-primary-custom:focus,
+.btn-primary-custom:focus-visible {
+    color: #fff !important;
+    box-shadow: 0 0 0 4px rgba(var(--jp-accent-rgb), 0.18) !important;
+}
+
+/* Botão “branco” (outline) — fixa texto escuro SEMPRE */
+.btn-outline-secondary {
+    height: var(--jp-control-h);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+
+    border-radius: var(--jp-radius-sm);
+    border: 1px solid var(--jp-border-strong) !important;
+    background: #fff !important;
+
+    color: rgba(15, 23, 42, 0.88) !important;
+    /* texto sempre escuro */
+    font-weight: 800;
+}
+
+.btn-outline-secondary:hover {
+    border-color: rgba(var(--jp-accent-rgb), 0.45) !important;
+    background: rgba(var(--jp-accent-rgb), 0.08) !important;
+    color: rgba(15, 23, 42, 0.92) !important;
+    /* impede Bootstrap de colocar branco */
+}
+
+.btn-outline-secondary:active {
+    border-color: rgba(var(--jp-accent-rgb), 0.55) !important;
+    background: rgba(var(--jp-accent-rgb), 0.12) !important;
+    color: rgba(15, 23, 42, 0.92) !important;
+}
+
+.btn-outline-secondary:focus,
+.btn-outline-secondary:focus-visible {
+    color: rgba(15, 23, 42, 0.92) !important;
+    box-shadow: 0 0 0 4px rgba(var(--jp-accent-rgb), 0.14) !important;
+}
+
+/* Se existir .btn-secondary em algum modal (OK), deixa no mesmo padrão azul */
+.panel-control .btn-secondary {
+    background: var(--jp-accent) !important;
+    border-color: var(--jp-accent) !important;
+    color: #fff !important;
+    font-weight: 800;
+    border-radius: var(--jp-radius-sm);
+    height: var(--jp-control-h);
+}
+
+.panel-control .btn-secondary:hover {
+    background: var(--jp-accent-2) !important;
+    border-color: var(--jp-accent-2) !important;
+    color: #fff !important;
+}
+
+.panel-control .btn-secondary:active {
+    background: var(--jp-accent-3) !important;
+    border-color: var(--jp-accent-3) !important;
+    color: #fff !important;
 }
 
 .btn-outline-secondary {
-    border-radius: 12px;
-}
+    height: var(--jp-control-h);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
 
-/* alerta info (mais clean) */
-.alert.alert-info {
-    border: 1px solid rgba(15, 118, 110, 0.25);
-    background: rgba(15, 118, 110, 0.08);
+    border-radius: var(--jp-radius-sm);
+    border-color: var(--jp-border-strong);
     color: var(--jp-text);
-    border-radius: 14px;
 }
 
-@media (max-width: 576px) {
-    .panel-control {
-        padding: 16px;
-    }
+/* alerts */
+.alert.alert-info {
+    border: 1px solid rgba(var(--jp-accent-rgb), 0.25);
+    background: rgba(var(--jp-accent-rgb), 0.08);
+    color: var(--jp-text);
+    border-radius: var(--jp-radius-sm);
 }
 
-/* ===== Crossdocking: ações e bipagem ===== */
+/* ===== Crossdocking ===== */
 .cd-actions .btn {
-    min-height: 42px;
+    min-height: var(--jp-control-h);
 }
 
 .cd-scan {
-    padding: 14px;
-    border: 1px dashed var(--jp-border);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.6);
+    padding: 16px;
+    border: 1px dashed var(--jp-border-strong);
+    border-radius: var(--jp-radius);
+    background: var(--jp-surface-2);
+
+    position: relative;
+    padding-bottom: 84px;
+    /* espaço pro Concluir */
 }
 
 .cd-scan-title {
-    font-weight: 800;
+    font-weight: 900;
 }
 
 .cd-scan-sub {
@@ -163,19 +247,25 @@ body {
     align-items: stretch;
 }
 
-/* ===== contador SUPER visível ===== */
+#inpNfeBarcode.form-control {
+    height: 56px;
+    /* leitura fica mais confortável */
+    font-size: 1.05rem;
+    font-weight: 650;
+    letter-spacing: 0.2px;
+}
+
+/* contador: forte, mas dentro do padrão */
 .cd-counter {
-    min-width: 170px;
-    padding: 14px 14px;
+    min-width: 168px;
     border-radius: 16px;
-
-    /* bem vibrante */
-    background: #00e5ff;
-    border: 3px solid #00b8d4;
-
+    border: 1px solid rgba(var(--jp-accent-rgb), 0.35);
+    background: linear-gradient(135deg,
+            rgba(var(--jp-accent-rgb), 0.18),
+            rgba(var(--jp-accent-rgb), 0.06));
     box-shadow:
-        0 12px 30px rgba(0, 229, 255, 0.28),
-        0 0 0 4px rgba(0, 229, 255, 0.20);
+        0 12px 28px rgba(var(--jp-accent-rgb), 0.10),
+        0 0 0 4px rgba(var(--jp-accent-rgb), 0.10);
 
     display: flex;
     flex-direction: column;
@@ -184,56 +274,54 @@ body {
 }
 
 .cd-counter-number {
-    font-size: 3.2rem;
-    font-weight: 1000;
+    font-size: 3rem;
+    font-weight: 950;
     line-height: 1;
-    color: #001018;
-    letter-spacing: 1px;
+    color: var(--jp-accent);
+    letter-spacing: 0.5px;
 }
 
 .cd-counter-label {
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     font-weight: 900;
     text-transform: uppercase;
-    color: #001018;
+    color: var(--jp-text);
     opacity: 0.9;
 }
 
-/* ===== popup de erro (gigante, vermelho, não bloqueia) ===== */
+/* popup erro: chamativo, mas sem “neon” */
 .cd-error-popup {
     position: fixed;
-    top: 90px;
+    top: 86px;
     left: 50%;
     transform: translateX(-50%);
 
     width: min(980px, 92vw);
-    padding: 18px 22px;
+    padding: 16px 20px;
 
-    background: #ff0033;
-    color: #ffffff;
+    background: var(--jp-danger);
+    color: #fff;
 
-    border: 6px solid #ffffff;
+    border: 4px solid rgba(255, 255, 255, 0.92);
     border-radius: 18px;
 
-    font-weight: 1000;
-    font-size: 2.1rem;
+    font-weight: 950;
+    font-size: 1.8rem;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.7px;
 
     z-index: 3000;
-
     box-shadow:
-        0 18px 50px rgba(255, 0, 51, 0.35),
-        0 0 0 6px rgba(255, 0, 51, 0.18);
+        0 18px 52px rgba(185, 28, 28, 0.30),
+        0 0 0 6px rgba(185, 28, 28, 0.14);
 
-    /* IMPORTANTÍSSIMO: não interrompe bipagem/clicks */
     pointer-events: none;
 }
 
 @media (max-width: 576px) {
     .cd-error-popup {
         top: 72px;
-        font-size: 1.5rem;
+        font-size: 1.35rem;
         padding: 14px 16px;
     }
 }
@@ -241,7 +329,7 @@ body {
 /* lista de bipes */
 .cd-bipes-list {
     border: 1px solid var(--jp-border);
-    border-radius: 14px;
+    border-radius: var(--jp-radius);
     background: var(--jp-surface);
     padding: 10px;
     max-height: 220px;
@@ -261,7 +349,7 @@ body {
 }
 
 .cd-bipe-code {
-    font-weight: 800;
+    font-weight: 850;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 0.95rem;
 }
@@ -272,47 +360,11 @@ body {
     white-space: nowrap;
 }
 
-/* deixa o bloco de bipagem “ancorar” o botão */
-.cd-scan {
-    position: relative;
-    padding-bottom: 80px;
-    /* espaço pro botão não cobrir a lista */
-}
-
+/* botão concluir */
 .cd-footer {
     position: absolute;
     right: 16px;
     bottom: 16px;
     display: flex;
     justify-content: flex-end;
-    margin-top: 0;
-}
-
-@media (max-width: 576px) {
-    .cd-scan-row {
-        flex-direction: column;
-    }
-
-    .cd-counter {
-        width: 100%;
-        min-width: 0;
-    }
-}
-
-/* garante espaço pro botão não cobrir a lista */
-#areaDespacho.cd-scan {
-    padding-bottom: 90px;
-}
-
-/* força posicionamento no canto direito (se algum CSS estiver brigando) */
-#areaDespacho .cd-footer {
-    left: auto !important;
-    right: 16px !important;
-    bottom: 16px !important;
-}
-
-/* caso exista algum float/margin esquisito em btns do projeto */
-#btnConcluir {
-    float: none !important;
-    margin-left: 0 !important;
 }

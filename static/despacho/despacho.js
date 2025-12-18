@@ -1,13 +1,16 @@
-// static/expedicao_crossdocking/expedicao_crossdocking.js
+// static/despacho/despacho.js
 
 document.addEventListener("DOMContentLoaded", () => {
-    // ===== marca “Expedição” ativo no menu =====
+    const API_MARKETPLACES = "/api/despacho/marketplaces";
+    const API_BIPAR_NFE = "/api/despacho/crossdocking/nfe";
+
+    // ===== marca “Despacho” ativo no menu =====
     try {
         const path = window.location.pathname || "";
         const links = document.querySelectorAll(".navbar .nav-link[href]");
         links.forEach((a) => {
             const href = a.getAttribute("href") || "";
-            if (path.startsWith("/expedicao") && href.includes("/expedicao")) {
+            if (path.startsWith("/despacho") && href.includes("/despacho")) {
                 a.classList.add("is-active");
             }
         });
@@ -27,19 +30,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const listEl = document.getElementById("cdBipesList");
     const btnConcluir = document.getElementById("btnConcluir");
 
+    // ===== estado =====
     let count = 0;
     const nfesBipadas = new Set();
     let marketplaceSelecionadoId = null;
-
     let errorTimer = null;
 
+    // ===== helpers =====
     function showErrorPopup(msg) {
         if (!errorPopupEl) return;
 
         const text = (msg || "").toString().trim();
         if (!text) return;
 
-        // texto bem “longe”
         errorPopupEl.textContent = text;
         errorPopupEl.classList.remove("d-none");
 
@@ -55,12 +58,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (payload.error) {
             if (typeof payload.error === "string") return payload.error;
-            try { return JSON.stringify(payload.error); } catch { return fallback; }
+            try {
+                return JSON.stringify(payload.error);
+            } catch {
+                return fallback;
+            }
         }
 
         if (payload.message && typeof payload.message === "string") return payload.message;
 
-        try { return JSON.stringify(payload); } catch { return fallback; }
+        try {
+            return JSON.stringify(payload);
+        } catch {
+            return fallback;
+        }
     }
 
     function resetarBipes() {
@@ -84,14 +95,44 @@ document.addEventListener("DOMContentLoaded", () => {
         listEl.scrollTop = listEl.scrollHeight;
     }
 
-    // foca o select quando o modal abrir
+    // ===== modal dinâmico =====
+    async function carregarMarketplacesNoSelect() {
+        if (!selMarketplace) return;
+
+        // opcional: mostra "carregando..."
+        selMarketplace.innerHTML = `<option value="" selected disabled>Carregando...</option>`;
+
+        const res = await fetch(API_MARKETPLACES, { method: "GET" });
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok || !json.ok) {
+            throw new Error(json.error || `Falha ao carregar marketplaces (HTTP ${res.status})`);
+        }
+
+        const items = Array.isArray(json.items) ? json.items : [];
+
+        selMarketplace.innerHTML = `<option value="" selected disabled>Selecione o Marketplace</option>`;
+
+        for (const m of items) {
+            const opt = document.createElement("option");
+            opt.value = String(m.id_mktp);
+            opt.textContent = String(m.nome_mktp || "").trim() || `Marketplace ${m.id_mktp}`;
+            selMarketplace.appendChild(opt);
+        }
+    }
+
     if (modalEl && selMarketplace) {
-        modalEl.addEventListener("shown.bs.modal", () => {
-            selMarketplace.focus();
+        modalEl.addEventListener("shown.bs.modal", async () => {
+            try {
+                await carregarMarketplacesNoSelect();
+                selMarketplace.focus();
+            } catch (e) {
+                showErrorPopup(e?.message || "Não foi possível carregar os marketplaces.");
+            }
         });
     }
 
-    // ENTER no input -> valida 44 dígitos -> POST -> lista + contador (SEM alert no sucesso)
+    // ===== ENTER no input -> valida 44 dígitos -> POST -> lista + contador =====
     if (inpNfeBarcode) {
         inpNfeBarcode.addEventListener("keydown", async (e) => {
             if (e.key !== "Enter") return;
@@ -121,7 +162,7 @@ document.addEventListener("DOMContentLoaded", () => {
             inpNfeBarcode.disabled = true;
 
             try {
-                const resp = await fetch("/api/despacho/crossdocking/nfe", {
+                const resp = await fetch(API_BIPAR_NFE, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -132,9 +173,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 const data = await resp.json().catch(() => null);
 
-                // erro HTTP ou backend ok:false
                 if (!resp.ok || !data || data.ok !== true) {
-                    // se for duplicidade no banco, mensagem padrão GRANDE
                     if (resp.status === 409) {
                         showErrorPopup("NF-e já registrada no banco");
                     } else {
@@ -143,7 +182,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
 
-                // sucesso no banco -> agora sim marca, conta e lista (SEM popup/alert)
+                // sucesso no banco -> marca, conta e lista (SEM popup no sucesso)
                 nfesBipadas.add(digits);
 
                 count += 1;
@@ -152,12 +191,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 const row = data.row || {};
                 const hora = row.hora_despacho ? String(row.hora_despacho).slice(0, 8) : "";
                 const tsServer =
-                    row.data_despacho && hora
-                        ? `${row.data_despacho} ${hora}`
-                        : new Date().toLocaleString("pt-BR");
+                    row.data_despacho && hora ? `${row.data_despacho} ${hora}` : new Date().toLocaleString("pt-BR");
 
                 adicionarBipe(digits, tsServer);
-
             } catch (err) {
                 showErrorPopup(errorToString(err, "Falha de rede ao salvar a NF-e"));
             } finally {
@@ -168,7 +204,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // botão concluir (SweetAlert2 + contagem regressiva + redirect)
+    // ===== botão concluir (SweetAlert2 + contagem regressiva + redirect) =====
     if (btnConcluir) {
         btnConcluir.addEventListener("click", async () => {
             const redirectUrl = btnConcluir.getAttribute("data-redirect-url") || "/";
@@ -180,11 +216,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 icon: "success",
                 title: "Despacho concluído!",
                 html: `
-        <div style="font-size: 1.05rem;">
-          Tudo certo. Redirecionando para <b>Agendamentos</b> em
-          <b><span id="cdSwalCountdown">${countdownSeconds}</span>s</b>.
-        </div>
-      `,
+          <div style="font-size: 1.05rem;">
+            Tudo certo. Redirecionando para <b>Agendamentos</b> em
+            <b><span id="cdSwalCountdown">${countdownSeconds}</span>s</b>.
+          </div>
+        `,
                 showConfirmButton: true,
                 confirmButtonText: "OK",
                 confirmButtonColor: "#6c63ff",
@@ -212,7 +248,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // função chamada pelo botão OK do modal
+    // ===== função chamada pelo botão OK do modal =====
     window.confirmarMarketplaceCrossdocking = function () {
         if (!selMarketplace) {
             showErrorPopup("Selecione o marketplace");

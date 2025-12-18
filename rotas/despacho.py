@@ -4,6 +4,10 @@ import re
 
 bp_despacho = Blueprint('despacho', __name__)
 
+def get_sandbox() -> bool:
+    # debug=True => sandbox (testes) | debug=False => produção
+    return bool(current_app.debug)
+
 SCHEMA = "agendamentosweb"
 TBL_DESPACHO = f"{SCHEMA}.despacho_crossdocking"
 TBL_MKTP = f"{SCHEMA}.marketplace_agend"
@@ -68,16 +72,18 @@ def api_despacho_crossdocking_nfe():
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             try:
+                sandbox = get_sandbox()
+
                 cur.execute(
                     f"""
                     INSERT INTO {TBL_DESPACHO}
-                        (id_mktp, chave_acesso_nfe)
+                        (id_mktp, chave_acesso_nfe, sandbox)
                     VALUES
-                        (%s, %s)
+                        (%s, %s, %s)
                     RETURNING
-                        id, id_mktp, chave_acesso_nfe, numero_nota, data_despacho, hora_despacho
+                        id, id_mktp, chave_acesso_nfe, numero_nota, data_despacho, hora_despacho, sandbox
                     """,
-                    (id_mktp, chave_digits)
+                    (id_mktp, chave_digits, sandbox)
                 )
                 row = cur.fetchone()
                 conn.commit()
@@ -229,6 +235,10 @@ def api_despacho_crossdocking_consultar():
 
     where = []
     params = []
+
+    # sempre filtra pelo ambiente (produção vs sandbox)
+    where.append("d.sandbox = %s")
+    params.append(get_sandbox())
 
     # marketplace
     if id_mktp is not None:

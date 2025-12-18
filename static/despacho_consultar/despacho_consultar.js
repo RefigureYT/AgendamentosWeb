@@ -94,9 +94,10 @@
 
         const items = Array.isArray(json.items) ? json.items : [];
 
-        const options = items.map((m) =>
-            `<option value="${m.id_mktp}">${m.nome_mktp} (${m.id_mktp})</option>`
-        ).join("");
+        const options = items.map((m) => {
+            const nome = String(m.nome_mktp || "").trim();
+            return `<option value="${m.id_mktp}">${nome || "Marketplace"}</option>`;
+        }).join("");
 
         // Preenche os dois selects (Pesquisa rápida e Filtros)
         if (qMarketplace) qMarketplace.insertAdjacentHTML("beforeend", options);

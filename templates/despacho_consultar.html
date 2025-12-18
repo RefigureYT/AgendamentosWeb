@@ -9,128 +9,79 @@
 {% block content %}
 <div class="container pt-4">
     <div class="panel-control">
+
         <div class="panel-title d-flex align-items-center justify-content-between gap-2 flex-wrap">
         <h5 class="mb-0">Despacho • Consultar pedidos</h5>
 
         <a class="btn btn-outline-secondary" href="{{ url_for('despacho.despacho_crossdocking') }}">
-            Voltar
+            ← Voltar
         </a>
         </div>
 
         <div class="panel-content">
 
-        <!-- Abas -->
-        <ul class="nav nav-tabs dc-tabs" id="dcTabs" role="tablist">
-            <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="tab-rapida" data-bs-toggle="tab" data-bs-target="#pane-rapida"
-                type="button" role="tab" aria-controls="pane-rapida" aria-selected="true">
-                Pesquisa rápida
-            </button>
-            </li>
-            <li class="nav-item" role="presentation">
-            <button class="nav-link" id="tab-filtros" data-bs-toggle="tab" data-bs-target="#pane-filtros"
-                type="button" role="tab" aria-controls="pane-filtros" aria-selected="false">
-                Filtros
-            </button>
-            </li>
-        </ul>
+        <!-- BUSCA (limpa, sem poluir a tela) -->
+        <div class="card shadow-sm dc-search-card">
+            <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                <div class="dc-search-title">Pesquisar</div>
 
-        <div class="tab-content pt-3">
-
-            <!-- Pesquisa rápida -->
-            <div class="tab-pane fade show active" id="pane-rapida" role="tabpanel" aria-labelledby="tab-rapida">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                <div class="d-flex flex-wrap gap-2 align-items-end">
-                    <div style="min-width: 240px;">
-                    <label class="form-label fw-bold">Marketplace</label>
-                    <select id="qMarketplace" class="form-select">
-                        <option value="">Todos</option>
-                    </select>
-                    </div>
-
-                    <div class="flex-grow-1" style="min-width: 260px;">
-                    <label class="form-label fw-bold">Pesquisar por chave NF-e (44 dígitos) ou número da nota</label>
-                    <div class="input-group">
-                        <input id="qInput" class="form-control" placeholder="Cole/digite aqui..." autocomplete="off" />
-                        <button id="qBtnBuscar" class="btn btn-primary-custom" type="button">
-                        Buscar
-                        </button>
-                    </div>
-                    <div class="form-text">
-                        Dica: ao digitar/colar <strong>44 dígitos</strong>, a busca dispara automaticamente.
-                    </div>
-                    </div>
-                </div>
-                </div>
-            </div>
+                <!-- Abre modal (Bootstrap fecha ao clicar fora por padrão) -->
+                <button
+                type="button"
+                class="btn btn-outline-secondary dc-icon-btn"
+                data-bs-toggle="modal"
+                data-bs-target="#modalFiltrosAvancados"
+                aria-controls="modalFiltrosAvancados"
+                >
+                <!-- ícone funil -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M6 10.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.8.4l-1.7-1.275L6.3 14.9a.5.5 0 0 1-.3-.4v-4z"/>
+                    <path d="M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .4.8L10 7v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7L1.6 1.8a.5.5 0 0 1-.1-.3z"/>
+                </svg>
+                Filtros avançados
+                </button>
             </div>
 
-            <!-- Filtros -->
-            <div class="tab-pane fade" id="pane-filtros" role="tabpanel" aria-labelledby="tab-filtros">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                <div class="row g-3">
-                    <div class="col-12 col-md-4">
-                    <label class="form-label fw-bold">Marketplace</label>
-                    <select id="fltMarketplace" class="form-select">
-                        <option value="">Todos</option>
-                    </select>
-                    </div>
-
-                    <div class="col-12 col-md-8">
-                    <label class="form-label fw-bold">Chave de acesso (44 dígitos)</label>
-                    <input id="fltChave" class="form-control" placeholder="Somente números ou com máscara" autocomplete="off" />
-                    </div>
-
-                    <div class="col-12 col-md-4">
-                    <label class="form-label fw-bold">Número da nota</label>
-                    <input id="fltNumeroNota" class="form-control" placeholder="Ex: 123456" inputmode="numeric" />
-                    </div>
-
-                    <div class="col-6 col-md-4">
-                    <label class="form-label fw-bold">Data (de)</label>
-                    <input id="fltDataDe" type="date" class="form-control" />
-                    </div>
-
-                    <div class="col-6 col-md-4">
-                    <label class="form-label fw-bold">Data (até)</label>
-                    <input id="fltDataAte" type="date" class="form-control" />
-                    </div>
-
-                    <div class="col-6 col-md-4">
-                    <label class="form-label fw-bold">Hora (de)</label>
-                    <input id="fltHoraDe" type="time" class="form-control" step="1" />
-                    </div>
-
-                    <div class="col-6 col-md-4">
-                    <label class="form-label fw-bold">Hora (até)</label>
-                    <input id="fltHoraAte" type="time" class="form-control" step="1" />
-                    </div>
-
-                    <div class="col-12 d-flex flex-wrap gap-2 mt-2">
-                    <button id="btnBuscar" class="btn btn-primary-custom" type="button">
-                        Buscar
-                    </button>
-                    <button id="btnLimpar" class="btn btn-outline-secondary" type="button">
-                        Limpar
-                    </button>
-                    </div>
+            <div class="dc-search-row">
+                <div>
+                <label class="form-label fw-bold">Marketplace</label><br>
+                <small class="text-muted">Selecione o Marketplace.</small>
+                <select id="qMarketplace" class="form-select">
+                    <option value="">Todos</option>
+                </select>
                 </div>
 
-                <div id="dcErr" class="alert alert-danger d-none mt-3 mb-0"></div>
+                <div>
+                <label class="form-label fw-bold">Chave NF-e (44 dígitos) ou Nº da nota</label><br>
+                <small class="text-muted">Dica: ao colar/digitar 44 dígitos, a busca dispara automaticamente.</small>
+                <input
+                    id="qInput"
+                    type="text"
+                    class="form-control"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    placeholder="Cole/digite aqui..."
+                />
+                </div>
+
+                <div>
+                <button id="qBtnBuscar" class="btn btn-primary-custom w-100" type="button">
+                    Buscar
+                </button>
                 </div>
             </div>
-            </div>
 
+            <div id="dcErr" class="alert alert-danger d-none mt-3 mb-0"></div>
+            </div>
         </div>
 
-        <!-- Resultados -->
+        <!-- RESULTADOS -->
         <div class="card shadow-sm mt-3">
             <div class="card-body">
             <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
                 <div class="fw-bold">Resultados</div>
-                <div id="resultsCount" class="badge bg-dark">0</div>
+                <div id="resultsCount" class="badge">0</div>
             </div>
 
             <div id="dcLoading" class="text-muted d-none mb-2">
@@ -160,6 +111,72 @@
             </div>
 
             </div>
+        </div>
+
+        </div>
+    </div>
+    </div>
+
+    <!-- MODAL: Filtros avançados (estilo Tiny: clicou fora, fecha) -->
+    <div class="modal fade" id="modalFiltrosAvancados" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+
+        <div class="modal-header">
+            <h5 class="modal-title">Filtros avançados</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+
+        <div class="modal-body">
+            <div class="row g-3">
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-bold">Marketplace</label>
+                <select id="fltMarketplace" class="form-select">
+                <option value="">Todos</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-8">
+                <label class="form-label fw-bold">Chave de acesso (44 dígitos)</label>
+                <input id="fltChave" type="text" class="form-control" inputmode="numeric" placeholder="Somente números ou com máscara" />
+            </div>
+
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-bold">Número da nota</label>
+                <input id="fltNumeroNota" type="text" class="form-control" placeholder="Ex: 123456" />
+            </div>
+
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-bold">Data (de)</label>
+                <input id="fltDataDe" type="date" class="form-control" />
+            </div>
+
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-bold">Data (até)</label>
+                <input id="fltDataAte" type="date" class="form-control" />
+            </div>
+
+            <div class="col-6 col-md-4">
+                <label class="form-label fw-bold">Hora (de)</label>
+                <input id="fltHoraDe" type="time" class="form-control" step="1" />
+            </div>
+
+            <div class="col-6 col-md-4">
+                <label class="form-label fw-bold">Hora (até)</label>
+                <input id="fltHoraAte" type="time" class="form-control" step="1" />
+            </div>
+            </div>
+        </div>
+
+        <div class="modal-footer d-flex flex-wrap gap-2">
+            <button id="btnLimpar" class="btn btn-outline-secondary" type="button">
+            Limpar
+            </button>
+
+            <!-- fecha o modal ao aplicar (sem mexer no JS de busca) -->
+            <button id="btnBuscar" class="btn btn-primary-custom" type="button" data-bs-dismiss="modal">
+            Buscar
+            </button>
         </div>
 
         </div>
