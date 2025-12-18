@@ -41,7 +41,7 @@ def require_login():
         'auth.login',               # rota de login
         'static',                   # arquivos estáticos
         'retirado.api_bipar',       # POST /api/bipar
-        'retirado.api_bipados_agend',  # GET /api/bipados/<id_agend>  <-- vírgula aqui
+        'retirado.api_bipados_agend',  # GET /api/bipados/<id_agend>
         'health_check',              # rota de health check
         'healthz'
     }
@@ -112,7 +112,7 @@ from rotas import *
 
 if __name__ == "__main__":
     # debug opcional; ajuste a gosto
-    app.run(host='0.0.0.0', port=8345, debug=True)
+    app.run(host='0.0.0.0', port=8345, debug=False)
     
 # -----------------------------------------------------------------------------
 # SOBRE O USO DE SocketIO (opcional)

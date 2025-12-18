@@ -247,6 +247,24 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // ─── Pausar auto-refresh ao interagir com os selects de depósito nos CONCLUÍDOS ──
+  const concluidosContainer = document.getElementById('concluidosContainer');
+  if (concluidosContainer) {
+    // quando focar/clicar em um <select> de depósito -> pausa auto-refresh
+    concluidosContainer.addEventListener('focusin', (e) => {
+      if (e.target && e.target.matches('.deposito-select')) {
+        window.pauseAutoRefresh = true;
+      }
+    });
+
+    // quando sair do <select> -> libera auto-refresh novamente
+    concluidosContainer.addEventListener('focusout', (e) => {
+      if (e.target && e.target.matches('.deposito-select')) {
+        window.pauseAutoRefresh = false;
+      }
+    });
+  }
 });
 
 function defineImgDepositos() {
