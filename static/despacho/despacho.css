@@ -1,0 +1,318 @@
+/* static/expedicao/expedicao_crossdocking.css */
+
+:root {
+    --jp-bg: #f4f7fb;
+    --jp-surface: #ffffff;
+    --jp-border: #dbe6f3;
+
+    --jp-text: #0f172a;
+    --jp-muted: #475569;
+
+    /* cor de destaque (puxa pro “verde/azul” do logo) */
+    --jp-accent: #0f766e;
+    --jp-accent-2: #115e59;
+
+    --jp-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+/* fundo geral */
+body {
+    background-color: var(--jp-bg);
+    color: var(--jp-text);
+}
+
+/* ===== NAV: destaque do item ativo (JS adiciona .is-active) ===== */
+.navbar .nav-link.is-active {
+    color: var(--jp-accent) !important;
+    font-weight: 700;
+    position: relative;
+}
+
+.navbar .nav-link.is-active::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: -8px;
+    height: 3px;
+    border-radius: 99px;
+    background: var(--jp-accent);
+    opacity: 0.9;
+}
+
+/* ===== painel ===== */
+.panel-control {
+    background: var(--jp-surface);
+    color: var(--jp-text);
+    border: 1px solid var(--jp-border);
+    border-radius: 14px;
+    padding: 22px;
+    box-shadow: var(--jp-shadow);
+}
+
+/* garante que nada force branco dentro do painel */
+.panel-control,
+.panel-control div,
+.panel-control p,
+.panel-control span,
+.panel-control small {
+    color: inherit;
+}
+
+.panel-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 14px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--jp-border);
+}
+
+.panel-title h5 {
+    margin: 0;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+/* “bar” do título */
+.panel-title::before {
+    content: "";
+    width: 10px;
+    height: 26px;
+    border-radius: 10px;
+    background: var(--jp-accent);
+}
+
+.panel-control .text-muted {
+    color: var(--jp-muted) !important;
+}
+
+/* cards */
+.panel-control .card {
+    border: 1px solid var(--jp-border);
+    border-radius: 14px;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.panel-control .card-title {
+    font-weight: 800;
+    color: var(--jp-text);
+}
+
+.panel-control .card-text {
+    color: var(--jp-muted);
+}
+
+/* botões */
+.btn-primary-custom {
+    background-color: var(--jp-accent);
+    border-color: var(--jp-accent);
+    color: #fff;
+    font-weight: 700;
+    border-radius: 12px;
+    padding: 10px 14px;
+}
+
+.btn-primary-custom:hover {
+    background-color: var(--jp-accent-2);
+    border-color: var(--jp-accent-2);
+}
+
+.btn-outline-secondary {
+    border-radius: 12px;
+}
+
+/* alerta info (mais clean) */
+.alert.alert-info {
+    border: 1px solid rgba(15, 118, 110, 0.25);
+    background: rgba(15, 118, 110, 0.08);
+    color: var(--jp-text);
+    border-radius: 14px;
+}
+
+@media (max-width: 576px) {
+    .panel-control {
+        padding: 16px;
+    }
+}
+
+/* ===== Crossdocking: ações e bipagem ===== */
+.cd-actions .btn {
+    min-height: 42px;
+}
+
+.cd-scan {
+    padding: 14px;
+    border: 1px dashed var(--jp-border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.cd-scan-title {
+    font-weight: 800;
+}
+
+.cd-scan-sub {
+    font-size: 0.95rem;
+}
+
+/* linha do input + contador */
+.cd-scan-row {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+}
+
+/* ===== contador SUPER visível ===== */
+.cd-counter {
+    min-width: 170px;
+    padding: 14px 14px;
+    border-radius: 16px;
+
+    /* bem vibrante */
+    background: #00e5ff;
+    border: 3px solid #00b8d4;
+
+    box-shadow:
+        0 12px 30px rgba(0, 229, 255, 0.28),
+        0 0 0 4px rgba(0, 229, 255, 0.20);
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+}
+
+.cd-counter-number {
+    font-size: 3.2rem;
+    font-weight: 1000;
+    line-height: 1;
+    color: #001018;
+    letter-spacing: 1px;
+}
+
+.cd-counter-label {
+    font-size: 1.05rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    color: #001018;
+    opacity: 0.9;
+}
+
+/* ===== popup de erro (gigante, vermelho, não bloqueia) ===== */
+.cd-error-popup {
+    position: fixed;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+
+    width: min(980px, 92vw);
+    padding: 18px 22px;
+
+    background: #ff0033;
+    color: #ffffff;
+
+    border: 6px solid #ffffff;
+    border-radius: 18px;
+
+    font-weight: 1000;
+    font-size: 2.1rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+
+    z-index: 3000;
+
+    box-shadow:
+        0 18px 50px rgba(255, 0, 51, 0.35),
+        0 0 0 6px rgba(255, 0, 51, 0.18);
+
+    /* IMPORTANTÍSSIMO: não interrompe bipagem/clicks */
+    pointer-events: none;
+}
+
+@media (max-width: 576px) {
+    .cd-error-popup {
+        top: 72px;
+        font-size: 1.5rem;
+        padding: 14px 16px;
+    }
+}
+
+/* lista de bipes */
+.cd-bipes-list {
+    border: 1px solid var(--jp-border);
+    border-radius: 14px;
+    background: var(--jp-surface);
+    padding: 10px;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.cd-bipe-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 12px;
+}
+
+.cd-bipe-item+.cd-bipe-item {
+    border-top: 1px solid rgba(219, 230, 243, 0.8);
+}
+
+.cd-bipe-code {
+    font-weight: 800;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.95rem;
+}
+
+.cd-bipe-time {
+    color: var(--jp-muted);
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+/* deixa o bloco de bipagem “ancorar” o botão */
+.cd-scan {
+    position: relative;
+    padding-bottom: 80px;
+    /* espaço pro botão não cobrir a lista */
+}
+
+.cd-footer {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0;
+}
+
+@media (max-width: 576px) {
+    .cd-scan-row {
+        flex-direction: column;
+    }
+
+    .cd-counter {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+/* garante espaço pro botão não cobrir a lista */
+#areaDespacho.cd-scan {
+    padding-bottom: 90px;
+}
+
+/* força posicionamento no canto direito (se algum CSS estiver brigando) */
+#areaDespacho .cd-footer {
+    left: auto !important;
+    right: 16px !important;
+    bottom: 16px !important;
+}
+
+/* caso exista algum float/margin esquisito em btns do projeto */
+#btnConcluir {
+    float: none !important;
+    margin-left: 0 !important;
+}

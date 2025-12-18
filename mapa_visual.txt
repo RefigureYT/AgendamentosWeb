@@ -48,6 +48,7 @@ AgendamentosWeb/
 │  ├─ atualizar_pdf.py
 │  ├─ auth.py
 │  ├─ config.py
+│  ├─ despacho.py
 │  ├─ downloads.py
 │  ├─ embalar.py
 │  ├─ erro.py
@@ -81,6 +82,12 @@ AgendamentosWeb/
 │  ├─ config
 │  │  ├─ config.css
 │  │  └─ config.js
+│  ├─ despacho
+│  │  ├─ despacho.css
+│  │  └─ despacho.js
+│  ├─ despacho_consultar
+│  │  ├─ despacho_consultar.css
+│  │  └─ despacho_consultar.js
 │  ├─ embalar
 │  │  ├─ BrowserPrint-3.1.250.min.js
 │  │  ├─ BrowserPrint-Zebra-1.1.250.min.js
@@ -112,11 +119,17 @@ AgendamentosWeb/
 │  │  ├─ reservados.css
 │  │  └─ reservados.js
 │  ├─ resources
+│  │  ├─ 785301556.png
+│  │  ├─ 894837591.png
+│  │  ├─ 894837619.png
+│  │  ├─ 905539821.png
+│  │  ├─ 905539832.png
 │  │  ├─ caixa.png
 │  │  ├─ caixa2.png
 │  │  ├─ caixa_jp.png
 │  │  ├─ caixa_ml.png
 │  │  ├─ logo.png
+│  │  ├─ naoUtilizado-141.png
 │  │  ├─ sem_img.webp
 │  │  ├─ seta_baixo.png
 │  │  └─ wallpaper_jaupesca.svg
@@ -130,6 +143,8 @@ AgendamentosWeb/
 │  ├─ base_template.html
 │  ├─ compras.html
 │  ├─ config.html
+│  ├─ despacho.html
+│  ├─ despacho_consultar.html
 │  ├─ embalar.html
 │  ├─ erro.html
 │  ├─ expedicao.html

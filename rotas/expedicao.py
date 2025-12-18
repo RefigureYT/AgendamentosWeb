@@ -1,4 +1,5 @@
-from flask import Blueprint, jsonify, request, render_template, current_app
+from flask import Blueprint, jsonify, request, render_template, current_app, session
+from psycopg2.extras import RealDictCursor
 import json  # (builtin)
 
 bp_expedicao = Blueprint('expedicao', __name__, template_folder='templates')

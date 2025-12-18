@@ -1,0 +1,16 @@
+/* Reaproveita o visual do despacho */
+@import url("../despacho/despacho.css");
+
+.dc-tabs .nav-link {
+    font-weight: 800;
+}
+
+#resultsCount {
+    font-size: 1rem;
+    padding: 8px 12px;
+    border-radius: 999px;
+}
+
+.text-monospace {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}

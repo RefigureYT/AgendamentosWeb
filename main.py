@@ -101,6 +101,9 @@ app.register_blueprint(bp_embalar)
 from rotas.expedicao import bp_expedicao
 app.register_blueprint(bp_expedicao)
 
+from rotas.despacho import bp_despacho
+app.register_blueprint(bp_despacho)
+
 from rotas.relatorio import bp_relatorio
 app.register_blueprint(bp_relatorio)
 
