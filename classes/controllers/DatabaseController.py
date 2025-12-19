@@ -73,6 +73,206 @@ class DatabaseController:
     def get_all_composicoes_from_produto(self, id_produto:int = 0):
         return self.access.custom_select_query("SELECT * FROM comp_agend WHERE id_prod_comp = %s;", (id_produto,))
     
+    def _placeholders(self, n: int) -> str:
+        return ", ".join(["%s"] * n)
+
+    def get_all_composicoes_from_agendamento(self, id_agend_bd: int):
+        """
+        Retorna comps do agendamento com chaves para mapear histórico:
+        (id_comp, id_prod_comp, id_prod_ml, sku_prod, sku_comp, id_comp_tiny)
+        """
+        query = """
+            SELECT
+                c.id_comp,
+                c.id_prod_comp,
+                p.id_prod_ml,
+                p.sku_prod,
+                c.sku_comp,
+                c.id_comp_tiny
+            FROM comp_agend c
+            JOIN produtos_agend p ON p.id_prod = c.id_prod_comp
+            WHERE p.id_agend_prod = %s;
+        """
+        return self.access.custom_select_query(query, (id_agend_bd,))
+
+    def snapshot_historico_transacoes(self, id_agend_bd: int):
+        """
+        Snapshot do histórico que depende de id_prod/id_comp, mas guardando chaves estáveis
+        para reencaixar depois (id_prod_ml/sku_prod + sku_comp/id_comp_tiny).
+        """
+        # ALTERAÇÕES
+        q_alt = """
+            SELECT
+                p.id_prod_ml,
+                p.sku_prod,
+                c.sku_comp,
+                c.id_comp_tiny,
+                al.id_tiny,
+                al.gtin_alt,
+                al.sku_alt,
+                al.nome_alt
+            FROM alteracoes_agend al
+            JOIN produtos_agend p ON p.id_prod = al.id_prod_alt
+            LEFT JOIN comp_agend c ON c.id_comp = al.id_comp_alt
+            WHERE p.id_agend_prod = %s;
+        """
+        alteracoes = self.access.custom_select_query(q_alt, (id_agend_bd,))
+
+        # COMPRAS
+        q_cmp = """
+            SELECT
+                p.id_prod_ml,
+                p.sku_prod,
+                c.sku_comp,
+                c.id_comp_tiny,
+                ca.id_tiny,
+                ca.gtin_compra,
+                ca.sku_compra,
+                ca.nome_compra,
+                ca.quant_comprar
+            FROM compras_agend ca
+            JOIN produtos_agend p ON p.id_prod = ca.id_prod_compra
+            LEFT JOIN comp_agend c ON c.id_comp = ca.id_comp_compra
+            WHERE p.id_agend_prod = %s;
+        """
+        compras = self.access.custom_select_query(q_cmp, (id_agend_bd,))
+
+        return {"alteracoes": alteracoes, "compras": compras}
+
+    def limpar_historico_transacoes(self, id_agend_bd: int):
+        """
+        Remove histórico dependente dos produtos do agendamento (sem apagar o agendamento).
+        """
+        ids = self.access.custom_select_query(
+            "SELECT id_prod FROM produtos_agend WHERE id_agend_prod = %s;",
+            (id_agend_bd,)
+        )
+        id_produtos = [row[0] for row in (ids or [])]
+
+        if not id_produtos:
+            return
+
+        ph = self._placeholders(len(id_produtos))
+
+        self.access.custom_i_u_query(
+            f"DELETE FROM alteracoes_agend WHERE id_prod_alt IN ({ph})",
+            [id_produtos]
+        )
+        self.access.custom_i_u_query(
+            f"DELETE FROM compras_agend WHERE id_prod_compra IN ({ph})",
+            [id_produtos]
+        )
+
+    # ==========================================================
+    #  SNAPSHOT / RESTORE do "histórico de transferência"
+    #  (Conf/Exp + lançamentos + qtd movida + substituição)
+    # ==========================================================
+    def snapshot_hist_transferencia(self, id_agend_bd: int) -> dict:
+        """
+        Captura APENAS o histórico que você quer preservar ao dar "reset" em comp_agend.
+        Chaves para reencaixe: id_prod_ml/sku_prod + sku_comp + id_comp_tiny.
+        """
+        q = """
+            SELECT
+                p.id_prod_ml,
+                p.sku_prod,
+                c.sku_comp,
+                c.id_comp_tiny,
+                c.substituido_comp,
+                c.lanc_conf_s,
+                c.lanc_conf_e,
+                c.status_conf,
+                c.qtd_mov_conf,
+                c.lanc_exp_s,
+                c.lanc_exp_e,
+                c.status_exp,
+                c.qtd_mov_exp
+            FROM comp_agend c
+            JOIN produtos_agend p ON p.id_prod = c.id_prod_comp
+            WHERE p.id_agend_prod = %s;
+        """
+        rows = self.access.custom_select_query(q, (id_agend_bd,)) or []
+        return {"comps": rows}
+
+    def restore_hist_transferencia(self, id_agend_bd: int, snap: dict):
+        """
+        Reencaixa o histórico da snapshot nas comps recém recriadas.
+        Ignora itens que não existirem mais no novo upload.
+        """
+        if not snap or not snap.get("comps"):
+            return
+
+        # comps novas (para achar o id_comp novo)
+        q_new = """
+            SELECT
+                c.id_comp,
+                p.id_prod_ml,
+                p.sku_prod,
+                c.sku_comp,
+                c.id_comp_tiny
+            FROM comp_agend c
+            JOIN produtos_agend p ON p.id_prod = c.id_prod_comp
+            WHERE p.id_agend_prod = %s;
+        """
+        new_rows = self.access.custom_select_query(q_new, (id_agend_bd,)) or []
+
+        # mapas de match (prioridade alta -> baixa)
+        by_full = {}   # (id_prod_ml, sku_comp, id_comp_tiny) -> id_comp
+        by_mid  = {}   # (sku_prod,   sku_comp, id_comp_tiny) -> id_comp
+        by_low  = {}   # (sku_comp,   id_comp_tiny)          -> id_comp
+
+        for (id_comp, id_prod_ml, sku_prod, sku_comp, id_comp_tiny) in new_rows:
+            if id_prod_ml and sku_comp and id_comp_tiny is not None:
+                by_full[(str(id_prod_ml), str(sku_comp), str(id_comp_tiny))] = id_comp
+            if sku_prod and sku_comp and id_comp_tiny is not None:
+                by_mid[(str(sku_prod), str(sku_comp), str(id_comp_tiny))] = id_comp
+            if sku_comp and id_comp_tiny is not None:
+                by_low[(str(sku_comp), str(id_comp_tiny))] = id_comp
+
+        updates = []
+        for row in snap["comps"]:
+            (
+                id_prod_ml, sku_prod, sku_comp, id_comp_tiny,
+                substituido_comp,
+                lanc_conf_s, lanc_conf_e, status_conf, qtd_mov_conf,
+                lanc_exp_s,  lanc_exp_e,  status_exp,  qtd_mov_exp
+            ) = row
+
+            target_id = None
+            if id_prod_ml and sku_comp and id_comp_tiny is not None:
+                target_id = by_full.get((str(id_prod_ml), str(sku_comp), str(id_comp_tiny)))
+            if not target_id and sku_prod and sku_comp and id_comp_tiny is not None:
+                target_id = by_mid.get((str(sku_prod), str(sku_comp), str(id_comp_tiny)))
+            if not target_id and sku_comp and id_comp_tiny is not None:
+                target_id = by_low.get((str(sku_comp), str(id_comp_tiny)))
+
+            if not target_id:
+                continue
+
+            updates.append((
+                substituido_comp,
+                lanc_conf_s, lanc_conf_e, status_conf, qtd_mov_conf,
+                lanc_exp_s,  lanc_exp_e,  status_exp,  qtd_mov_exp,
+                target_id
+            ))
+
+        if updates:
+            q_up = """
+                UPDATE comp_agend
+                SET
+                    substituido_comp = %s,
+                    lanc_conf_s      = %s,
+                    lanc_conf_e      = %s,
+                    status_conf      = %s,
+                    qtd_mov_conf     = %s,
+                    lanc_exp_s       = %s,
+                    lanc_exp_e       = %s,
+                    status_exp       = %s,
+                    qtd_mov_exp      = %s
+                WHERE id_comp = %s;
+            """
+            self.access.custom_i_u_query(q_up, updates)
+
     def get_all_agendamentos_in_alteracoes(self):
         return self.access.custom_select_query("SELECT DISTINCT a.*\
                                                  FROM alteracoes_agend al\

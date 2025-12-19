@@ -546,6 +546,91 @@ class AgendamentoController:
         for i in agendamento.produtos:
             i.set_estoque_error_flag()
 
+    def _restaurar_historico_transacoes(self, id_agend_bd: int, snap: dict):
+        """
+        Reinsere histórico (alteracoes/compras) casando pelas chaves estáveis.
+        Ignora entradas sem correspondência (produto/comp não existe mais).
+        """
+        if not snap:
+            return
+
+        # Mapa de produtos novos: por id_prod_ml e por sku
+        produtos_bd = self.db_controller.get_all_produtos_from_agendamento(id_agendamento=id_agend_bd) or []
+        prod_by_ml = {}
+        prod_by_sku = {}
+        for p in produtos_bd:
+            # p = (id_prod, id_agend_prod, id_prod_ml, sku_prod, ...)
+            id_prod = p[0]
+            id_prod_ml = p[2]
+            sku_prod = p[3]
+            if id_prod_ml:
+                prod_by_ml[str(id_prod_ml)] = id_prod
+            if sku_prod:
+                prod_by_sku[str(sku_prod)] = id_prod
+
+        # Mapa de comps novas
+        comps_bd = self.db_controller.get_all_composicoes_from_agendamento(id_agend_bd=id_agend_bd) or []
+        comp_by_full = {}   # (id_prod_ml, sku_comp, id_comp_tiny) -> id_comp
+        comp_by_loose = {}  # (sku_comp, id_comp_tiny) -> id_comp (fallback)
+        for c in comps_bd:
+            # c = (id_comp, id_prod_comp, id_prod_ml, sku_prod, sku_comp, id_comp_tiny)
+            id_comp = c[0]
+            id_prod_ml = c[2]
+            sku_comp = c[4]
+            id_comp_tiny = c[5]
+            if id_prod_ml and sku_comp and id_comp_tiny is not None:
+                comp_by_full[(str(id_prod_ml), str(sku_comp), int(id_comp_tiny))] = id_comp
+            if sku_comp and id_comp_tiny is not None:
+                comp_by_loose[(str(sku_comp), int(id_comp_tiny))] = id_comp
+
+        # Reinsere ALTERAÇÕES
+        alteracoes_in = []
+        for row in (snap.get("alteracoes") or []):
+            # (id_prod_ml, sku_prod, sku_comp, id_comp_tiny, id_tiny, gtin_alt, sku_alt, nome_alt)
+            id_prod_ml, sku_prod, sku_comp, id_comp_tiny, id_tiny, gtin_alt, sku_alt, nome_alt = row
+
+            id_prod_new = prod_by_ml.get(str(id_prod_ml)) or prod_by_sku.get(str(sku_prod))
+            if not id_prod_new:
+                continue
+
+            id_comp_new = None
+            if sku_comp and id_comp_tiny is not None and id_prod_ml:
+                id_comp_new = comp_by_full.get((str(id_prod_ml), str(sku_comp), int(id_comp_tiny)))
+            if not id_comp_new and sku_comp and id_comp_tiny is not None:
+                id_comp_new = comp_by_loose.get((str(sku_comp), int(id_comp_tiny)))
+
+            if not id_comp_new:
+                continue
+
+            alteracoes_in.append((id_comp_new, id_prod_new, id_tiny, gtin_alt, sku_alt, nome_alt))
+
+        if alteracoes_in:
+            self.db_controller.insert_alteracao_in_bd(alteracoes_in)
+
+        # Reinsere COMPRAS
+        compras_in = []
+        for row in (snap.get("compras") or []):
+            # (id_prod_ml, sku_prod, sku_comp, id_comp_tiny, id_tiny, gtin_compra, sku_compra, nome_compra, quant_comprar)
+            id_prod_ml, sku_prod, sku_comp, id_comp_tiny, id_tiny, gtin_compra, sku_compra, nome_compra, quant_comprar = row
+
+            id_prod_new = prod_by_ml.get(str(id_prod_ml)) or prod_by_sku.get(str(sku_prod))
+            if not id_prod_new:
+                continue
+
+            id_comp_new = None
+            if sku_comp and id_comp_tiny is not None and id_prod_ml:
+                id_comp_new = comp_by_full.get((str(id_prod_ml), str(sku_comp), int(id_comp_tiny)))
+            if not id_comp_new and sku_comp and id_comp_tiny is not None:
+                id_comp_new = comp_by_loose.get((str(sku_comp), int(id_comp_tiny)))
+
+            if not id_comp_new:
+                continue
+
+            compras_in.append((id_comp_new, id_prod_new, id_tiny, gtin_compra, sku_compra, nome_compra, quant_comprar))
+
+        if compras_in:
+            self.db_controller.insert_compras_in_bd(compras_in)
+
     def update_empresa_colaborador_bd(self, agendamento:Agendamento = None):
         self.db_controller.update_empresa_colaborador_agend(agendamento.id_bd, agendamento.id_mktp, agendamento.empresa, agendamento.colaborador)
     
@@ -638,7 +723,14 @@ class AgendamentoController:
             # Usa o valor original que acabamos de guardar
             agendamento_original.set_centro(centro_final)
 
-            # 3) limpa produtos e composições antigas do banco
+            # 3) SNAPSHOTS (histórico de transações + histórico de transferência Conf/Exp)
+            snap_hist = self.db_controller.snapshot_historico_transacoes(id_bd)
+            snap_transf = self.db_controller.snapshot_hist_transferencia(id_bd)
+
+            # limpa tabelas filhas que dependem de id_prod antigo (pra não sobrar lixo/orfão)
+            self.db_controller.limpar_historico_transacoes(id_bd)
+
+            # 3.1) RESET total - comp_agend e produtos_agend
             self.db_controller.delete_composicoes_by_agendamento(id_bd)
             self.db_controller.delete_produtos_by_agendamento(id_bd)
 
@@ -670,6 +762,10 @@ class AgendamentoController:
                     produto.set_id_bd_for_composicoes()
             self.set_error_flags_composicoes(novo)
             self.insert_composicao_in_bd(novo)
+
+            # 5.1) RESTAURA histórico de transferência (Conf/Exp) e histórico de transações
+            self.db_controller.restore_hist_transferencia(id_bd, snap_transf)
+            self._restaurar_historico_transacoes(id_bd, snap_hist)
 
             # 6) finalmente atualiza o registro de agendamento com o novo número
             self.db_controller.update_agendamento(
@@ -732,7 +828,14 @@ class AgendamentoController:
             )
             agendamento_original.centro_distribuicao = centro_final
 
-            # 4) Limpa produtos e composições antigos no BD
+            # 4) SNAPSHOTS (histórico de transações + histórico de transferência Conf/Exp)
+            snap_hist = self.db_controller.snapshot_historico_transacoes(id_bd)
+            snap_transf = self.db_controller.snapshot_hist_transferencia(id_bd)
+
+            # limpa tabelas filhas que dependem de id_prod antigo
+            self.db_controller.limpar_historico_transacoes(id_bd)
+
+            # 4.1) RESET total
             self.db_controller.delete_composicoes_by_agendamento(id_bd)
             self.db_controller.delete_produtos_by_agendamento(id_bd)
 
@@ -786,6 +889,10 @@ class AgendamentoController:
             # 9) FLAGS primeiro, depois INSERT das composições (pra salvar as flags no BD)
             self.set_error_flags_composicoes(novo)
             self.insert_composicao_in_bd(novo)
+
+            # 9.1) RESTAURA histórico de transferência (Conf/Exp) e histórico de transações
+            self.db_controller.restore_hist_transferencia(id_bd, snap_transf)
+            self._restaurar_historico_transacoes(id_bd, snap_hist)
 
             # 10) Atualiza as informações do agendamento no BD
             self.db_controller.update_agendamento(
