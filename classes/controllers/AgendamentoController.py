@@ -7,6 +7,7 @@ import time, json
 from base_jp_lab import Caller
 import logging
 from typing import Optional
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
@@ -697,16 +698,21 @@ class AgendamentoController:
         id_tipo: int,
         excel_path: str,
         centro_distribuicao: Optional[str] = None,
+        fonte_dados: str = "db",   # <-- NOVO: "db" ou "tiny"
+        pg_pool=None,             # <-- NOVO: obrigatório quando fonte_dados="db"
     ):
         """
         Atualiza um agendamento (Shopee / Excel) a partir de uma nova planilha,
         mantendo o mesmo número de pedido (id_agend_ml) já existente no banco.
+
+        fonte_dados:
+          - "tiny": busca id_tiny/gtin/imagens/composição direto no Tiny
+          - "db":  busca em tiny.produtos e tiny.composicoes no PostgreSQL
         """
         try:
             # 1) Carrega agendamentos do BD em memória
             self.create_agendamento_from_bd_data()
             agendamento_original = self.search_agendamento("id_bd", str(id_bd))
-
             if not agendamento_original:
                 return False, f"Agendamento com id_bd={id_bd} não encontrado."
 
@@ -731,7 +737,6 @@ class AgendamentoController:
             self.db_controller.delete_produtos_by_agendamento(id_bd)
 
             # 5) Recria o agendamento EM MEMÓRIA a partir do Excel
-            #    Usando o mesmo número de pedido original (original_id_agend_ml)
             novo = self.create_agendamento_from_excel(
                 excel_path=excel_path,
                 id_tipo=id_tipo,
@@ -740,17 +745,22 @@ class AgendamentoController:
                 colaborador=colaborador,
                 upload_uuid=original_id_agend_ml,
             )
-
-            # Garante que centro/campos estejam consistentes
             novo.centro_distribuicao = centro_final
 
             # Usa o MESMO id_bd do agendamento original
             self.set_id_bd_for_all(novo, id_bd)
 
-            # 6) Recarrega dados do Tiny (id_tiny, composições, etc.)
-            self.get_prod_data_tiny(novo)
-            self.get_comp_tiny(novo)
-            self.get_comp_data_tiny(novo)
+            # 6) Decide fonte de dados (Tiny vs Banco)
+            fonte = (fonte_dados or "db").strip().lower()
+            if fonte == "tiny":
+                self.get_prod_data_tiny(novo)
+                self.get_comp_tiny(novo)
+                self.get_comp_data_tiny(novo)
+            else:
+                if not pg_pool:
+                    raise Exception("pg_pool não informado (necessário quando fonte_dados='db').")
+                self.get_prod_data_pg(novo, pg_pool)
+                self.get_comp_pg(novo, pg_pool)
 
             # 7) Insere produtos novos no BD
             self.insert_produto_in_bd(novo)
@@ -762,31 +772,25 @@ class AgendamentoController:
             for prod in novo.produtos:
                 mapa_produtos_memoria.setdefault(prod.sku, []).append(prod)
 
-            # Re-mapeia produtos do BD para objetos em memória usando o MESMO índice de SKU
-            # usado no fluxo de criação (tpl[4] = sku_prod).
             for tpl in produtos_bd:
-                # precisa ter ao menos 5 colunas: [0]=id_prod, [1]=id_agend, [2]=id_tiny, [3]=nome, [4]=sku
                 if len(tpl) < 5:
                     continue
-
-                id_prod_bd = tpl[0]   # id_produto no BD
-                sku_prod_bd = tpl[4]  # sku_prod no BD (mesmo índice do fluxo de criação)
+                id_prod_bd = tpl[0]
+                sku_prod_bd = tpl[4]
 
                 if sku_prod_bd in mapa_produtos_memoria and mapa_produtos_memoria[sku_prod_bd]:
                     produto_obj = mapa_produtos_memoria[sku_prod_bd].pop(0)
-                    # agora o Produto em memória passa a ter o id_bd correto
                     produto_obj.set_id_bd(id_prod_bd)
-                    # e esta chamada propaga o id_prod_bd para todas as composições (id_prod_comp)
                     produto_obj.set_id_bd_for_composicoes()
 
-            # 9) Insere composições e flags de erro
-            self.insert_composicao_in_bd(novo)
+            # 9) FLAGS primeiro, depois INSERT das composições (pra salvar as flags no BD)
             self.set_error_flags_composicoes(novo)
+            self.insert_composicao_in_bd(novo)
 
             # 10) Atualiza as informações do agendamento no BD
             self.db_controller.update_agendamento(
                 id_agend_bd=agendamento_original.id_bd,
-                id_agend_ml=agendamento_original.id_agend_ml,  # MESMO número de pedido
+                id_agend_ml=agendamento_original.id_agend_ml,
                 id_agend_tipo=agendamento_original.id_tipo,
                 empresa=agendamento_original.empresa,
                 id_mktp=agendamento_original.id_mktp,
@@ -794,11 +798,358 @@ class AgendamentoController:
                 centro_distribuicao=agendamento_original.centro_distribuicao,
             )
 
-            return True, "Agendamento atualizado com sucesso (Excel)."
+            return True, f"Agendamento atualizado com sucesso (Excel) via {fonte}."
 
         except Exception as e:
             print(f"Erro ao atualizar agendamento (Excel): {e}")
             return False, f"Erro ao atualizar agendamento: {e}"
+
+    # ==========================================================
+    #  PostgreSQL (tiny.produtos / tiny.composicoes)
+    # ==========================================================
+    def get_prod_data_pg(self, agendamento, pg_pool):
+        """
+        Preenche dados de produto usando Postgres:
+          - tabela: tiny.produtos
+          - sku: codigo_sku
+          - gtin: gtin_ean
+          - id_tiny: id
+          - imagem: url_imagem_1 (fallback: url_imagem_externa_1)
+        """
+        if not agendamento or not getattr(agendamento, "produtos", None):
+            return
+        if not pg_pool:
+            raise Exception("PG_POOL não foi passado para get_prod_data_pg().")
+
+        skus = []
+        for p in agendamento.produtos:
+            sku = (getattr(p, "sku", None) or "").strip()
+            if sku:
+                skus.append(sku)
+
+        if not skus:
+            return
+
+        skus_lc = [s.lower() for s in skus]
+
+        from psycopg2 import OperationalError, InterfaceError
+
+        conn = None
+        rows = []
+
+        try:
+            for tentativa in (1, 2):
+                conn = pg_pool.getconn()
+                try:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute(
+                            """
+                            SELECT
+                                id,
+                                codigo_sku,
+                                gtin_ean,
+                                tipo_do_produto,
+                                estoque,
+                                localizacao,
+                                COALESCE(NULLIF(url_imagem_1, ''), NULLIF(url_imagem_externa_1, ''), '') AS imagem_url
+                            FROM tiny.produtos
+                            WHERE lower(codigo_sku) = ANY(%s)
+                            """,
+                            (skus_lc,)
+                        )
+                        rows = cur.fetchall() or []
+
+                    break  # ok
+
+                except (OperationalError, InterfaceError) as e:
+                    # descarta conexão quebrada
+                    try:
+                        pg_pool.putconn(conn, close=True)
+                    except Exception:
+                        pass
+                    conn = None
+
+                    if tentativa == 2:
+                        raise Exception(f"Falha no Postgres (conexão encerrada). Detalhe: {e}") from e
+
+        finally:
+            if conn is not None:
+                try:
+                    # fecha transação (evita idle in transaction)
+                    conn.rollback()
+                except Exception:
+                    pass
+                try:
+                    pg_pool.putconn(conn)
+                except Exception:
+                    pass
+
+        mapa = {}
+        for r in rows:
+            k = (r.get("codigo_sku") or "").strip().lower()
+            if k:
+                mapa[k] = r
+
+        for p in agendamento.produtos:
+            sku_lc = (getattr(p, "sku", None) or "").strip().lower()
+            row = mapa.get(sku_lc)
+            if not row:
+                continue
+
+            id_tiny = row.get("id")
+            gtin = (row.get("gtin_ean") or "").strip()
+            tipo = (row.get("tipo_do_produto") or "").strip().upper()
+            img = (row.get("imagem_url") or "").strip()
+
+            if hasattr(p, "set_id_tiny"):
+                p.set_id_tiny(id_tiny)
+            else:
+                p.id_tiny = id_tiny
+
+            if hasattr(p, "set_gtin"):
+                p.set_gtin(gtin)
+            else:
+                p.gtin = gtin
+
+            # --- KIT flag ---
+            if tipo in ("K", "KIT"):
+                if hasattr(p, "set_is_kit"):
+                    p.set_is_kit("K")
+                else:
+                    p.is_kit = "K"
+            else:
+                # evita "vazar" kit de outro ciclo
+                if hasattr(p, "set_is_kit"):
+                    try:
+                        p.set_is_kit(False)
+                    except Exception:
+                        pass
+                else:
+                    p.is_kit = False
+
+            # --- imagem ---
+            if img:
+                if hasattr(p, "set_imagem_url"):
+                    p.set_imagem_url(img)
+                else:
+                    p.imagem_url = img
+
+            # --- estoque/localizacao (o que faltava) ---
+            estoque_raw = row.get("estoque")
+            try:
+                estoque_val = int(float(estoque_raw or 0))
+            except Exception:
+                estoque_val = 0
+
+            local_val = (row.get("localizacao") or "").strip()
+
+            # tenta setters; se não existirem, seta atributo direto
+            if hasattr(p, "set_estoque_tiny"):
+                p.set_estoque_tiny(estoque_val)
+            else:
+                p.estoque_tiny = estoque_val
+
+            if hasattr(p, "set_localizacao"):
+                p.set_localizacao(local_val)
+            else:
+                p.localizacao = local_val
+
+    def get_comp_pg(self, agendamento, pg_pool):
+        """
+        Cria composições em memória usando tiny.composicoes
+        e já enriquece com dados do tiny.produtos (gtin/estoque/localizacao/imagem).
+        """
+        if not agendamento or not getattr(agendamento, "produtos", None):
+            return
+        if not pg_pool:
+            raise Exception("PG_POOL não foi informado para get_comp_pg().")
+
+        # kits presentes no agendamento
+        kits = []
+        for p in agendamento.produtos:
+            sku = (getattr(p, "sku", None) or "").strip()
+            if not sku:
+                continue
+            if getattr(p, "is_kit", False):
+                kits.append(sku)
+
+        # Para NÃO-KIT: composição simples (1x ele mesmo) COM estoque/localização do produto
+        def _to_int(v, default=0):
+            try:
+                if v is None:
+                    return default
+                return int(float(v))
+            except Exception:
+                return default
+
+        for p in agendamento.produtos:
+            if not getattr(p, "is_kit", False):
+                estoque_val = _to_int(getattr(p, "estoque_tiny", 0), 0)
+                local_val = (getattr(p, "localizacao", "") or "").strip()
+
+                self.insert_composicao(
+                    produto=p,
+                    fk_id_prod=p.id_bd,
+                    nome=p.nome,
+                    sku=p.sku,
+                    id_tiny=p.id_tiny,
+                    gtin=p.gtin,
+                    unidades_por_kit=1,
+                    unidades_de_kits=p.unidades,
+                    estoque_tiny=estoque_val,
+                    localizacao=local_val,
+                    imagem_url=getattr(p, "imagem_url", "") or ''
+                )
+
+        if not kits:
+            return
+
+        kits_lc = [k.lower() for k in kits]
+
+        from psycopg2 import OperationalError, InterfaceError
+
+        conn = None
+        try:
+            # tenta 2x: se pegar conexão morta do pool, descarta e tenta outra
+            for tentativa in (1, 2):
+                conn = pg_pool.getconn()
+                try:
+                    # 1) Busca linhas de composição
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute(
+                            """
+                            SELECT
+                                sku_kit,
+                                sku_comp,
+                                produto_comp,
+                                quantidade_comp,
+                                id_comp
+                            FROM tiny.composicoes
+                            WHERE lower(sku_kit) = ANY(%s)
+                            """,
+                            (kits_lc,)
+                        )
+                        comp_rows = cur.fetchall() or []
+
+                    if not comp_rows:
+                        return
+
+                    # 2) Busca dados dos componentes no catálogo
+                    skus_comp = sorted({
+                        (r.get("sku_comp") or "").strip().lower()
+                        for r in comp_rows
+                        if (r.get("sku_comp") or "").strip()
+                    })
+                    comp_map = {}
+
+                    if skus_comp:
+                        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                            cur.execute(
+                                """
+                                SELECT
+                                    id,
+                                    codigo_sku,
+                                    descricao,
+                                    gtin_ean,
+                                    estoque,
+                                    localizacao,
+                                    COALESCE(NULLIF(url_imagem_1, ''), NULLIF(url_imagem_externa_1, ''), '') AS imagem_url
+                                FROM tiny.produtos
+                                WHERE lower(codigo_sku) = ANY(%s)
+                                """,
+                                (skus_comp,)
+                            )
+                            prows = cur.fetchall() or []
+                        for r in prows:
+                            k = (r.get("codigo_sku") or "").strip().lower()
+                            if k:
+                                comp_map[k] = r
+
+                    break  # deu tudo certo, sai do retry
+
+                except (OperationalError, InterfaceError) as e:
+                    # conexão morreu: NÃO devolve pro pool como "boa"
+                    try:
+                        pg_pool.putconn(conn, close=True)
+                    except Exception:
+                        pass
+                    conn = None
+
+                    if tentativa == 2:
+                        raise Exception(f"Falha no Postgres (conexão encerrada). Detalhe: {e}") from e
+                    # senão: tenta de novo com outra conexão
+
+        finally:
+            if conn is not None:
+                try:
+                    # fecha a transação aberta pelo psycopg2 (mesmo em SELECT)
+                    conn.rollback()
+                except Exception:
+                    pass
+                try:
+                    pg_pool.putconn(conn)
+                except Exception:
+                    pass
+
+        # Mapa de produtos do agendamento por SKU
+        prod_by_sku = {}
+        for p in agendamento.produtos:
+            sku = (getattr(p, "sku", None) or "").strip().lower()
+            if sku:
+                prod_by_sku[sku] = p
+
+        # 3) Cria as composições nos produtos KIT
+        def _to_int(v, default=0):
+            try:
+                if v is None:
+                    return default
+                # Decimal, str "12.0", etc.
+                return int(float(v))
+            except Exception:
+                return default
+
+        for r in comp_rows:
+            sku_kit = (r.get("sku_kit") or "").strip().lower()
+            sku_comp_raw = (r.get("sku_comp") or "").strip()
+            sku_comp_lc = sku_comp_raw.lower()
+
+            if not sku_kit or not sku_comp_raw:
+                continue
+
+            prod_kit = prod_by_sku.get(sku_kit)
+            if not prod_kit:
+                continue
+
+            qtd = _to_int(r.get("quantidade_comp"), 0)
+
+            comp_info = comp_map.get(sku_comp_lc)
+
+            if not comp_info:
+                logger.warning(
+                    "[PG COMP] Não achei sku_comp=%r no tiny.produtos.codigo_sku. (kit=%r)",
+                    sku_comp_raw, r.get("sku_kit")
+                )
+
+            id_tiny_comp = (comp_info.get("id") if comp_info else None) or r.get("id_comp") or ""
+            gtin_comp    = ((comp_info.get("gtin_ean") if comp_info else "") or "").strip()
+            estoque_comp = _to_int((comp_info.get("estoque") if comp_info else None), 0)
+            local_comp   = ((comp_info.get("localizacao") if comp_info else "") or "").strip()
+            img_comp     = ((comp_info.get("imagem_url") if comp_info else "") or "").strip()
+            nome_comp    = ((r.get("produto_comp") or (comp_info.get("descricao") if comp_info else "") or "")).strip()
+
+            self.insert_composicao(
+                produto=prod_kit,
+                fk_id_prod=prod_kit.id_bd,
+                nome=nome_comp,
+                sku=sku_comp_raw,               # mantém original
+                id_tiny=str(id_tiny_comp),
+                gtin=gtin_comp,
+                unidades_por_kit=qtd,
+                unidades_de_kits=prod_kit.unidades,
+                estoque_tiny=estoque_comp,      # <-- AGORA é int garantido
+                localizacao=local_comp,
+                imagem_url=img_comp
+            )
 
     def get_comp_tiny(self, agendamento: Agendamento = None):
         """

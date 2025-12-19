@@ -44,6 +44,14 @@ def upload_excel():
 
         colaborador = request.form.get('colaborador', '')
 
+        # fonte de dados: 'db' (PostgreSQL) ou 'tiny' (API)
+        fonte_dados = (request.form.get('fonte_dados') or 'db').strip().lower()
+        if fonte_dados not in ('db', 'tiny'):
+            fonte_dados = 'db'
+
+        # pool do PostgreSQL (definido no main.py)
+        pg_pool = app.config.get('PG_POOL')
+
         # helper para evitar ValueError quando vier "Todas", "Todos", "", etc.
         def _parse_int_field(field_name: str, default: int = 0) -> int:
             raw = (request.form.get(field_name) or "").strip()
@@ -79,11 +87,14 @@ def upload_excel():
                 id_tipo=id_tipo,
                 excel_path=save_path,
                 centro_distribuicao=centro_distribuicao,
+                fonte_dados=fonte_dados,
+                pg_pool=pg_pool,
             )
 
             if ok:
                 flash("Agendamento atualizado com sucesso a partir da planilha.", "success")
-                return redirect(url_for('agendamentos', acao='ver') + "?upload=ok_excel")
+                return redirect(url_for('agendamentos', acao='ver') + "?upload=ok_excel_update")
+
             else:
                 app.logger.error(f"Falha ao atualizar agendamento via Excel (id_bd={id_bd}): {msg}")
                 flash("Falha ao atualizar o agendamento a partir da planilha.", "danger")
@@ -102,9 +113,17 @@ def upload_excel():
             upload_uuid=upload_uuid
         )
 
-        agendamento_controller.get_prod_data_tiny(ag)
-        agendamento_controller.get_comp_tiny(ag)
-        agendamento_controller.get_comp_data_tiny(ag)
+        if fonte_dados == 'tiny':
+            agendamento_controller.get_prod_data_tiny(ag)
+            agendamento_controller.get_comp_tiny(ag)
+            agendamento_controller.get_comp_data_tiny(ag)
+        else:
+            # PostgreSQL: tiny.produtos + tiny.composicoes
+            if not pg_pool:
+                raise Exception("PG_POOL não configurado no app (main.py).")
+
+            agendamento_controller.get_prod_data_pg(ag, pg_pool)
+            agendamento_controller.get_comp_pg(ag, pg_pool)
 
         # gera um pedido fake de 8 dígitos e sobrescreve o id_agend_ml
         fake_pedido = ''.join(random.choices(string.digits, k=8))

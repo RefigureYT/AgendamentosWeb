@@ -12,6 +12,11 @@ from exceptions import ParametroInvalido, MetodoInvalido, LimiteRequests, Arquiv
 # Remova SocketIO se não for usar agora:
 # from flask_socketio import SocketIO, join_room, emit
 
+## Configuração de desenvolvimento e produção
+DEBUG=True
+PORT= 44523 if DEBUG == True else 8345 # 8345 se produção
+## FIM Configuração
+
 from psycopg2.pool import SimpleConnectionPool # Para PostgreSQL
 PG_DSN = "postgresql://postgres:fa02a5fc917ea31de761c22fc956a0b2@192.168.15.121:5432/api"
 
@@ -30,6 +35,9 @@ app.config["PG_POOL"] = SimpleConnectionPool(
     maxconn=10,
     dsn=PG_DSN,
 )
+
+# Exporta também como variável para outros módulos poderem importar direto
+PG_POOL = app.config["PG_POOL"]
 
 # -------------------------------
 # Proteção de rotas por login
@@ -112,7 +120,7 @@ from rotas import *
 
 if __name__ == "__main__":
     # debug opcional; ajuste a gosto
-    app.run(host='0.0.0.0', port=8345, debug=False)
+    app.run(host='0.0.0.0', port=PORT, debug=DEBUG)
     
 # -----------------------------------------------------------------------------
 # SOBRE O USO DE SocketIO (opcional)

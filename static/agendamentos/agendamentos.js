@@ -40,7 +40,7 @@ function abrirModalAgendamento() {
     const marketplace = $('#nome_marketplace').val();
 
     if (!marketplace) return alert("Selecione o marketplace!");
-    $('#inp_mktp_pedido').val(marketplace);
+    $('#inp_mktp_pedido_hidden').val(marketplace);
 
     if (marketplace !== '1') {
         $('#inp_centro_distribuicao').val(''); // evita centro “fantasma”
@@ -135,7 +135,7 @@ function setFiltros() {
 
     const emp = $('#inp_emp_pedido').val();
     const status = $('#inp_status_pedido').val();
-    const mktp = $('#inp_mktp_pedido').val();
+    const mktp = $('#inp_mktp_filtro').val();
     const num = ($('#inp_num_pedido').val() || '').trim();
 
     cards.forEach(card => {
@@ -165,82 +165,142 @@ function setFiltros() {
     });
 }
 
-// Upload (PDF/Excel) – Novo agendamento
+function syncFonteDadosUpload() {
+    const $toggle = $('#toggle_fonte_dados');
+    if (!$toggle.length) return;
+
+    const usarDb = $toggle.is(':checked');
+    $('#upload_fonte_dados').val(usarDb ? 'db' : 'tiny');
+
+    // Layout NOVO (Tiny | Banco)
+    const $lblTiny = $('#src_lbl_tiny');
+    const $lblDb = $('#src_lbl_db');
+    if ($lblTiny.length && $lblDb.length) {
+        $lblTiny.toggleClass('active', !usarDb);
+        $lblDb.toggleClass('active', usarDb);
+
+        const $badge = $('#badge_recomendado_db');
+        if ($badge.length) $badge.toggle(usarDb);
+
+        const $help = $('#source_help');
+        if ($help.length) {
+            $help.text(
+                usarDb
+                    ? 'Mais rápido e evita chamadas ao Tiny. Se faltar algo, mude para Tiny.'
+                    : 'Usa o Tiny como fonte. Pode ser mais lento, mas tende a trazer tudo completo.'
+            );
+        }
+    }
+
+    // Layout antigo (se existir em alguma tela)
+    const $oldLabel = $('#toggle_fonte_dados_label');
+    if ($oldLabel.length) $oldLabel.text(usarDb ? 'Banco de dados' : 'Tiny');
+
+    const $oldBadge = $('#toggle_fonte_dados_badge');
+    if ($oldBadge.length) $oldBadge.toggle(usarDb);
+}
+
+function resetFonteDadosUpload() {
+    $('#toggle_fonte_dados').prop('checked', true);
+    syncFonteDadosUpload();
+}
+
+$(document).on('change', '#toggle_fonte_dados', syncFonteDadosUpload);
+$(document).ready(function () { syncFonteDadosUpload(); });
+
 function abrirModalUpload() {
     const colaborador = $('#nome_colaborador').val();
 
-    // Sempre zera o id_bd quando for "Novo agendamento"
+    // ✅ sempre volta para "Banco de dados (RECOMENDADO)" ao abrir
+    resetFonteDadosUpload();
+
+    // Novo agendamento: zera id_bd e limpa info de atualização
     $('#upload_id_bd').val('');
+    $('#info-atualizacao-pdf').hide().empty();
 
-    // =========================
+    // Helpers rápidos
+    const pickFirst = (...sels) => {
+        for (const s of sels) {
+            const v = $(s).val();
+            if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+        }
+        return '';
+    };
+
     // 1) Empresa
-    // =========================
-    // Primeiro: o que veio do modal "Selecionar empresa"
-    let empresa = $('#nome_empresa').val() || $('#inp_nome_emp').val() || '';
-
-    // Se ainda não tiver nada, tenta aproveitar o filtro da barra
+    let empresa = pickFirst('#nome_empresa', '#inp_nome_emp');
     if (!empresa) {
-        const empFiltro = $('#inp_emp_pedido').val();
-        if (empFiltro && /^\d+$/.test(empFiltro)) {
-            empresa = empFiltro; // só usa se for numérico
-        }
+        const empFiltro = pickFirst('#inp_emp_pedido');
+        if (empFiltro && /^\d+$/.test(empFiltro)) empresa = empFiltro;
     }
 
-    // =========================
-    // 2) Marketplace
-    // =========================
-    // Já é definido em abrirModalAgendamento() pelo select do modal
-    let marketplace = $('#nome_marketplace').val() || $('#inp_mktp_pedido').val() || '';
-
+    // 2) Marketplace (suporta as 2 versões de id)
+    let marketplace = pickFirst('#nome_marketplace', '#inp_mktp_pedido_hidden', '#inp_mktp_pedido');
     if (!marketplace) {
-        const mktFiltro = $('#inp_mktp_pedido').val();
-        if (mktFiltro && /^\d+$/.test(mktFiltro)) {
-            marketplace = mktFiltro;
-        }
+        const mktFiltro = pickFirst('#inp_mktp_filtro');
+        if (mktFiltro && /^\d+$/.test(mktFiltro)) marketplace = mktFiltro;
     }
 
-    // =========================
-    // 3) Tipo de agendamento
-    // =========================
-    let tipo = $('#nome_tipo').val() || '';
+    // 3) Tipo
+    const tipo = pickFirst('#nome_tipo');
 
-    // Preenche os hiddens do form de upload
-    $('#upload_empresa').val(empresa);
-    $('#upload_marketplace').val(marketplace);
-    $('#upload_tipo').val(tipo);
-
-    // Centro de distribuição só faz sentido para Mercado Livre (1)
+    // 4) Centro (só ML)
     let centro = '';
     if (String(marketplace) === '1') {
-        centro = $('#nome_centro_distribuicao').val()
-            || $('#inp_centro_distribuicao').val()
-            || '';
+        centro = pickFirst('#nome_centro_distribuicao', '#inp_centro_distribuicao');
     }
     $('#inp_centro_distribuicao').val(centro);
 
-    const form = $('#form_upload_pdf');
-    const fileInput = form.find('input[type="file"]');
-    const btn = form.find('button[type="submit"]');
-    const label = $('#modalUploadPdfLabel');
-    const helpText = $('#upload_help_text');
-
-    // Regra: somente Mercado Livre (1) usa PDF; demais marketplaces usam Excel
-    if (marketplace && marketplace !== '1') {
-        form.attr('action', '/upload-excel');
-        fileInput.attr({ name: 'file', accept: '.xlsx,.xls,.csv' });
-        btn.text('Enviar Excel');
-        label.text('Upload do Excel');
-        helpText.text('Selecione o arquivo Excel (.xlsx, .xls ou .csv) do pedido:');
-    } else {
-        form.attr('action', '/upload-pdf');
-        fileInput.attr({ name: 'path', accept: 'application/pdf' });
-        btn.text('Enviar PDF');
-        label.text('Upload do PDF');
-        helpText.text('Selecione o arquivo PDF do pedido:');
-    }
-
+    // Hidden inputs do upload
+    $('#upload_empresa').val(empresa);
+    $('#upload_marketplace').val(marketplace);
+    $('#upload_tipo').val(tipo);
     $('#upload_colaborador').val(colaborador);
 
+    // Preenche pills (contexto)
+    const EMP = { '1': 'Jaú Pesca', '2': 'Jaú Fishing', '3': 'L.T. Sports' };
+    const MKTP = { '1': 'Mercado Livre', '2': 'Magalu', '3': 'Shopee', '4': 'Amazon' };
+    const TIPO = { '1': 'Limpeza', '3': 'Conferência', '4': 'Embalar', '5': 'Expedição' };
+
+    $('#ctx_empresa').html(`<i class="bi bi-building"></i> ${EMP[empresa] || '—'}`);
+    $('#ctx_mktp').html(`<i class="bi bi-shop"></i> ${MKTP[marketplace] || '—'}`);
+    $('#ctx_tipo').html(`<i class="bi bi-flag"></i> ${TIPO[tipo] || '—'}`);
+
+    // Centro só aparece no ML (PDF)
+    const isExcel = marketplace && marketplace !== '1';
+    if (isExcel) {
+        $('#ctx_centro').addClass('d-none');
+    } else {
+        $('#ctx_centro').removeClass('d-none')
+            .html(`<i class="bi bi-geo-alt"></i> ${centro || '—'}`);
+    }
+
+    // Configura UI e form (PDF x Excel)
+    const $form = $('#form_upload_pdf');
+    const $file = $('#upload_file_input');
+    const $btn = $('#upload_submit_btn');
+
+    if (isExcel) {
+        $form.attr('action', '/upload-excel');
+        $file.attr({ name: 'file', accept: '.xlsx,.xls,.csv' });
+
+        $('#modalUploadPdfLabel').text('Upload do Excel');
+        $('#upload_subtitle').text('Envie o Excel do pedido para montar produtos e composição.');
+        $('#upload_file_label').text('Arquivo Excel');
+        $('#upload_file_hint').html('<i class="bi bi-info-circle"></i> Apenas <strong>.xlsx, .xls ou .csv</strong>.');
+        $btn.text('Enviar Excel');
+    } else {
+        $form.attr('action', '/upload-pdf');
+        $file.attr({ name: 'path', accept: 'application/pdf' });
+
+        $('#modalUploadPdfLabel').text('Upload do PDF');
+        $('#upload_subtitle').text('Envie o PDF do pedido para montar produtos e composição.');
+        $('#upload_file_label').text('Arquivo PDF');
+        $('#upload_file_hint').html('<i class="bi bi-info-circle"></i> Apenas <strong>.pdf</strong>.');
+        $btn.text('Enviar PDF');
+    }
+
+    // Fecha modal anterior e abre o upload
     const modalTipo = bootstrap.Modal.getInstance(document.getElementById('modalTipoAgendamento'));
     if (modalTipo) modalTipo.hide();
 
@@ -329,7 +389,10 @@ window.addEventListener("load", () => {
 // Seleção rápida (compatibilidade)
 // -----------------------------
 function setMarketplace(idMktp) {
+    // compat: algumas telas usam inp_mktp_pedido, outras inp_mktp_pedido_hidden
+    $('#inp_mktp_pedido_hidden').val(idMktp);
     $('#inp_mktp_pedido').val(idMktp);
+
     if (String(idMktp) !== '1') {
         $('#inp_centro_distribuicao').val('');
     }
@@ -365,17 +428,18 @@ function abrirModalAlteracoes(id) {
 }
 
 function abrirModalAtualizarPDF(id_bd, id_agend_ml) {
+    resetFonteDadosUpload();
+
     const form = document.getElementById('form_upload_pdf');
     const modalElement = document.getElementById('modalUploadPdf');
     const modal = new bootstrap.Modal(modalElement);
-    const modalLabel = document.getElementById('modalUploadPdfLabel');
+
     const infoParaUsuario = document.getElementById('info-atualizacao-pdf');
 
-    const fileInput = form.querySelector('input[type="file"]');
-    const submitButton = form.querySelector('button[type="submit"]');
-    const helpText = document.getElementById('upload_help_text');
+    const fileInput = document.getElementById('upload_file_input') || form.querySelector('input[type="file"]');
+    const submitButton = document.getElementById('upload_submit_btn') || form.querySelector('button[type="submit"]');
 
-    // Garante input hidden para id_bd
+    // garante hidden id_bd
     let hiddenId = document.getElementById('upload_id_bd');
     if (!hiddenId) {
         hiddenId = document.createElement('input');
@@ -386,7 +450,7 @@ function abrirModalAtualizarPDF(id_bd, id_agend_ml) {
     }
     hiddenId.value = id_bd;
 
-    // Recupera o card do agendamento para extrair dados (empresa, marketplace, tipo, centro)
+    // acha o card
     const botao = document.getElementById(`btn-modal--${id_bd}--`);
     const card = botao ? botao.closest('.agendamento-container') : null;
 
@@ -396,55 +460,67 @@ function abrirModalAtualizarPDF(id_bd, id_agend_ml) {
         return cls ? cls.replace(prefix, '') : '';
     };
 
+    const empresa = getClassValue('emp-');
+    const marketplace = getClassValue('id_mktp-');
+    const tipo = getClassValue('tipo-');
     const centroDistribuicao = card?.dataset.centro || '';
+
+    // hidden do upload
+    document.getElementById('upload_empresa').value = empresa;
+    document.getElementById('upload_marketplace').value = marketplace;
+    document.getElementById('upload_tipo').value = tipo;
 
     const colaborador = card?.querySelector('.text-primary')?.innerText || '';
     document.getElementById('upload_colaborador').value = colaborador;
-    document.getElementById('upload_empresa').value = getClassValue('emp-');
-    document.getElementById('upload_marketplace').value = getClassValue('id_mktp-');
-    document.getElementById('upload_tipo').value = getClassValue('tipo-');
 
-    const marketplace = document.getElementById('upload_marketplace').value;
-
-    // Centro de distribuição só faz sentido para Mercado Livre (PDF)
+    // centro só ML
     document.getElementById('inp_centro_distribuicao').value =
         marketplace === '1' ? centroDistribuicao : '';
 
-    // Decide se é PDF (Mercado Livre) ou Excel (demais marketplaces)
-    if (marketplace && marketplace !== '1') {
-        // Excel (Shopee, Magalu, Amazon, etc.)
+    // pills
+    const EMP = { '1': 'Jaú Pesca', '2': 'Jaú Fishing', '3': 'L.T. Sports' };
+    const MKTP = { '1': 'Mercado Livre', '2': 'Magalu', '3': 'Shopee', '4': 'Amazon' };
+    const TIPO = { '1': 'Limpeza', '3': 'Conferência', '4': 'Embalar', '5': 'Expedição' };
+
+    $('#ctx_empresa').html(`<i class="bi bi-building"></i> ${EMP[empresa] || '—'}`);
+    $('#ctx_mktp').html(`<i class="bi bi-shop"></i> ${MKTP[marketplace] || '—'}`);
+    $('#ctx_tipo').html(`<i class="bi bi-flag"></i> ${TIPO[tipo] || '—'}`);
+
+    const isExcel = marketplace && marketplace !== '1';
+    if (isExcel) $('#ctx_centro').addClass('d-none');
+    else $('#ctx_centro').removeClass('d-none')
+        .html(`<i class="bi bi-geo-alt"></i> ${centroDistribuicao || '—'}`);
+
+    // info para usuário
+    if (infoParaUsuario) {
+        infoParaUsuario.style.display = 'block';
+        infoParaUsuario.innerHTML = `Atualizando pedido <strong>${id_agend_ml || ''}</strong>.`;
+    }
+
+    // configura form + UI
+    if (isExcel) {
         form.action = '/upload-excel';
         if (fileInput) {
             fileInput.name = 'file';
             fileInput.accept = '.xlsx,.xls,.csv';
         }
-        if (submitButton) {
-            submitButton.textContent = 'Atualizar Excel';
-        }
-        modalLabel.textContent = 'Atualizar Excel do Pedido';
-        if (helpText) {
-            helpText.textContent =
-                'Selecione o arquivo Excel (.xlsx, .xls ou .csv) para atualizar o pedido:';
-        }
+        $('#modalUploadPdfLabel').text('Atualizar Excel do Pedido');
+        $('#upload_subtitle').text('Envie o Excel do pedido para atualizar produtos e composição.');
+        $('#upload_file_label').text('Arquivo Excel');
+        $('#upload_file_hint').html('<i class="bi bi-info-circle"></i> Apenas <strong>.xlsx, .xls ou .csv</strong>.');
+        if (submitButton) submitButton.textContent = 'Atualizar Excel';
     } else {
-        // Mercado Livre → PDF
         form.action = '/upload-pdf';
         if (fileInput) {
             fileInput.name = 'path';
             fileInput.accept = 'application/pdf';
         }
-        if (submitButton) {
-            submitButton.textContent = 'Atualizar PDF';
-        }
-        modalLabel.textContent = 'Atualizar PDF do Pedido';
-        if (helpText) {
-            helpText.textContent = 'Selecione o arquivo PDF do pedido:';
-        }
+        $('#modalUploadPdfLabel').text('Atualizar PDF do Pedido');
+        $('#upload_subtitle').text('Envie o PDF do pedido para atualizar produtos e composição.');
+        $('#upload_file_label').text('Arquivo PDF');
+        $('#upload_file_hint').html('<i class="bi bi-info-circle"></i> Apenas <strong>.pdf</strong>.');
+        if (submitButton) submitButton.textContent = 'Atualizar PDF';
     }
-
-    infoParaUsuario.innerHTML =
-        `Você está atualizando o agendamento do pedido: <strong>${id_agend_ml}</strong>`;
-    infoParaUsuario.style.display = 'block';
 
     modal.show();
 }
@@ -1170,4 +1246,106 @@ async function carregarInfoEmpresaModal(idAgend) {
         el.addEventListener('hide.bs.modal', (e) => e.preventDefault()); // não deixa fechar
         modal.show();
     });
+})();
+
+(function () {
+    function mapEmpresa(v) {
+        return ({ "1": "Jaú Pesca", "2": "Jaú Fishing", "3": "L.T. Sports", "0": "Nenhuma" })[String(v)] || "—";
+    }
+    function mapMktp(v) {
+        return ({ "1": "Mercado Livre", "2": "Magalu", "3": "Shopee", "4": "Amazon" })[String(v)] || "—";
+    }
+    function mapTipo(v) {
+        return ({ "1": "Limpeza", "3": "Conferência", "4": "Embalar", "5": "Expedição", "2": "Finalizado" })[String(v)] || "—";
+    }
+
+    function updateFonteUI() {
+        const toggle = document.getElementById("toggle_fonte_dados");
+        const hidden = document.getElementById("upload_fonte_dados");
+        const label = document.getElementById("toggle_fonte_dados_label");
+        const badge = document.getElementById("toggle_fonte_dados_badge");
+        const desc = document.getElementById("fonte_dados_desc");
+
+        if (!toggle || !hidden || !label) return;
+
+        const isDb = !!toggle.checked;
+        hidden.value = isDb ? "db" : "tiny";
+        label.textContent = isDb ? "Banco" : "Tiny";
+
+        if (badge) badge.style.display = isDb ? "inline-block" : "none";
+
+        if (desc) {
+            desc.textContent = isDb
+                ? "Mais rápido e evita chamadas ao Tiny. Se faltar algo, mude para Tiny."
+                : "Usa o Tiny como fonte. Pode ser mais lento, mas tende a trazer tudo completo.";
+        }
+    }
+
+    function updateResumoUI() {
+        const emp = document.getElementById("upload_empresa")?.value;
+        const mk = document.getElementById("upload_marketplace")?.value;
+        const tp = document.getElementById("upload_tipo")?.value;
+        const ce = document.getElementById("inp_centro_distribuicao")?.value;
+
+        const rEmp = document.getElementById("resumo_empresa");
+        const rMk = document.getElementById("resumo_marketplace");
+        const rTp = document.getElementById("resumo_tipo");
+        const rCe = document.getElementById("resumo_centro");
+
+        if (rEmp) rEmp.textContent = mapEmpresa(emp);
+        if (rMk) rMk.textContent = mapMktp(mk);
+        if (rTp) rTp.textContent = mapTipo(tp);
+        if (rCe) rCe.textContent = (ce && String(ce).trim()) ? String(ce).trim() : "—";
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+        const toggle = document.getElementById("toggle_fonte_dados");
+        if (toggle) toggle.addEventListener("change", updateFonteUI);
+
+        const modalEl = document.getElementById("modalUploadPdf");
+        if (modalEl) {
+            modalEl.addEventListener("show.bs.modal", function () {
+                updateResumoUI();
+                updateFonteUI();
+            });
+        }
+
+        // inicializa caso a página já tenha o modal no DOM
+        updateFonteUI();
+    });
+})();
+
+(function () {
+    function $(id) { return document.getElementById(id); }
+
+    function updateFonteUI() {
+        const toggle = $("toggle_fonte_dados");
+        const hidden = $("upload_fonte_dados");
+        const lblTiny = $("src_lbl_tiny");
+        const lblDb = $("src_lbl_db");
+        const badge = $("badge_recomendado_db");
+        const help = $("source_help");
+
+        if (!toggle || !hidden) return;
+
+        const isDb = !!toggle.checked;
+        hidden.value = isDb ? "db" : "tiny";
+
+        if (lblTiny) lblTiny.classList.toggle("active", !isDb);
+        if (lblDb) lblDb.classList.toggle("active", isDb);
+
+        if (badge) badge.style.display = isDb ? "inline-block" : "none";
+
+        if (help) {
+            help.textContent = isDb
+                ? "Muito rápido e evita chamadas ao Tiny. Se faltar algo, mude para Tiny."
+                : "Usa o Tiny como fonte. Muito lento, porém atualizado.";
+        }
+    }
+
+    document.addEventListener("change", function (e) {
+        if (e.target && e.target.id === "toggle_fonte_dados") updateFonteUI();
+    });
+
+    document.addEventListener("DOMContentLoaded", updateFonteUI);
 })();

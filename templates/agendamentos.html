@@ -42,14 +42,14 @@
         </select>
       </div>
       <div class="col">
-        <label class="form-label">Loja</label>
-        <select id="inp_mktp_pedido" class="form-select" onchange="setFiltros()">
-          <option selected>Todas</option>
-          <option value="1">Mercado Livre</option>
-          <option value="2">Magalu</option>
-          <option value="3">Shopee</option>
-          <option value="4">Amazon</option>
-        </select>
+      <label class="form-label">Loja</label>
+      <select id="inp_mktp_filtro" class="form-select" onchange="setFiltros()">
+        <option selected>Todas</option>
+        <option value="1">Mercado Livre</option>
+        <option value="2">Magalu</option>
+        <option value="3">Shopee</option>
+        <option value="4">Amazon</option>
+      </select>
       </div>
       <div class="col">
         <label class="form-label">Nº Pedido</label>
@@ -293,19 +293,82 @@
     </div>
   </div>
 
-  <!-- MODAL 5: Upload (PDF ou Excel) -->
+  <!-- MODAL 5: Upload (PDF) -->
   <div class="modal fade" id="modalUploadPdf" tabindex="-1" aria-labelledby="modalUploadPdfLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content text-center">
-        <div class="modal-header justify-content-between">
-          <h5 class="modal-title" id="modalUploadPdfLabel">Upload do Pedido</h5>
+    <div class="modal-dialog modal-dialog-centered modal-md">
+      <div class="modal-content upload-modal">
+
+        <div class="modal-header upload-modal__header">
+          <div class="d-flex align-items-center gap-3">
+            <div class="upload-ic">
+              <i class="bi bi-file-earmark-arrow-up"></i>
+            </div>
+            <div class="text-start">
+              <h5 class="modal-title mb-0" id="modalUploadPdfLabel">Upload do PDF</h5>
+              <div class="small text-muted" id="upload_subtitle">
+                Envie o PDF do pedido para montar produtos e composição.
+              </div>
+            </div>
+          </div>
+
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
         </div>
-        <div class="modal-body">
-          <p class="text-muted small" id="upload_help_text">Selecione o arquivo para upload:</p>
+
+        <div class="modal-body pt-3">
+          <!-- Contexto (empresa / loja / centro / tipo) -->
+          <div class="upload-context mb-3" aria-label="Contexto do agendamento">
+            <span class="ctx-pill" id="ctx_empresa"><i class="bi bi-building"></i> —</span>
+            <span class="ctx-pill" id="ctx_mktp"><i class="bi bi-shop"></i> —</span>
+            <span class="ctx-pill" id="ctx_centro"><i class="bi bi-geo-alt"></i> —</span>
+            <span class="ctx-pill" id="ctx_tipo"><i class="bi bi-flag"></i> —</span>
+          </div>
+
           <div id="info-atualizacao-pdf" class="mb-2 text-start text-muted small" style="display: none;"></div>
+
           <form id="form_upload_pdf" action="/upload-pdf" method="POST" enctype="multipart/form-data">
-            <input type="file" name="path" accept="application/pdf" class="form-control mb-3" required>
+            <div class="mb-3 text-start">
+              <label class="form-label mb-1" id="upload_file_label">Arquivo PDF</label>
+              <input
+                id="upload_file_input"
+                type="file"
+                name="path"
+                accept="application/pdf"
+                class="form-control"
+                required
+              >
+              <div class="form-text" id="upload_file_hint">
+                <i class="bi bi-info-circle"></i> Apenas <strong>.pdf</strong>.
+              </div>
+            </div>
+
+            <!-- Fonte de dados (visual alinhado) -->
+            <div class="source-card mb-3">
+              <div class="source-card__top">
+                <div class="text-start">
+                  <div class="fw-semibold d-flex align-items-center gap-2">
+                    Fonte de dados
+                    <span id="badge_recomendado_db" class="badge text-bg-success">Recomendado</span>
+                  </div>
+                  <div class="small text-muted" id="source_help">
+                    Muito rápido e evita chamadas ao Tiny. Se faltar algo, mude para Tiny.
+                  </div>
+                </div>
+
+                <div class="source-toggle" role="group" aria-label="Fonte de dados">
+                  <span class="src-label" id="src_lbl_tiny">Tiny</span>
+
+                  <div class="form-check form-switch m-0">
+                    <input class="form-check-input" type="checkbox" id="toggle_fonte_dados" checked>
+                  </div>
+
+                  <span class="src-label active" id="src_lbl_db">Banco</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- campo hidden para enviar ao backend -->
+            <input type="hidden" name="fonte_dados" id="upload_fonte_dados" value="db">
+
             <!-- hidden inputs preenchidos pelos modais anteriores -->
             <input type="hidden" name="id_bd" id="upload_id_bd">
             <input type="hidden" name="colaborador" id="upload_colaborador" value="{{ session.nome_display_usuario }}">
@@ -313,9 +376,17 @@
             <input type="hidden" name="marketplace" id="upload_marketplace">
             <input type="hidden" name="centro_distribuicao" id="inp_centro_distribuicao">
             <input type="hidden" name="tipo" id="upload_tipo">
-            <button type="submit" class="btn btn-primary w-100">Enviar PDF</button>
+
+            <button id="upload_submit_btn" type="submit" class="btn btn-primary w-100 btn-upload">
+              Enviar PDF
+            </button>
+
+            <div class="upload-foot small text-muted mt-2">
+              Ao enviar, o sistema vai montar produtos, estoque e composição automaticamente.
+            </div>
           </form>
         </div>
+
       </div>
     </div>
   </div>
@@ -337,7 +408,7 @@
     <input type="text" id="inp_tipo_pedido" name="inp_tipo_pedido">
     <input type="text" id="inp_nome_emp" name="inp_nome_emp">
     <input type="text" id="inp_nome_col" name="inp_nome_col">
-    <input type="text" id="inp_mktp_pedido" name="inp_mktp_pedido">
+    <input type="text" id="inp_mktp_pedido_hidden" name="inp_mktp_pedido">
   </form>
 
   <!-- Modal: Ver Relatório (reintroduzido) -->
