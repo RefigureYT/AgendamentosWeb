@@ -449,7 +449,13 @@
 </div>
 
 <!-- Dados para JS -->
-<div id="js-data" data-comps='{{ comps | tojson | safe }}' style="display:none;"></div>
+<div 
+  id="js-data" 
+  data-comps='{{ comps | tojson | safe }}' 
+  data-equivalentes='[]'
+  style="display:none;">
+</div>
+
 <div id="placeholder-image" data-url="{{ url_for('static', filename='resources/sem_img.webp') }}"></div>
 
 <script>

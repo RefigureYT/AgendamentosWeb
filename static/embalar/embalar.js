@@ -2908,19 +2908,30 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     if (e.key !== "Enter") return;
     e.preventDefault();
 
-    const valor = inputSku.value.trim();
-    if (!valor) return;
+    //? ATUALIZAÇÃO: Agora ele além de procurar por SKU e GTIN dos produtos originais (PENDENTES), também procura por produtos equivalentes.
+    //? Para isso, farei com que ele procure primeiramente pelos produtos equivalentes, e se localizar algum, ele vai substituir o valor bipado (SKU/GTIN) pelo SKU/GTIN do produto original.
+    //? Assim, o restante do fluxo permanece inalterado, pois ele vai tratar o SKU/GTIN original do produto pendente e vai procurar pelo produto original na lista de produtos pendentes.
+    const inputUser = inputSku.value.trim(); //? Aqui ele pega o valor digitado pelo usuário (ou bipado) e armazena na variável 'valor'
+    if (!inputUser) return; //? Caso a variável esteja vazia, a função retorna sem fazer nada (significa que o usuário não digitou nada')
 
-    console.clear();
+    //? Captura a lista do HTML (com os produtos equivalentes)
+    const prodEquivalentes = JSON.parse(document.getElementById("js-data").dataset.equivalentes || []);
+    const prodEquivalenteBipado = prodEquivalentes.find(pe => pe.gtin_bipado === inputUser || pe.sku_bipado === inputUser);
+
+    const valor = prodEquivalenteBipado ? prodEquivalenteBipado.gtin_original || prodEquivalenteBipado.sku_original : inputUser;
+    if (!valor) return; //? Caso a variável esteja vazia, a função retorna sem fazer nada (significa que o usuário não digitou nada')
+
+    console.clear(); //? Limpa o console do navegador, apaga os registros antigos.
     console.log(`--- BIP REGISTRADO: "${valor}" ---`);
 
     // 1) é uma etiqueta de produto já iniciado?
-    const produtoPorEtiqueta = produtos.find(p => p.id_ml === valor);
-    inputSku.value = "";
+    const produtoPorEtiqueta = produtos.find(p => p.id_ml === valor); //? Serve para verificar se é uma etiqueta do agendamento (Tipo: ABCD12345)
+    inputSku.value = ""; //? Limpa o campo de entrada após capturar o valor.
 
-    if (produtoPorEtiqueta) {
-      if (produtoPorEtiqueta.bipados >= produtoPorEtiqueta.unidades) {
-        Swal.fire({ icon: "info", title: "Anúncio já finalizado!", timer: 1800, showConfirmButton: false });
+    if (produtoPorEtiqueta) { //? Se encontrar um produto correspondente à etiqueta digitada
+      //? verifica se já finalizado
+      if (produtoPorEtiqueta.bipados >= produtoPorEtiqueta.unidades) { //? Caso a quantidade bipada seja maior ou igual à quantidade necessária
+        Swal.fire({ icon: "info", title: "Anúncio já finalizado!", timer: 1800, showConfirmButton: false }); //? Então significa que já foi finalizado.
         return;
       }
       // chama a função atômica no VOLUME (caixa OU pallet)
@@ -3039,7 +3050,13 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     if (e.key !== "Enter" || e.target.id !== "sku-confirmacao-unico") return;
     e.preventDefault();
     const inputUnico = e.target;
-    const valorDigitado = inputUnico.value.trim();
+    const inputUser = inputUnico.value.trim(); //? Pode ser produto original ou equivalente
+    if (!inputUser) return;
+
+    const prodEquivalentes = JSON.parse(document.getElementById("js-data").dataset.equivalentes || []);
+    const prodEquivalenteBipado = prodEquivalentes.find(pe => pe.gtin_bipado === inputUser || pe.sku_bipado === inputUser);
+
+    const valorDigitado = prodEquivalenteBipado ? prodEquivalenteBipado.gtin_original || prodEquivalenteBipado.sku_original : inputUser; //? Aqui sempre será um produto original ou então o valor original que o usuário digitou.
     if (!valorDigitado) return;
     const itemLi = Array.from(bodyConfirme.querySelectorAll('.componente-item')).find(li => {
       const okSku = li.dataset.skuEsperado === valorDigitado;
@@ -3264,14 +3281,35 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     imprimirEtiqueta(zpl, "id");
   }
 
+  async function inicializarListaProdutosEquivalentes() {
+    const jsDataEl = document.getElementById('js-data');
+
+    try {
+      const response = await fetch(`/api/equiv/${agendamentoCompleto.id_bd}`, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      produtosEquivalentes = await response.json();
+      console.log('Produtos Equivalentes Atualizados:', produtosEquivalentes);
+
+      if (jsDataEl) {
+        jsDataEl.dataset.equivalentes = JSON.stringify(produtosEquivalentes || []);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar produtos equivalentes:', error);
+    }
+  }
+
   // Inicialização
   inicializarPopoversDeImagem();
   await carregarCaixasSalvas();
   await buscarDadosEmbalagem(); // Busca inicial
   const SYNC_MS = 1 * 60 * 1000; // 1 minuto  
   const syncId = setInterval(buscarDadosEmbalagem, SYNC_MS);
-  window.addEventListener('beforeunload', () => clearInterval(syncId));
-
+  const syncProdEquiv = setInterval(inicializarListaProdutosEquivalentes, 10 * 1000); // 10 segundos
+  window.addEventListener('beforeunload', () => {
+    clearInterval(syncId);
+    clearInterval(syncProdEquiv);
+  });
 
   async function handleFinalizarEmbalagem(event) {
     event.preventDefault();
@@ -3361,4 +3399,5 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   window.gerarEtiquetaCustom = gerarEtiquetaCustom; // ML
   window.gerarEtiquetaCaixa = gerarEtiquetaCaixa; // JP
   inicializarModalFecharCaixa();
+  inicializarListaProdutosEquivalentes();
 });
