@@ -17,7 +17,7 @@ DEBUG=True
 PORT= 44523 if DEBUG == True else 8345 # 8345 se produção
 ## FIM Configuração
 
-from psycopg2.pool import SimpleConnectionPool # Para PostgreSQL
+from psycopg2.pool import ThreadedConnectionPool  # Para PostgreSQL (thread-safe)
 PG_DSN = "postgresql://postgres:fa02a5fc917ea31de761c22fc956a0b2@192.168.15.121:5432/api"
 
 
@@ -30,7 +30,7 @@ CORS(app)
 app.secret_key = "test_key"  # TODO: mover para variável de ambiente
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
-app.config["PG_POOL"] = SimpleConnectionPool(
+app.config["PG_POOL"] = ThreadedConnectionPool(
     minconn=1,
     maxconn=10,
     dsn=PG_DSN,

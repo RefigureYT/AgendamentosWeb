@@ -367,6 +367,8 @@ body {
     bottom: 16px;
     display: flex;
     justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 /* Destaque: Marketplace selecionado + Empresa */
@@ -415,4 +417,132 @@ body {
     background: rgba(11, 94, 215, 0.15);
     color: #0b5ed7;
     border: 1px solid rgba(11, 94, 215, 0.35);
+}
+
+/* =========================
+   Impressão: Relação (1 página)
+   ========================= */
+
+/* fica escondido na tela */
+.cd-print-sheet {
+    display: none;
+}
+
+.cd-print-wrap {
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    color: #000;
+}
+
+
+.cd-print-page {
+    display: flex;
+    flex-direction: column;
+    gap: 8mm;
+}
+
+.cd-print-cut {
+    border-top: 1px dashed #000;
+    opacity: 0.55;
+}
+
+.cd-print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 2px solid #000;
+    border-radius: 10px;
+    padding: 14mm;
+}
+
+.cd-print-title {
+    font-weight: 900;
+    font-size: 18px;
+    margin: 0 0 8mm 0;
+}
+
+.cd-print-meta {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    font-size: 12.5px;
+}
+
+.cd-print-label {
+    font-weight: 800;
+}
+
+.cd-print-value {
+    font-weight: 900;
+}
+
+.cd-print-volumes {
+    margin-top: 10mm;
+    padding: 10mm;
+    border: 2px solid #000;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.cd-print-volumes-num {
+    font-size: 42px;
+    font-weight: 950;
+    line-height: 1;
+}
+
+.cd-print-volumes-label {
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.cd-print-notes {
+    margin-top: 8mm;
+    font-size: 11px;
+}
+
+.cd-print-sign-grid {
+    margin-top: 16mm;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12mm;
+}
+
+.cd-print-line {
+    border-top: 1px solid #000;
+    height: 1px;
+    margin-bottom: 3mm;
+}
+
+.cd-print-sign-label {
+    font-size: 11px;
+    font-weight: 800;
+}
+
+@media print {
+    @page {
+        size: A4;
+        margin: 10mm;
+    }
+
+    body {
+        background: #fff !important;
+    }
+
+    /* imprime SOMENTE a folha */
+    body * {
+        visibility: hidden !important;
+    }
+
+    #cdPrintSheet,
+    #cdPrintSheet * {
+        visibility: visible !important;
+    }
+
+    #cdPrintSheet {
+        display: block !important;
+        position: fixed;
+        inset: 0;
+        padding: 0;
+        margin: 0;
+    }
 }

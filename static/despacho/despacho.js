@@ -33,13 +33,38 @@ document.addEventListener("DOMContentLoaded", () => {
     const counterEl = document.getElementById("cdCounter");
     const listEl = document.getElementById("cdBipesList");
     const btnConcluir = document.getElementById("btnConcluir");
+    const btnImprimirRelacao = document.getElementById("btnImprimirRelacao");
+    const printSheetEl = document.getElementById("cdPrintSheet");
 
     // ===== estado =====
     let count = 0;
     const nfesBipadas = new Set();
     let marketplaceSelecionadoId = null;
     let empresaSelecionadaId = null;
+    let marketplaceSelecionadoNome = "";
+    let empresaSelecionadaNome = "";
     let errorTimer = null;
+
+    // botão de impressão começa desabilitado
+    setPrintEnabled(false);
+
+    // limpa a folha após a impressão (evita ficar "presa" no DOM)
+    window.addEventListener("beforeprint", () => {
+        // Alguns cenários (ex: confirmação via modal) podem abrir o preview em branco
+        // se o conteúdo ainda não estiver montado.
+        if (printSheetEl && !printSheetEl.innerHTML) {
+            printSheetEl.innerHTML = montarRelacaoHtml(2);
+        }
+    });
+
+    window.addEventListener("afterprint", () => {
+        // Delay para evitar limpar cedo demais (alguns navegadores disparam o evento rapidamente).
+        if (printSheetEl) {
+            setTimeout(() => {
+                printSheetEl.innerHTML = "";
+            }, 400);
+        }
+    });
 
     // ===== helpers =====
     function showErrorPopup(msg) {
@@ -79,11 +104,103 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    function escapeHtml(v) {
+        return String(v ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function setPrintEnabled(on) {
+        if (!btnImprimirRelacao) return;
+        btnImprimirRelacao.disabled = !on;
+    }
+
+    function montarRelacaoHtml(repeticoes = 2) {
+        const dataHoje = new Date().toLocaleDateString("pt-BR");
+        const empresa = escapeHtml(empresaSelecionadaNome || "-");
+        const marketplace = escapeHtml(marketplaceSelecionadoNome || "-");
+        const volumes = Number(count) || 0;
+
+        const card = `
+        <div class="cd-print-card">
+          <h1 class="cd-print-title">Relação de Coleta • Crossdocking</h1>
+
+          <div class="cd-print-meta">
+            <div><span class="cd-print-label">Empresa:</span> <span class="cd-print-value">${empresa}</span></div>
+            <div><span class="cd-print-label">Marketplace:</span> <span class="cd-print-value">${marketplace}</span></div>
+            <div><span class="cd-print-label">Data:</span> <span class="cd-print-value">${dataHoje}</span></div>
+            <div><span class="cd-print-label">Volumes bipados:</span> <span class="cd-print-value">${volumes}</span></div>
+          </div>
+
+          <div class="cd-print-volumes">
+            <div class="cd-print-volumes-num">${volumes}</div>
+            <div class="cd-print-volumes-label">Volumes bipados</div>
+          </div>
+
+          <div class="cd-print-notes">
+            Observação: esta relação é resumida (não lista as NF-es). Para detalhes, use “Consultar pedidos”.
+          </div>
+
+          <div class="cd-print-sign-grid">
+            <div>
+              <div class="cd-print-line"></div>
+              <div class="cd-print-sign-label">Nome e assinatura (coleta)</div>
+            </div>
+            <div>
+              <div class="cd-print-line"></div>
+              <div class="cd-print-sign-label">Documento / RG / CPF</div>
+            </div>
+          </div>
+        </div>
+        `;
+
+        const n = Math.max(1, Number(repeticoes) || 1);
+        const cards = Array.from({ length: n }, (_, i) => {
+            const sep = i === 0 ? "" : `<div class="cd-print-cut"></div>`;
+            return `${sep}${card}`;
+        }).join("");
+
+        return `
+      <div class="cd-print-wrap">
+        <div class="cd-print-page">
+          ${cards}
+        </div>
+      </div>
+    `;
+    }
+    function imprimirRelacao() {
+        if (!empresaSelecionadaId || !marketplaceSelecionadoId) {
+            showErrorPopup("Selecione a empresa e o marketplace antes de imprimir");
+            return;
+        }
+        if ((Number(count) || 0) <= 0) {
+            showErrorPopup("Nenhuma NF-e bipada para imprimir");
+            return;
+        }
+        if (!printSheetEl) {
+            // fallback (não deve acontecer se o HTML estiver atualizado)
+            window.print();
+            return;
+        }
+
+        // 2 vias na mesma folha (em cima e em baixo)
+        printSheetEl.innerHTML = montarRelacaoHtml(2);
+
+        // força reflow pra garantir que o HTML “assentou” (ajuda a evitar preview em branco)
+        void printSheetEl.offsetHeight;
+
+        // dá um tick a mais pro DOM renderizar antes do print (Chrome/Edge)
+        setTimeout(() => window.print(), 120);
+    }
     function resetarBipes() {
         count = 0;
         nfesBipadas.clear();
         if (counterEl) counterEl.textContent = "0";
         if (listEl) listEl.innerHTML = "";
+        setPrintEnabled(false);
     }
 
     function adicionarBipe(digits, ts) {
@@ -178,6 +295,14 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // ===== botão "Imprimir relação" =====
+    if (btnImprimirRelacao) {
+        btnImprimirRelacao.addEventListener("click", (e) => {
+            e.preventDefault();
+            imprimirRelacao();
+        });
+    }
+
     // ===== ENTER no input -> valida 44 dígitos -> POST -> lista + contador =====
     if (inpNfeBarcode) {
         inpNfeBarcode.addEventListener("keydown", async (e) => {
@@ -238,6 +363,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 count += 1;
                 if (counterEl) counterEl.textContent = String(count);
+                setPrintEnabled(true);
 
                 const row = data.row || {};
                 const hora = row.hora_despacho ? String(row.hora_despacho).slice(0, 8) : "";
@@ -255,14 +381,60 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // ===== botão concluir (SweetAlert2 + contagem regressiva + redirect) =====
+    // ===== botão concluir (opção de imprimir a relação antes de finalizar) =====
     if (btnConcluir) {
         btnConcluir.addEventListener("click", async () => {
             const redirectUrl = btnConcluir.getAttribute("data-redirect-url") || "/";
             const countdownSeconds = Number(btnConcluir.getAttribute("data-countdown") || "5");
 
-            let timerInterval = null;
+            if (!empresaSelecionadaId || !marketplaceSelecionadoId) {
+                showErrorPopup("Selecione a empresa e o marketplace antes de concluir");
+                return;
+            }
 
+            if ((Number(count) || 0) <= 0) {
+                showErrorPopup("Nenhuma NF-e bipada");
+                return;
+            }
+
+            const resumoHtml = `
+        <div style="text-align:left; font-size: 1.02rem;">
+          <div><b>Empresa:</b> ${escapeHtml(empresaSelecionadaNome || "-")}</div>
+          <div><b>Marketplace:</b> ${escapeHtml(marketplaceSelecionadoNome || "-")}</div>
+          <div><b>Volumes bipados:</b> ${escapeHtml(count)}</div>
+          <div style="margin-top: 10px;" class="text-muted">
+            A relação impressa é resumida (1 página) e não lista as NF-es.
+          </div>
+        </div>
+      `;
+
+            const escolha = await Swal.fire({
+                icon: "question",
+                title: "Finalizar despacho",
+                html: resumoHtml,
+                showCancelButton: true,
+                showDenyButton: true,
+                confirmButtonText: "Imprimir relação",
+                denyButtonText: "Concluir",
+                cancelButtonText: "Voltar",
+                confirmButtonColor: "#0b5ed7",
+                allowOutsideClick: false,
+                allowEscapeKey: true,
+            });
+
+            if (escolha.isConfirmed) {
+                // Garante que o SweetAlert fechou 100% antes de abrir o print (evita página em branco)
+                setTimeout(() => imprimirRelacao(), 150);
+                return;
+            }
+
+            if (!escolha.isDenied) {
+                // cancelou / fechou
+                return;
+            }
+
+            // Concluir -> mostra contagem e redireciona
+            let timerInterval = null;
             await Swal.fire({
                 icon: "success",
                 title: "Despacho concluído!",
@@ -281,11 +453,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 timerProgressBar: true,
                 didOpen: () => {
                     const el = Swal.getHtmlContainer()?.querySelector("#cdSwalCountdown");
-
                     timerInterval = setInterval(() => {
                         const msLeft = Swal.getTimerLeft();
                         if (msLeft == null) return;
-
                         const secLeft = Math.max(0, Math.ceil(msLeft / 1000));
                         if (el) el.textContent = String(secLeft);
                     }, 200);
@@ -313,8 +483,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
         empresaSelecionadaId = empVal;
 
+        // guarda nome selecionado (para impressão)
+        empresaSelecionadaNome = selEmpresa?.options?.[selEmpresa.selectedIndex]?.text || "";
+
         // Se trocou empresa, zera marketplace selecionado
         marketplaceSelecionadoId = null;
+        marketplaceSelecionadoNome = "";
         if (selMarketplace) selMarketplace.value = "";
 
         if (!modalEmpresaEl || !window.bootstrap) return;
@@ -357,6 +531,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const empTxt = selEmpresa?.options?.[selEmpresa.selectedIndex]?.text || "";
         const mktpTxt = selMarketplace.options[selMarketplace.selectedIndex]?.text || "";
+
+        // guarda nomes para impressão
+        empresaSelecionadaNome = empTxt;
+        marketplaceSelecionadoNome = mktpTxt;
 
         if (!modalMktpEl || !window.bootstrap) return;
 

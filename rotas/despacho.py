@@ -119,7 +119,12 @@ def api_despacho_crossdocking_nfe():
                 current_app.logger.exception("Falha ao inserir em agendamentosweb.despacho_crossdocking")
                 return jsonify(ok=False, error=str(e)), 500
     finally:
+        try:
+            conn.rollback()  # encerra transação do SELECT (evita idle in transaction)
+        except Exception:
+            pass
         pool.putconn(conn)
+
 
 
 @bp_despacho.route('/api/despacho/marketplaces', methods=['GET'])
@@ -149,7 +154,12 @@ def api_despacho_marketplaces():
             rows = cur.fetchall() or []
             return jsonify(ok=True, items=rows), 200
     finally:
+        try:
+            conn.rollback()  # encerra transação do SELECT (evita idle in transaction)
+        except Exception:
+            pass
         pool.putconn(conn)
+
 
 @bp_despacho.route('/api/despacho/empresas', methods=['GET'])
 def api_despacho_empresas():
@@ -180,7 +190,13 @@ def api_despacho_empresas():
             rows = cur.fetchall() or []
             return jsonify(ok=True, items=rows), 200
     finally:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         pool.putconn(conn)
+
+
 
 @bp_despacho.route('/api/despacho/crossdocking/consultar', methods=['POST'])
 def api_despacho_crossdocking_consultar():
@@ -381,6 +397,10 @@ def api_despacho_crossdocking_consultar():
             rows = [_iso_row(r) for r in rows]
             return jsonify(ok=True, count=len(rows), items=rows), 200
     finally:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         pool.putconn(conn)
 
 
