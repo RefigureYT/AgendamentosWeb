@@ -8,9 +8,33 @@ VERSION="latest"
 IMAGE_NAME="${IP}:${REG_PORT}/${NAME}:${VERSION}"
 APP_PORT="8345"          # Porta do app Flask
 
+# ---- Detecta modo (auto) e define porta do app ----
+MODE="${MODE:-auto}"   # auto | debug | prod
+
+if [[ "$MODE" == "auto" ]]; then
+    if grep -nE '^[[:space:]]*DEBUG[[:space:]]*=[[:space:]]*True\b' main.py >/dev/null 2>&1; then
+        MODE="debug"
+    else
+        MODE="prod"
+    fi
+fi
+
+if [[ "$MODE" == "debug" ]]; then
+    APP_PORT="${APP_PORT:-44523}"
+else
+    APP_PORT="${APP_PORT:-8345}"
+fi
+
+echo "🧭 MODE=${MODE} | APP_PORT=${APP_PORT}"
+
 # ---------------- Guardas anti-debug antes do build ----------------
 if [[ "${ALLOW_DEBUG:-0}" != "1" ]]; then
     echo "🔍 Verificando flags de DEBUG no código e configs..."
+
+    # 0) DEBUG=True hardcoded no main.py
+    if grep -nE '^[[:space:]]*DEBUG[[:space:]]*=[[:space:]]*True\b' main.py 2>/dev/null; then
+        echo "❌ Abortado: main.py está com DEBUG=True hardcoded. Troque para DEBUG=False ou rode com ALLOW_DEBUG=1." ; exit 11
+    fi
 
     # 1) debug=True em chamadas .run(...)
     if grep -RInE '^[[:space:]]*[^#]*\.(run)\([^)]*debug[[:space:]]*=[[:space:]]*True' . --include='*.py' 2>/dev/null; then

@@ -1,6 +1,33 @@
 from flask import Blueprint, jsonify, request, render_template, current_app, session
 from psycopg2.extras import RealDictCursor
+import psycopg2
 import re
+
+def _pg_discard(pool, conn) -> None:
+    """Remove conexão quebrada do pool."""
+    if not conn or not pool:
+        return
+    try:
+        pool.putconn(conn, close=True)
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def _pg_putconn(pool, conn) -> None:
+    """
+    Devolve conexão pro pool garantindo que não fica transação aberta.
+    Se rollback falhar, descarta a conexão (porque provavelmente está morta).
+    """
+    if not conn or not pool:
+        return
+    try:
+        conn.rollback()
+    except Exception:
+        _pg_discard(pool, conn)
+        return
+    pool.putconn(conn)
 
 bp_despacho = Blueprint('despacho', __name__)
 
@@ -176,27 +203,33 @@ def api_despacho_empresas():
     if not pool:
         return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 500
 
-    conn = pool.getconn()
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                f"""
-                SELECT id_emp, nome_emp
-                FROM {TBL_EMP}
-                WHERE id_emp > 0
-                ORDER BY id_emp ASC
-                """
-            )
-            rows = cur.fetchall() or []
-            return jsonify(ok=True, items=rows), 200
-    finally:
+    # 1 retry: se pegar conexão morta do pool, descarta e tenta de novo
+    for attempt in (1, 2):
+        conn = None
         try:
-            conn.rollback()
-        except Exception:
-            pass
-        pool.putconn(conn)
+            conn = pool.getconn()
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    f"""
+                    SELECT id_emp, nome_emp
+                    FROM {TBL_EMP}
+                    WHERE id_emp > 0
+                    ORDER BY id_emp ASC
+                    """
+                )
+                rows = cur.fetchall() or []
+                return jsonify(ok=True, items=rows), 200
 
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            _pg_discard(pool, conn)
+            conn = None
+            if attempt == 1:
+                continue
+            current_app.logger.exception("Postgres caiu em /api/despacho/empresas")
+            return jsonify(ok=False, error="Falha de conexão com o Postgres"), 503
 
+        finally:
+            _pg_putconn(pool, conn)
 
 @bp_despacho.route('/api/despacho/crossdocking/consultar', methods=['POST'])
 def api_despacho_crossdocking_consultar():

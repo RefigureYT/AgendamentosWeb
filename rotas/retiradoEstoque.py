@@ -427,7 +427,6 @@ def _start_estoque_worker_once():
     _mov_worker_started = True
     print(f"[estoque-worker] pool disparado com {len(threads)} threads; TINY_MAX_PAR={TINY_MAX_PAR}.")
 
-    
 @bp_retirado.route('/api/bipagem/detalhe', methods=['GET'])
 def api_bipagem_detalhe():
     """

@@ -291,6 +291,7 @@ body {
 
 /* popup erro: chamativo, mas sem “neon” */
 .cd-error-popup {
+    white-space: pre-line;
     position: fixed;
     top: 86px;
     left: 50%;
@@ -358,6 +359,73 @@ body {
     color: var(--jp-muted);
     font-size: 0.9rem;
     white-space: nowrap;
+}
+
+/* ===== Toast (sucesso) ===== */
+.cd-toast {
+    position: fixed;
+    top: 86px;
+    right: 16px;
+    z-index: 3200;
+
+    max-width: min(520px, 92vw);
+    padding: 12px 14px;
+
+    border-radius: 14px;
+    font-weight: 900;
+    letter-spacing: 0.2px;
+
+    color: #fff;
+    box-shadow: 0 14px 40px rgba(15, 23, 42, 0.18);
+    pointer-events: none;
+
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.cd-toast.is-show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.cd-toast--success {
+    background: #16a34a; /* verde */
+    border: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+@media (max-width: 576px) {
+    .cd-toast {
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+}
+
+/* ===== Estados dos itens bipados ===== */
+.cd-bipe-item--pending {
+    opacity: 0.9;
+}
+
+.cd-bipe-item--pending .cd-bipe-time {
+    font-weight: 900;
+    color: var(--jp-accent-2);
+}
+
+.cd-bipe-item--ok {
+    background: rgba(22, 163, 74, 0.08);
+}
+
+.cd-bipe-item--ok .cd-bipe-code {
+    color: #166534;
+}
+
+.cd-bipe-item--err {
+    background: rgba(185, 28, 28, 0.08);
+}
+
+.cd-bipe-item--err .cd-bipe-code {
+    color: var(--jp-danger);
 }
 
 /* botão concluir */

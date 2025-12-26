@@ -45,6 +45,47 @@ document.addEventListener("DOMContentLoaded", () => {
     let empresaSelecionadaNome = "";
     let errorTimer = null;
 
+    // Blindagem: não deixe o input cortar (ex: maxlength=44 no HTML)
+    if (inpNfeBarcode) {
+        inpNfeBarcode.removeAttribute("maxlength");
+        // limite alto só para evitar colagens gigantes acidentais
+        inpNfeBarcode.maxLength = 512;
+    }
+
+    // ===== Toast de sucesso (verde) =====
+    let successTimer = null;
+    const successToastEl = (() => {
+        const el = document.createElement("div");
+        el.className = "cd-toast cd-toast--success";
+        el.id = "cdSuccessToast";
+        document.body.appendChild(el);
+        return el;
+    })();
+
+    function showSuccessToast(msg) {
+        const text = (msg || "").toString().trim();
+        if (!text) return;
+
+        successToastEl.textContent = text;
+        successToastEl.classList.add("is-show");
+
+        if (successTimer) clearTimeout(successTimer);
+        successTimer = setTimeout(() => {
+            successToastEl.classList.remove("is-show");
+        }, 1200);
+    }
+
+    // ===== Envio assíncrono (fila) =====
+    const inflightNfes = new Map(); // chave -> { el, startedAt }
+    const queueNfes = [];
+    let activeSaves = 0;
+
+    // Limite pra não “espancar” servidor/DB; dá pra aumentar depois
+    const MAX_CONCURRENCY = 4;
+
+    // Token da sessão atual (se trocar marketplace/empresa, ignora respostas antigas)
+    let sessionToken = 0;
+
     // botão de impressão começa desabilitado
     setPrintEnabled(false);
 
@@ -196,25 +237,46 @@ document.addEventListener("DOMContentLoaded", () => {
         setTimeout(() => window.print(), 120);
     }
     function resetarBipes() {
+        // invalida qualquer request antigo (troca de empresa/marketplace)
+        sessionToken += 1;
+
         count = 0;
         nfesBipadas.clear();
+
+        inflightNfes.clear();
+        queueNfes.length = 0;
+        activeSaves = 0;
+
         if (counterEl) counterEl.textContent = "0";
         if (listEl) listEl.innerHTML = "";
         setPrintEnabled(false);
     }
 
-    function adicionarBipe(digits, ts) {
-        if (!listEl) return;
+    function criarBipeItem(chave, ts, state = "ok") {
+        if (!listEl) return null;
 
         const item = document.createElement("div");
-        item.className = "cd-bipe-item";
+        item.className = `cd-bipe-item cd-bipe-item--${state}`;
+        item.dataset.key = String(chave);
+
         item.innerHTML = `
-      <div class="cd-bipe-code">${digits}</div>
-      <div class="cd-bipe-time">${ts}</div>
-    `;
+          <div class="cd-bipe-code">${escapeHtml(chave)}</div>
+          <div class="cd-bipe-time">${escapeHtml(ts)}</div>
+        `;
 
         listEl.appendChild(item);
         listEl.scrollTop = listEl.scrollHeight;
+        return item;
+    }
+
+    function atualizarBipeItem(item, state, ts) {
+        if (!item) return;
+
+        item.classList.remove("cd-bipe-item--pending", "cd-bipe-item--ok", "cd-bipe-item--err");
+        item.classList.add(`cd-bipe-item--${state}`);
+
+        const timeEl = item.querySelector(".cd-bipe-time");
+        if (timeEl) timeEl.textContent = String(ts || "");
     }
 
     // ===== modal dinâmico =====
@@ -303,11 +365,98 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // ===== ENTER no input -> valida 44 dígitos -> POST -> lista + contador =====
+    function extrairChaveNfe(raw) {
+        const digitsOnly = String(raw || "").replace(/\D+/g, "");
+        return digitsOnly.length === 44 ? digitsOnly : null;
+    }
+
+    function enqueueSave(chave) {
+        queueNfes.push(chave);
+        pumpQueue();
+    }
+
+    async function processSave(chave, token) {
+        const meta = inflightNfes.get(chave);
+        if (!meta) return;
+
+        try {
+            const resp = await fetch(API_BIPAR_NFE, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id_mktp: Number(marketplaceSelecionadoId),
+                    id_emp: Number(empresaSelecionadaId),
+                    chave_acesso_nfe: chave,
+                }),
+            });
+
+            const data = await resp.json().catch(() => null);
+
+            // se mudou de sessão (troca marketplace/empresa), ignora resposta
+            if (token !== sessionToken) return;
+
+            if (!resp.ok || !data || data.ok !== true) {
+                if (resp.status === 409) {
+                    atualizarBipeItem(meta.el, "err", "Já no banco");
+                    showErrorPopup("NF-e já registrada no banco");
+                } else {
+                    atualizarBipeItem(meta.el, "err", "Falhou");
+                    showErrorPopup(errorToString(data, `Erro HTTP ${resp.status}`));
+                }
+                return;
+            }
+
+            // sucesso
+            nfesBipadas.add(chave);
+
+            count += 1;
+            if (counterEl) counterEl.textContent = String(count);
+            setPrintEnabled(true);
+
+            const row = data.row || {};
+            const hora = row.hora_despacho ? String(row.hora_despacho).slice(0, 8) : "";
+            const tsServer =
+                row.data_despacho && hora ? `${row.data_despacho} ${hora}` : new Date().toLocaleString("pt-BR");
+
+            atualizarBipeItem(meta.el, "ok", tsServer);
+            showSuccessToast("NF-e adicionada com sucesso no banco ✅");
+        } catch (err) {
+            if (token !== sessionToken) return;
+            atualizarBipeItem(meta.el, "err", "Falha de rede");
+            showErrorPopup(errorToString(err, "Falha de rede ao salvar a NF-e"));
+        } finally {
+            // não deixa “preso” no inflight
+            inflightNfes.delete(chave);
+        }
+    }
+
+    function pumpQueue() {
+        while (activeSaves < MAX_CONCURRENCY && queueNfes.length > 0) {
+            const chave = queueNfes.shift();
+            const token = sessionToken;
+
+            activeSaves += 1;
+            processSave(chave, token)
+                .finally(() => {
+                    activeSaves -= 1;
+                    pumpQueue();
+                });
+        }
+    }
+
+    // ===== ENTER no input -> (não bloqueia) -> enfileira POST -> UI atualiza quando voltar =====
     if (inpNfeBarcode) {
-        inpNfeBarcode.addEventListener("keydown", async (e) => {
+        inpNfeBarcode.addEventListener("keydown", (e) => {
             if (e.key !== "Enter") return;
             e.preventDefault();
+
+            const raw = (inpNfeBarcode.value || "").trim();
+
+            // sempre limpa e volta o foco (fluxo de bipagem)
+            inpNfeBarcode.value = "";
+            inpNfeBarcode.focus();
+
+            if (!raw) return;
 
             if (!empresaSelecionadaId) {
                 showErrorPopup("Selecione a empresa antes de bipar");
@@ -318,66 +467,32 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            const raw = (inpNfeBarcode.value || "").trim();
-            const digits = raw.replace(/\D+/g, "");
+            const chave = extrairChaveNfe(raw);
 
-            if (digits.length !== 44) {
-                showErrorPopup("NF-e inválida: precisa ter 44 dígitos");
+            if (!chave) {
+                const digitsCount = (raw.replace(/\D+/g, "") || "").length;
+                showErrorPopup(`Precisa ter exatamente 44 dígitos. Encontrado: ${digitsCount}`);
                 return;
             }
 
-            // bloqueio local (rápido)
-            if (nfesBipadas.has(digits)) {
+            // já confirmada nessa sessão
+            if (nfesBipadas.has(chave)) {
                 showErrorPopup("NF-e já bipada nesta sessão");
-                inpNfeBarcode.value = "";
-                inpNfeBarcode.focus();
                 return;
             }
 
-            inpNfeBarcode.disabled = true;
-
-            try {
-                const resp = await fetch(API_BIPAR_NFE, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        id_mktp: Number(marketplaceSelecionadoId),
-                        id_emp: Number(empresaSelecionadaId),
-                        chave_acesso_nfe: digits,
-                    }),
-                });
-
-                const data = await resp.json().catch(() => null);
-
-                if (!resp.ok || !data || data.ok !== true) {
-                    if (resp.status === 409) {
-                        showErrorPopup("NF-e já registrada no banco");
-                    } else {
-                        showErrorPopup(errorToString(data, `Erro HTTP ${resp.status}`));
-                    }
-                    return;
-                }
-
-                // sucesso no banco -> marca, conta e lista (SEM popup no sucesso)
-                nfesBipadas.add(digits);
-
-                count += 1;
-                if (counterEl) counterEl.textContent = String(count);
-                setPrintEnabled(true);
-
-                const row = data.row || {};
-                const hora = row.hora_despacho ? String(row.hora_despacho).slice(0, 8) : "";
-                const tsServer =
-                    row.data_despacho && hora ? `${row.data_despacho} ${hora}` : new Date().toLocaleString("pt-BR");
-
-                adicionarBipe(digits, tsServer);
-            } catch (err) {
-                showErrorPopup(errorToString(err, "Falha de rede ao salvar a NF-e"));
-            } finally {
-                inpNfeBarcode.disabled = false;
-                inpNfeBarcode.value = "";
-                inpNfeBarcode.focus();
+            // já está em envio
+            if (inflightNfes.has(chave)) {
+                showErrorPopup("NF-e já está sendo enviada (aguarde)");
+                return;
             }
+
+            // cria item pendente imediatamente (percepção de “instantâneo”)
+            const itemEl = criarBipeItem(chave, "Enviando…", "pending");
+            inflightNfes.set(chave, { el: itemEl, startedAt: Date.now() });
+
+            // enfileira sem bloquear o input
+            enqueueSave(chave);
         });
     }
 

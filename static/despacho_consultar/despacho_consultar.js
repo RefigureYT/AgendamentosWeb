@@ -24,7 +24,14 @@
     const btnBuscar = el("btnBuscar");
     const btnLimpar = el("btnLimpar");
 
+    // Impressão
+    const btnImprimirRelacao = el("btnImprimirRelacao");
+    const printSheetEl = el("cdPrintSheet");
+
     const digits = (v) => String(v || "").replace(/\D+/g, "");
+
+    let lastItems = [];
+    let lastPrintCtx = null;
 
     function showErr(msg) {
         if (!dcErr) return;
@@ -48,19 +55,233 @@
         resultsCount.textContent = String(n || 0);
     }
 
+    function setPrintEnabled(on) {
+        if (!btnImprimirRelacao) return;
+        btnImprimirRelacao.disabled = !on;
+    }
+
+    function escapeHtml(v) {
+        return String(v ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    function getSelectText(sel, fallback) {
+        if (!sel) return fallback;
+        const opt = sel.selectedOptions && sel.selectedOptions[0];
+        const txt = (opt?.textContent || "").trim();
+        if (sel.value === "" || !txt) return fallback;
+        return txt;
+    }
+
+    function isoToBrDate(iso) {
+        // "YYYY-MM-DD" -> "DD/MM/YYYY"
+        const s = String(iso || "").trim();
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return s;
+        return `${m[3]}/${m[2]}/${m[1]}`;
+    }
+
+    function buildPeriodo(ctx) {
+        const d1 = (ctx?.data_de || "").trim();
+        const d2 = (ctx?.data_ate || "").trim();
+        const h1 = (ctx?.hora_de || "").trim();
+        const h2 = (ctx?.hora_ate || "").trim();
+
+        const left = [d1 ? isoToBrDate(d1) : "", h1].filter(Boolean).join(" ");
+        const right = [d2 ? isoToBrDate(d2) : "", h2].filter(Boolean).join(" ");
+
+        if (!left && !right) return "";
+        if (left && right) return `${left} → ${right}`;
+        return left || right;
+    }
+
+    function capturePrintCtx(kind) {
+        // Snapshot do que gerou os resultados atuais (para não “desalinhar” ao mexer nos filtros depois)
+        return {
+            kind: kind || "unknown",
+            empresa: getSelectText(fltEmpresa, "Todas"),
+            marketplace: getSelectText(fltMarketplace, "Todos"),
+            q: (qInput?.value || "").trim(),
+            numero_nota: (fltNumeroNota?.value || "").trim(),
+            chave: digits(fltChave?.value || ""),
+            data_de: (fltDataDe?.value || "").trim(),
+            data_ate: (fltDataAte?.value || "").trim(),
+            hora_de: (fltHoraDe?.value || "").trim(),
+            hora_ate: (fltHoraAte?.value || "").trim(),
+        };
+    }
+
+    function montarRelacaoHtml(repeticoes) {
+        const ctx = lastPrintCtx || capturePrintCtx("unknown");
+
+        const empresa = escapeHtml(ctx.empresa || "-");
+        const marketplace = escapeHtml(ctx.marketplace || "-");
+        const volumes = escapeHtml(String(lastItems?.length || 0));
+        const dataHoje = escapeHtml(new Date().toLocaleDateString("pt-BR"));
+
+        const extras = [];
+
+        const periodo = buildPeriodo(ctx);
+        if (periodo) {
+            extras.push(`
+        <div><span class="cd-print-label">Período:</span> <span class="cd-print-value">${escapeHtml(periodo)}</span></div>
+      `);
+        }
+
+        if (ctx.kind === "quick" && ctx.q) {
+            extras.push(`
+        <div><span class="cd-print-label">Busca:</span> <span class="cd-print-value">${escapeHtml(ctx.q)}</span></div>
+      `);
+        }
+
+        // Se quiser também, dá pra mostrar quando filtrou por nota/chave:
+        // (mantive discreto pra não “estourar” o layout)
+        if (ctx.kind === "filters") {
+            const parts = [];
+            if (ctx.numero_nota) parts.push(`Nº Nota ${ctx.numero_nota}`);
+            if (ctx.chave) parts.push(`Chave ${ctx.chave}`);
+            if (parts.length) {
+                extras.push(`
+          <div><span class="cd-print-label">Filtro:</span> <span class="cd-print-value">${escapeHtml(parts.join(" • "))}</span></div>
+        `);
+            }
+        }
+
+        const card = `
+      <div class="cd-print-card">
+        <h1 class="cd-print-title">Relação de coleta • Crossdocking</h1>
+
+        <div class="cd-print-meta">
+          <div><span class="cd-print-label">Empresa:</span> <span class="cd-print-value">${empresa}</span></div>
+          <div><span class="cd-print-label">Marketplace:</span> <span class="cd-print-value">${marketplace}</span></div>
+          <div><span class="cd-print-label">Data:</span> <span class="cd-print-value">${dataHoje}</span></div>
+          <div><span class="cd-print-label">Volumes bipados:</span> <span class="cd-print-value">${volumes}</span></div>
+          ${extras.join("")}
+        </div>
+
+        <div class="cd-print-volumes">
+          <div class="cd-print-volumes-num">${volumes}</div>
+          <div class="cd-print-volumes-label">Volumes bipados</div>
+        </div>
+
+        <div class="cd-print-notes">
+          Observação: esta relação é resumida (não lista as NF-es). Para detalhes, use a tela de consulta.
+        </div>
+
+        <div class="cd-print-sign-grid">
+          <div>
+            <div class="cd-print-line"></div>
+            <div class="cd-print-sign-label">Nome e assinatura (coleta)</div>
+          </div>
+          <div>
+            <div class="cd-print-line"></div>
+            <div class="cd-print-sign-label">Documento / RG / CPF</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+        const n = Math.max(1, Number(repeticoes) || 1);
+        const cards = Array.from({ length: n }, (_, i) => {
+            const sep = i === 0 ? "" : `<div class="cd-print-cut"></div>`;
+            return `${sep}${card}`;
+        }).join("");
+
+        return `
+      <div class="cd-print-wrap">
+        <div class="cd-print-page">
+          ${cards}
+        </div>
+      </div>
+    `;
+    }
+
+    function imprimirRelacao() {
+        if (!lastItems || lastItems.length <= 0) {
+            showErr("Não há resultados para imprimir.");
+            return;
+        }
+
+        // Gera 2 vias (metade/metade)
+        const relacaoHtml = montarRelacaoHtml(2);
+
+        // Copia os CSS atuais (bootstrap + despacho.css etc) para o iframe
+        const stylesHtml = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+            .map((n) => n.outerHTML)
+            .join("\n");
+
+        // Iframe invisível (impressão isolada => não repete páginas)
+        const iframe = document.createElement("iframe");
+        iframe.style.position = "fixed";
+        iframe.style.right = "0";
+        iframe.style.bottom = "0";
+        iframe.style.width = "0";
+        iframe.style.height = "0";
+        iframe.style.border = "0";
+        iframe.setAttribute("aria-hidden", "true");
+        document.body.appendChild(iframe);
+
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+
+        doc.open();
+        doc.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Relação de coleta</title>
+  ${stylesHtml}
+  <style>
+    /* no iframe, o #cdPrintSheet precisa ficar visível */
+    #cdPrintSheet { display: block !important; }
+  </style>
+</head>
+<body>
+  <div id="cdPrintSheet" class="cd-print-sheet">
+    ${relacaoHtml}
+  </div>
+</body>
+</html>`);
+        doc.close();
+
+        const cleanup = () => {
+            try { iframe.remove(); } catch (_) { }
+        };
+
+        // Alguns browsers não disparam afterprint sempre: mantém fallback
+        iframe.contentWindow.onafterprint = cleanup;
+
+        // Pequeno delay pra garantir CSS aplicado antes do print
+        setTimeout(() => {
+            try {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            } finally {
+                // fallback de limpeza
+                setTimeout(cleanup, 1500);
+            }
+        }, 250);
+    }
+
     function renderRows(items) {
         if (!resultsBody) return;
 
-        if (!items || items.length === 0) {
+        lastItems = Array.isArray(items) ? items : [];
+        setPrintEnabled(lastItems.length > 0);
+
+        if (!lastItems || lastItems.length === 0) {
             resultsBody.innerHTML = `
-            <tr>
-            <td colspan="7" class="text-muted">Nada encontrado.</td>
-            </tr>`;
+        <tr>
+          <td colspan="7" class="text-muted">Nada encontrado.</td>
+        </tr>`;
             setCount(0);
             return;
         }
 
-        const html = items.map((r) => {
+        const html = lastItems.map((r) => {
             const marketplace = r.marketplace || "-";
             const empresa = r.empresa || "-";
             const numNota = (r.numero_nota === null || r.numero_nota === undefined) ? "-" : r.numero_nota;
@@ -68,21 +289,20 @@
             const hora = r.hora_despacho || "-";
 
             return `
-                <tr>
-                <td>${r.id ?? "-"}</td>
-                <td>${marketplace}</td>
-                <td>${empresa}</td>
-                <td class="text-monospace">${r.chave_acesso_nfe || "-"}</td>
-                <td>${numNota}</td>
-                <td>${data}</td>
-                <td>${hora}</td>
-                </tr>
-            `;
+        <tr>
+          <td>${r.id ?? "-"}</td>
+          <td>${marketplace}</td>
+          <td>${empresa}</td>
+          <td class="text-monospace">${r.chave_acesso_nfe || "-"}</td>
+          <td>${numNota}</td>
+          <td>${data}</td>
+          <td>${hora}</td>
+        </tr>
+      `;
         }).join("");
 
-
         resultsBody.innerHTML = html;
-        setCount(items.length);
+        setCount(lastItems.length);
     }
 
     async function loadMarketplaces() {
@@ -122,9 +342,12 @@
         if (fltEmpresa) fltEmpresa.insertAdjacentHTML("beforeend", options);
     }
 
-    async function consultar(payload) {
+    async function consultar(payload, printCtx) {
         hideErr();
         setLoading(true);
+
+        // snapshot que vai aparecer na impressão desse resultado
+        if (printCtx) lastPrintCtx = printCtx;
 
         try {
             const res = await fetch(API_CONSULTAR, {
@@ -186,7 +409,7 @@
         if (d.length === 44) {
             clearTimeout(autoTimer);
             autoTimer = setTimeout(() => {
-                consultar(payloadFromQuick());
+                consultar(payloadFromQuick(), capturePrintCtx("quick"));
             }, 250);
         }
     }
@@ -204,6 +427,8 @@
     }
 
     document.addEventListener("DOMContentLoaded", async () => {
+        setPrintEnabled(false);
+
         try {
             await loadMarketplaces();
             await loadEmpresas();
@@ -212,19 +437,31 @@
         }
 
         // Pesquisa rápida
-        if (qBtnBuscar) qBtnBuscar.addEventListener("click", () => consultar(payloadFromQuick()));
+        if (qBtnBuscar) {
+            qBtnBuscar.addEventListener("click", () => {
+                consultar(payloadFromQuick(), capturePrintCtx("quick"));
+            });
+        }
+
         if (qInput) {
             qInput.addEventListener("input", onQuickInput);
             qInput.addEventListener("keydown", (ev) => {
                 if (ev.key === "Enter") {
                     ev.preventDefault();
-                    consultar(payloadFromQuick());
+                    consultar(payloadFromQuick(), capturePrintCtx("quick"));
                 }
             });
         }
 
         // Filtros
-        if (btnBuscar) btnBuscar.addEventListener("click", () => consultar(payloadFromFilters()));
+        if (btnBuscar) {
+            btnBuscar.addEventListener("click", () => {
+                consultar(payloadFromFilters(), capturePrintCtx("filters"));
+            });
+        }
         if (btnLimpar) btnLimpar.addEventListener("click", () => clearFilters());
+
+        // Impressão
+        if (btnImprimirRelacao) btnImprimirRelacao.addEventListener("click", () => imprimirRelacao());
     });
 })();

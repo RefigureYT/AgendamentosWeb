@@ -13,7 +13,7 @@ from exceptions import ParametroInvalido, MetodoInvalido, LimiteRequests, Arquiv
 # from flask_socketio import SocketIO, join_room, emit
 
 ## Configuração de desenvolvimento e produção
-DEBUG=True
+DEBUG=True  # Mude para False em produção
 PORT= 44523 if DEBUG == True else 8345 # 8345 se produção
 ## FIM Configuração
 

@@ -1,144 +1,103 @@
 body {
-    font-weight: 500;
+  font-weight: 500;
 }
 
 /* Card Wrapper */
 .card {
-    border: none;
-    border-radius: 0.5rem;
+  border: none;
+  border-radius: 0.5rem;
 }
 
 .card-body {
-    padding: 0;
+  padding: 0;
 }
 
-/* Table Base Styles */
+/* ========= Tabela (compacta + scroll real) ========= */
 .table {
-    font-size: 0.95rem;
-    margin-bottom: 0;
-}
-
-.table-responsive {
-    overflow-x: auto;
-    /* permite scroll lateral sempre que necessário */
-    border-radius: 0.5rem;
-}
-
-.table-responsive table {
-    border-collapse: separate;
-    border-radius: 0.5rem 0.5rem 0 0;
-}
-
-/* Header: blue background + white text */
-.table thead {
-    background-color: #007bff;
-}
-
-.table thead th {
-    color: #fff;
-    border: none;
-    font-weight: 600;
-    padding: 0.75rem 1rem;
-}
-
-/* Zebra stripes & hover */
-.table tbody tr:nth-child(even) {
-    background-color: #fbfcfd;
-}
-
-.table tbody tr:hover {
-    background-color: #f1f5f9;
+  font-size: 0.82rem;
+  margin-bottom: 0;
+  line-height: 1.15;
 }
 
 .table td,
 .table th {
-    padding: 0.75rem 1rem;
-    vertical-align: middle;
+  padding: 0.45rem 0.6rem;
+  vertical-align: middle;
 }
 
-/* “Abrir no Tiny” link */
-.tiny-link {
-    color: #4da6ff;
-    text-decoration: none;
-    font-weight: 500;
-    display: inline-flex;
-    align-items: center;
+.table thead {
+  background-color: #007bff;
 }
 
-.tiny-link i {
-    margin-right: 4px;
-    font-size: 1em;
+.table thead th {
+  color: #fff;
+  border: none;
+  font-weight: 700;
+  padding: 0.55rem 0.6rem;
 }
 
-.tiny-link:hover {
-    text-decoration: underline;
-    color: #4091e8;
+/* Zebra stripes & hover */
+.table tbody tr:nth-child(even) {
+  background-color: #fbfcfd;
 }
 
-/* REMOVIDO: bloco @media que transformava em cards no mobile */
-
-/* Garante que a tabela permita cantos arredondados */
-.table-responsive table {
-    border-collapse: separate;
-    border-spacing: 0;
+.table tbody tr:hover {
+  background-color: #f1f5f9;
 }
 
-/* Aplica raio apenas nos cantos superiores */
-.table thead th:first-child {
-    border-top-left-radius: 0.5rem;
-}
-
-.table thead th:last-child {
-    border-top-right-radius: 0.5rem;
-}
-
-/* Para que o wrapper "corte" corretamente os cantos da tabela */
+/* Wrapper: precisa permitir overflow (senão corta colunas) */
 .table-responsive {
-    overflow: hidden;
-    border-radius: 0.5rem;
+  overflow: auto;
+  border-radius: 0.5rem;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
-@media (max-width: 768px) {
-    .table thead {
-        display: none;
-        /* esconde os headers */
-    }
+.table-responsive table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
 
-    .table tbody,
-    .table tr,
-    .table td {
-        display: block;
-        width: 100%;
-    }
+/* cantos */
+.table thead th:first-child {
+  border-top-left-radius: 0.5rem;
+}
+.table thead th:last-child {
+  border-top-right-radius: 0.5rem;
+}
 
-    .table tr {
-        margin-bottom: 1rem;
-        background: #fff;
-        border-radius: 0.5rem;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-        padding: 0.75rem;
-    }
+/* ========= Reports: controle de largura ========= */
+.alt-reports-table td {
+  white-space: nowrap;
+}
 
-    .table td {
-        padding: 0.5rem 1rem;
-        border: none;
-        text-align: left;
-        position: relative;
-    }
+/* Produto / Report / Obs podem quebrar e não estourar */
+.alt-reports-table td:nth-child(5),
+.alt-reports-table td:nth-child(9),
+.alt-reports-table td.alt-col-obs {
+  white-space: normal;
+  min-width: 220px;
+  max-width: 420px;
+  word-break: break-word;
+}
 
-    .table td::before {
-        content: attr(data-label);
-        position: absolute;
-        left: 1rem;
-        top: 0.5rem;
-        font-weight: bold;
-        color: #6c757d;
-        font-size: 0.85rem;
-        color: #0D6EFD;
-    }
+/* ========= Copiar (qualquer célula) ========= */
+.alt-copy {
+  cursor: copy;
+  user-select: text;
+}
 
-    .table td {
-        padding-left: 7rem;
-        /* espaço para o label */
-    }
+.alt-copy:hover {
+  background-color: rgba(13, 110, 253, 0.06);
+}
+
+.alt-copy:active {
+  background-color: rgba(13, 110, 253, 0.12);
+}
+
+/* ========= Header fixo ========= */
+.header-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }

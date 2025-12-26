@@ -73,7 +73,20 @@
             <div class="card-body">
             <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
                 <div class="fw-bold">Resultados</div>
-                <div id="resultsCount" class="badge">0</div>
+
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <button
+                            id="btnImprimirRelacao"
+                            type="button"
+                            class="btn btn-outline-secondary"
+                            title="Imprime 2 vias na mesma folha (metade/metade)"
+                            disabled
+                        >
+                            🖨️ Imprimir relação
+                        </button>
+
+                        <div id="resultsCount" class="badge">0</div>
+                    </div>
             </div>
 
             <div id="dcLoading" class="text-muted d-none mb-2">
@@ -108,6 +121,9 @@
         </div>
     </div>
     </div>
+
+    <!-- ÁREA DE IMPRESSÃO (fica escondida na tela; aparece no modo de impressão) -->
+    <div id="cdPrintSheet" class="cd-print-sheet" aria-hidden="true"></div>
 
     <!-- MODAL: Filtros avançados (estilo Tiny: clicou fora, fecha) -->
     <div class="modal fade" id="modalFiltrosAvancados" tabindex="-1" aria-hidden="true">
