@@ -206,6 +206,52 @@
     </div>
   </div>
 
+  <!-- Modal: reportar -->
+  <div id="modal-report" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="tituloModalReport">
+      <h2 id="tituloModalReport" class="titulo-vermelho">Reportar</h2>
+
+      <div class="info-box" style="margin-bottom:12px;">
+        <p class="mb-2">Sobre o que você está reportando?</p>
+
+        <div class="report-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+          <div><strong>Empresa:</strong> <span id="report-empresa">—</span></div>
+          <div><strong>Marketplace:</strong> <span id="report-marketplace">—</span></div>
+
+          <div><strong>ID:</strong> <span id="report-id">—</span></div>
+          <div><strong>Tipo (Contexto):</strong> <span id="report-contexto">—</span></div>
+
+          <div style="grid-column: 1 / -1;"><strong>Produto:</strong> <span id="report-nome">—</span></div>
+
+          <div><strong>SKU:</strong> <span id="report-sku">—</span></div>
+          <div><strong>EAN:</strong> <span id="report-ean">—</span></div>
+        </div>
+
+        <label for="report-tipo-tiny" class="form-label fw-bold" style="margin-top:12px;">
+          Tipo (Tiny) <span class="text-danger">*</span>
+        </label>
+        <select id="report-tipo-tiny" class="form-select" required>
+          <option value="">Selecione...</option>
+          <option value="SIMPLES">SIMPLES</option>
+          <option value="KIT">KIT</option>
+          <option value="PAI">PAI</option>
+          <option value="ANUNCIO">ANÚNCIO</option>
+        </select>
+
+        <label for="report-observacao" class="form-label fw-bold" style="margin-top:12px;">
+          Observação <span class="text-danger">*</span>
+        </label>
+        <textarea id="report-observacao" class="form-control" rows="4"
+                  placeholder="Descreva o problema..." required></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-outline" onclick="fecharModalReport()">Cancelar</button>
+        <button type="button" class="btn btn-primary" onclick="enviarReport()">Enviar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Overlay de erro da busca de equivalente (usado pelo JS) -->
   <div id="erroBuscaEquivalenteDiv" class="input-equivalente-off"
        style="position: fixed; border: 1px solid red; width: 100px; height: 100px;"></div>

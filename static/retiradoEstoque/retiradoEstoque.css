@@ -113,8 +113,10 @@ body {
 
 /* container dos pendentes: mais alto e com espaço pro popover do último item */
 #pendentesContainer {
-  max-height: 80vh;      /* antes era 70vh inline */
-  padding-bottom: 40px;  /* espaço extra para o popover do último produto */
+  max-height: 80vh;
+  /* antes era 70vh inline */
+  padding-bottom: 40px;
+  /* espaço extra para o popover do último produto */
 }
 
 #pendentesContainer .produto-item {
@@ -237,8 +239,10 @@ body {
   right: auto;
   margin-top: 6px;
 
-  max-width: 220px;     /* não deixa atravessar o modal todo */
-  z-index: 40;          /* acima da coluna da esquerda */
+  max-width: 220px;
+  /* não deixa atravessar o modal todo */
+  z-index: 40;
+  /* acima da coluna da esquerda */
 }
 
 /* imagem um pouco menor no modal pra caber melhor */
@@ -248,7 +252,8 @@ body {
 
 /* ==== ESTILO PARA PRODUTOS CONCLUÍDOS NO PAINEL DE PENDENTES ==== */
 #pendentesContainer .produto-item.concluido {
-  background-color: #ecfdf3;            /* verde bem claro */
+  background-color: #ecfdf3;
+  /* verde bem claro */
   border-color: #bbf7d0;
   box-shadow: 0 4px 14px rgba(22, 163, 74, 0.25);
 }
@@ -276,7 +281,8 @@ body {
 }
 
 #pendentesContainer .produto-item.concluido .progress-bar {
-  background-color: #16a34a;  /* verde principal */
+  background-color: #16a34a;
+  /* verde principal */
   color: #ecfdf3;
 }
 
@@ -639,6 +645,43 @@ body {
   background: #fff1f1;
 }
 
+/* Botão de report (mais visível) */
+.btn-report {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid #fecaca;
+  background: #fee2e2;
+  color: #dc2626;
+  cursor: pointer;
+}
+
+.btn-report:hover {
+  background: #fecaca;
+}
+
+.btn-report:active {
+  transform: translateY(1px);
+}
+
+/* Modal de report: acima do modal de edição */
+#modal-report {
+  z-index: 1090;
+}
+
+#modal-report .modal-content {
+  max-width: 720px;
+}
+
+#modal-report #report-observacao {
+  border-radius: 12px;
+  resize: vertical;
+  min-height: 110px;
+}
+
 /* ===== Layout dos cards do modal ===== */
 .produto-item-modal {
   position: relative;
@@ -832,7 +875,8 @@ body {
 
 /* imagem da confirmação: centralizada, sem esticar demais */
 #modal-equivalente .eq-confirm-img {
-  max-width: 380px;      /* limite "humano" dentro do modal */
+  max-width: 380px;
+  /* limite "humano" dentro do modal */
   width: 100%;
   height: auto;
   display: block;
@@ -842,20 +886,20 @@ body {
 
 /* footer fixo com Voltar / Confirmar */
 #modal-equivalente .eq-confirm-footer {
-  margin-top: auto;                /* empurra pro fundo do overlay */
+  margin-top: auto;
+  /* empurra pro fundo do overlay */
   padding-top: 12px;
   border-top: 1px solid #e5e7eb;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 
-  position: sticky;                /* fica visível mesmo com scroll */
+  position: sticky;
+  /* fica visível mesmo com scroll */
   bottom: 0;
-  background: linear-gradient(
-    to top,
-    #ffffff 70%,
-    rgba(255, 255, 255, 0.96) 100%
-  );
+  background: linear-gradient(to top,
+      #ffffff 70%,
+      rgba(255, 255, 255, 0.96) 100%);
 }
 
 /* quando a confirmação estiver aberta, esconda os botões do rodapé */

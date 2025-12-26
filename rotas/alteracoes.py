@@ -140,7 +140,7 @@ async def remover(id, quant):
 # API - ALTERAÇÕES (REPORTS)
 # ==========================================================
 
-@app.route("/api/alteracoes/reports", methods=["GET"])
+@app.route("/api/alteracoes/reports", methods=["GET", "POST"])
 def api_alteracoes_reports_list():
     if "id_usuario" not in session:
         return jsonify(ok=False, error="Não autenticado"), 401
@@ -149,6 +149,146 @@ def api_alteracoes_reports_list():
     if not pool:
         return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 500
 
+    # ======================================================
+    # POST - CRIAR REPORT
+    # ======================================================
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+
+        empresa_label = (data.get("empresa_label") or "").strip()
+        
+        # id_emp é NOT NULL na tabela
+        id_emp_raw = data.get("id_emp", None)
+
+        # fallback: tenta inferir pelo label (caso o front não mande)
+        if id_emp_raw is None:
+            emp_norm = (empresa_label or "").strip().lower()
+            emp_norm = emp_norm.replace("á", "a").replace("ã", "a").replace("â", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("õ", "o").replace("ú", "u").replace("ç", "c")
+            if "jau pesca" in emp_norm:
+                id_emp_raw = 1
+            elif "jau fishing" in emp_norm:
+                id_emp_raw = 2
+            elif "lt sports" in emp_norm or "l.t. sports" in emp_norm or "l t sports" in emp_norm:
+                id_emp_raw = 3
+
+        try:
+            id_emp = int(id_emp_raw)
+        except Exception:
+            return jsonify(ok=False, error='Campo "id_emp" é obrigatório e deve ser numérico.'), 400
+
+        marketplace_label = (data.get("marketplace_label") or "").strip()
+        etiqueta_id = (data.get("etiqueta_id") or "").strip()  # aqui você está usando como "ID" do produto reportado
+        produto = (data.get("produto") or "").strip()
+        sku = (data.get("sku") or "").strip()
+        ean = (data.get("ean") or "").strip()
+        tipo = (data.get("tipo") or "").strip().upper()
+        report = (data.get("report") or "").strip()
+        colaborador = (data.get("colaborador") or "").strip()
+
+        # normaliza ANÚNCIO -> ANUNCIO
+        if tipo == "ANÚNCIO":
+            tipo = "ANUNCIO"
+
+        # validações (campos do modal)
+        missing = []
+        if not empresa_label: missing.append("empresa_label")
+        if not marketplace_label: missing.append("marketplace_label")
+        if not etiqueta_id: missing.append("etiqueta_id")
+        if not produto: missing.append("produto")
+        if not sku: missing.append("sku")
+        if not tipo: missing.append("tipo")
+        if not report: missing.append("report")
+        if not colaborador: missing.append("colaborador")
+
+        if missing:
+            return jsonify(ok=False, error=f"Campos obrigatórios ausentes: {', '.join(missing)}"), 400
+
+        if tipo not in ("SIMPLES", "KIT", "PAI", "ANUNCIO"):
+            return jsonify(ok=False, error='Campo "tipo" deve ser: SIMPLES, KIT, PAI ou ANUNCIO'), 400
+
+        for attempt in (1, 2):
+            conn = None
+            try:
+                conn = pool.getconn()
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {TBL_REPORTS} (
+                          created_at,
+                          sandbox,
+                          id_emp,
+                          empresa_label,
+                          marketplace_label,
+                          etiqueta_id,
+                          produto,
+                          sku,
+                          ean,
+                          tipo,
+                          report,
+                          colaborador,
+                          obs,
+                          feito
+                        )
+                        VALUES (
+                        NOW(),
+                        %s,
+                        %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        '',
+                        false
+                        )
+                        RETURNING
+                          id,
+                          created_at,
+                          empresa_label,
+                          marketplace_label,
+                          etiqueta_id,
+                          produto,
+                          sku,
+                          ean,
+                          tipo,
+                          report,
+                          colaborador,
+                          obs,
+                          feito
+                        """,
+                        (
+                            get_sandbox(),
+                            id_emp,
+                            empresa_label,
+                            marketplace_label,
+                            etiqueta_id,
+                            produto,
+                            sku,
+                            ean,
+                            tipo,
+                            report,
+                            colaborador,
+                        )
+                    )
+                    row = cur.fetchone()
+                    conn.commit()
+                    return jsonify(ok=True, item=row), 201
+
+            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                _pg_discard(pool, conn)
+                conn = None
+                if attempt == 1:
+                    continue
+                current_app.logger.exception("Postgres caiu em POST /api/alteracoes/reports")
+                return jsonify(ok=False, error="Falha de conexão com o Postgres"), 503
+
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                current_app.logger.exception("Erro ao criar report")
+                return jsonify(ok=False, error=str(e)), 500
+
+            finally:
+                _pg_putconn(pool, conn)
+                
     q = (request.args.get("q") or "").strip()
     show_feitos = (request.args.get("show_feitos") or "0").strip() in ("1", "true", "True")
 

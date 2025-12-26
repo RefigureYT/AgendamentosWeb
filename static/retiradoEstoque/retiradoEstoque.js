@@ -770,6 +770,178 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') fecharModalEquivalente(true);
 });
 
+// =====================================================
+// REPORT (somente UI por agora)
+// =====================================================
+let _reportContext = null;
+
+function _empresaNomeFromCode(code) {
+  const n = Number(code);
+  if (n === 1) return 'Jaú Pesca';
+  if (n === 2) return 'Jaú Fishing';
+  if (n === 3) return 'L.T. Sports';
+  return 'Nenhuma';
+}
+
+function abrirModalReport(role, skuTarget, skuOriginal = null, idProduto = '', ean = '') {
+  _reportContext = { role, skuTarget, skuOriginal: skuOriginal || skuTarget, idProduto, ean };
+
+  const infoAgend = document.getElementById('infoAgend')?.dataset || {};
+  const empresa = _empresaNomeFromCode(infoAgend.empresa);
+  const marketplace = (infoAgend.marketplace || '—').toString();
+
+  const nome = document.getElementById(`nome-${skuTarget}`)?.textContent?.trim() || '—';
+  const contexto = (role === 'original') ? 'Original' : 'Equivalente';
+
+  const m = document.getElementById('modal-report');
+  if (!m) {
+    console.warn('modal-report não encontrado no HTML');
+    return;
+  }
+
+  document.getElementById('report-empresa').textContent = empresa;
+  document.getElementById('report-marketplace').textContent = marketplace;
+
+  document.getElementById('report-id').textContent = (idProduto || '—');
+  document.getElementById('report-contexto').textContent = contexto;
+
+  document.getElementById('report-nome').textContent = nome;
+  document.getElementById('report-sku').textContent = skuTarget;
+  document.getElementById('report-ean').textContent = (ean && String(ean).trim()) ? String(ean).trim() : '—';
+
+  const tipoTiny = document.getElementById('report-tipo-tiny');
+  if (tipoTiny) {
+    tipoTiny.value = '';
+    tipoTiny.classList.remove('is-invalid');
+  }
+
+  const obs = document.getElementById('report-observacao');
+  if (obs) {
+    obs.value = '';
+    obs.classList.remove('is-invalid');
+  }
+
+  m.style.display = 'block';
+  m.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+  window.pauseAutoRefresh = true;
+
+  setTimeout(() => tipoTiny?.focus(), 50);
+}
+
+function fecharModalReport() {
+  const m = document.getElementById('modal-report');
+  if (!m) return;
+  m.style.display = 'none';
+  m.setAttribute('aria-hidden', 'true');
+
+  // se ainda existe algum modal aberto, mantém o body travado e o auto-refresh pausado
+  const modalEdit = document.getElementById('modal-editar-produto');
+  const modalEq = document.getElementById('modal-equivalente');
+  const algumModalAberto = (modalEdit?.style.display === 'block') || (modalEq?.style.display === 'block');
+
+  if (algumModalAberto) {
+    document.body.style.overflow = 'hidden';
+    window.pauseAutoRefresh = true;
+  } else {
+    document.body.style.overflow = '';
+    window.pauseAutoRefresh = false;
+  }
+
+  _reportContext = null;
+}
+
+async function enviarReport() {
+  const tipoTinyEl = document.getElementById('report-tipo-tiny');
+  const obsEl = document.getElementById('report-observacao');
+
+  const tipo = (tipoTinyEl?.value || '').trim();
+  const reportTxt = (obsEl?.value || '').trim();
+
+  // validações (iguais ao backend)
+  let ok = true;
+  if (!tipo) { tipoTinyEl?.classList.add('is-invalid'); ok = false; } else { tipoTinyEl?.classList.remove('is-invalid'); }
+  if (!reportTxt) { obsEl?.classList.add('is-invalid'); ok = false; } else { obsEl?.classList.remove('is-invalid'); }
+
+  if (!ok) {
+    notify.error('Preencha os campos obrigatórios.', { duration: 3000 });
+    return;
+  }
+
+  // coleta valores exibidos no modal
+  const empresa_label = (document.getElementById('report-empresa')?.textContent || '').trim();
+  const marketplace_label = (document.getElementById('report-marketplace')?.textContent || '').trim();
+  const etiqueta_id = (document.getElementById('report-id')?.textContent || '').trim(); // seu "ID"
+  const produto = (document.getElementById('report-nome')?.textContent || '').trim();
+  const sku = (document.getElementById('report-sku')?.textContent || '').trim();
+  const eanRaw = (document.getElementById('report-ean')?.textContent || '').trim();
+  const ean = (eanRaw === '—') ? '' : eanRaw;
+
+  // colaborador vem do dataset (mais confiável do que texto)
+  const colaborador = ((await whoAmI())?.nome_display_usuario || 'Não encontrado').trim();
+
+  // valida mínimos do lado do front (pra não mandar lixo)
+  if (!empresa_label || !marketplace_label || !etiqueta_id || !produto || !sku || !colaborador) {
+    notify.error('Faltando dados do report (empresa/marketplace/id/produto/sku/colaborador).', { duration: 4000 });
+    return;
+  }
+
+  const infoAgend = document.getElementById('infoAgend')?.dataset || {};
+  const id_emp = Number(infoAgend.empresa || 0);
+
+  const payload = {
+    id_emp, // <-- NOVO (NOT NULL no banco)
+    empresa_label,
+    marketplace_label,
+    etiqueta_id,
+    produto,
+    sku,
+    ean,
+    tipo,
+    report: reportTxt,
+    colaborador
+  };
+
+  // trava botão enquanto envia
+  const modal = document.getElementById('modal-report');
+  const btnEnviar = modal?.querySelector('button.btn.btn-primary, button.btn-primary, #btn-enviar-report');
+  const oldText = btnEnviar?.textContent;
+  if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.textContent = 'Enviando...'; }
+
+  try {
+    const resp = await fetch('/api/alteracoes/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok || !data.ok) {
+      const msg =
+        data?.error ||
+        (resp.status === 401 ? 'Não autenticado. Faça login novamente.' : `Erro ao enviar report (HTTP ${resp.status}).`);
+      notify.error(msg, { duration: 4500 });
+      return;
+    }
+
+    // sucesso
+    fecharModalReport();
+    notify.success('Report enviado', { duration: 3500 });
+
+  } catch (e) {
+    notify.error(`Falha de rede ao enviar report: ${e?.message || e}`, { duration: 4500 });
+  } finally {
+    if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.textContent = oldText || 'Enviar'; }
+  }
+}
+
+// Fecha report clicando fora
+window.addEventListener('click', (e) => {
+  const m = document.getElementById('modal-report');
+  if (e.target === m) fecharModalReport();
+});
 
 async function verificaAdicaoProdutoEquivalentePermitido(valorBipado) {
   const raw = document.getElementById("js-data").dataset.comps;
@@ -1543,7 +1715,7 @@ async function agendamentoFinalizadoChamarTransferencia(DEPOSITO_DESTINO = 82220
   const mktp = info.marketplace;
 
   // Definindo Usuário que fez a transferência
-  let user = ((await whoAmI())?.nome_display_usuario || "Indefinido");
+  let user = ((await whoAmI())?.nome_display_usuario || "Indefinido").trim();
 
   listaObjPrincipal = groupPkList(listaObjPrincipal);
 
@@ -2133,11 +2305,22 @@ async function editarProdutoCompLapis(sku) {
             <span id="sku-${sku}" class="badge">${sku}</span>
             <span id="tipo-${sku}" class="badge">Original</span>
           </div>
-          <div class="small" style="font-size:.85rem; color:#6b7280;">
-            Bipado: <strong id="bipado-${sku}">${totalBipadosOriginal}</strong> /
-            Total: <strong id="total-${sku}">${compTotal}</strong>
-            (<span id="percent-${sku}">${porcento}</span>%)
-          </div>
+            <div class="small" style="font-size:.85rem; color:#6b7280; display:flex; align-items:center; gap:8px;">
+              <button
+                type="button"
+                class="btn-report"
+                title="Reportar"
+                aria-label="Reportar"
+                onclick="abrirModalReport('original','${sku}','${sku}','${comp.id_tiny}','${comp.gtin || ''}')">
+                <i class="bi bi-flag-fill"></i>
+              </button>
+
+              <span>
+                Bipado: <strong id="bipado-${sku}">${totalBipadosOriginal}</strong> /
+                Total: <strong id="total-${sku}">${compTotal}</strong>
+                (<span id="percent-${sku}">${porcento}</span>%)
+              </span>
+            </div>
         </div>
 
         <div id="progressWrap-${sku}" class="progress"
@@ -2208,10 +2391,21 @@ async function editarProdutoCompLapis(sku) {
               <span id="sku-${p.sku_bipado}" class="badge">${p.sku_bipado}</span>
               <span id="tipo-${p.sku_bipado}" class="badge">Equivalente</span>
             </div>
-            <div class="small" style="font-size:.85rem; color:#6b7280;">
-              Bipado: <strong id="bipado-${p.sku_bipado}">${p.bipados}</strong> /
-              Total: <strong id="total-${p.sku_bipado}">${compTotal}</strong>
-              (<span id="percent-${p.sku_bipado}">${porcentoEquiv}</span>%)
+            <div class="small" style="font-size:.85rem; color:#6b7280; display:flex; align-items:center; gap:8px;">
+              <button
+                type="button"
+                class="btn-report"
+                title="Reportar"
+                aria-label="Reportar"
+                onclick="abrirModalReport('equivalente','${p.sku_bipado}','${sku}','${p.id_tiny_equivalente}','${p.gtin_bipado || p.gtin || ''}')">
+                <i class="bi bi-flag-fill"></i>
+              </button>
+
+              <span>
+                Bipado: <strong id="bipado-${p.sku_bipado}">${p.bipados}</strong> /
+                Total: <strong id="total-${p.sku_bipado}">${compTotal}</strong>
+                (<span id="percent-${p.sku_bipado}">${porcentoEquiv}</span>%)
+              </span>
             </div>
           </div>
 
@@ -2531,6 +2725,13 @@ window.addEventListener('click', (e) => {
 // Fecha com ESC
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+
+  const modalReport = document.getElementById('modal-report');
+  if (modalReport?.style.display === 'block') {
+    fecharModalReport();
+    return;
+  }
+
   const modalEq = document.getElementById('modal-equivalente');
   const modalEdit = document.getElementById('modal-editar-produto');
   if (modalEq?.style.display === 'block') fecharModalEquivalente(true);
