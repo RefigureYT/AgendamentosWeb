@@ -2556,30 +2556,54 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     atualizarPainelEsquerdo();
   }
 
-  let scanBusy = false; // trava simples contra double-enter
-  // ====== NOVO: adicionar item no volume (caixa OU pallet) ======
+  let scanBusy = false; // trava simples contra double-enter (usada dentro das funções de caixa/pallet)
+
+  // ====== NOVO: fila de bipagens (NÃO perde bip quando o operador bipa rápido) ======
+  let scanQueueCount = 0;
+  let scanChain = Promise.resolve();
+
+  function enqueueScan(taskFn) {
+    scanQueueCount++;
+
+    const run = () => Promise.resolve().then(taskFn);
+
+    const next = scanChain
+      .then(run, run)
+      .finally(() => {
+        scanQueueCount = Math.max(0, scanQueueCount - 1);
+      });
+
+    // garante que um erro não "quebra" a fila
+    scanChain = next.catch(() => { });
+
+    return next;
+  }
+
+  // ====== adicionar item no volume (caixa OU pallet) - agora enfileirado ======
   async function adicionarItemNoVolume(etiqueta) {
-    const caixaAberta =
-      caixaAtivaIndex !== -1 &&
-      caixas[caixaAtivaIndex] &&
-      !caixas[caixaAtivaIndex].fechada;
+    return enqueueScan(async () => {
+      const caixaAberta =
+        caixaAtivaIndex !== -1 &&
+        caixas[caixaAtivaIndex] &&
+        !caixas[caixaAtivaIndex].fechada;
 
-    const palletAberto =
-      palletAtivoIndex !== -1 &&
-      pallets[palletAtivoIndex] &&
-      !pallets[palletAtivoIndex].fechada;
+      const palletAberto =
+        palletAtivoIndex !== -1 &&
+        pallets[palletAtivoIndex] &&
+        !pallets[palletAtivoIndex].fechada;
 
-    if (!caixaAberta && !palletAberto) {
-      Swal.fire("Atenção", "Nenhuma caixa ou pallet aberto. Crie um volume antes.", "warning");
-      throw new Error("Nenhuma caixa ou pallet aberto.");
-    }
+      if (!caixaAberta && !palletAberto) {
+        Swal.fire("Atenção", "Nenhuma caixa ou pallet aberto. Crie um volume antes.", "warning");
+        throw new Error("Nenhuma caixa ou pallet aberto.");
+      }
 
-    if (caixaAberta) {
-      return adicionarItemNaCaixa(etiqueta);
-    }
+      if (caixaAberta) {
+        return adicionarItemNaCaixa(etiqueta);
+      }
 
-    // se chegou aqui, é porque o pallet está aberto
-    return adicionarItemNoPallet(etiqueta);
+      // se chegou aqui, é porque o pallet está aberto
+      return adicionarItemNoPallet(etiqueta);
+    });
   }
 
   // ====== NOVO: adicionar item no PALLET (usando /api/embalar/caixa + /api/embalar/scan) ======
@@ -3118,6 +3142,11 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
 
   async function buscarDadosEmbalagem() {
     if (!idAgendMl) return;
+
+    // enquanto tem bipagem em andamento/na fila, evita puxar bipados
+    // (menos carga e menos chance de aumentar latência/timeout)
+    if (scanQueueCount > 0 || scanBusy) return;
+
     try {
       const data = await fetchJSON(`/api/embalar/bipados/${idAgendMl}`);
       data.forEach(item => atualizarStatusProduto(item.id_prod_ml, Number(item.bipados || 0)));
