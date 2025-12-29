@@ -364,68 +364,199 @@ class DatabaseController:
         sql = f"SELECT 1 FROM agendamento WHERE id_agend_ml = %s LIMIT 1"
         return bool(self.access.custom_select_query(sql, (ml_id,)))
 
-    def delete_agendamento_completo(self, id_agend_bd: int):
+    def delete_agendamento_completo(self, id_agend_bd: int) -> bool:
         """
-        Executa a exclusão em cascata de um agendamento e todos os seus dados associados.
-        A ordem das queries é fundamental para respeitar as chaves estrangeiras.
+        Exclusão COMPLETA e segura (transação única) de um agendamento e tudo que é
+        derivado dele nas tabelas do jp_bd.
+
+        Importante:
+        - id_agend_bd (INT) = agendamento.id_agend
+        - id_agend_ml (VARCHAR) = agendamento.id_agend_ml
+        - Tabelas agendamento_produto_bipagem* usam coluna chamada id_agend_ml, mas no dump ela é INT
+          e representa o id_agend_bd (não o VARCHAR do ML).
         """
-        
-        # Pega o id_agend_ml antes de excluir, para limpar tabelas que usam ele
-        id_ml_result = self.access.custom_select_query("SELECT id_agend_ml FROM agendamento WHERE id_agend = %s;", (id_agend_bd,))
-        id_agend_ml = id_ml_result[0][0] if id_ml_result else None
 
-        # Lista de produtos associados ao agendamento
-        produtos_result = self.access.custom_select_query("SELECT id_prod FROM produtos_agend WHERE id_agend_prod = %s;", (id_agend_bd,))
-        id_produtos = tuple([row[0] for row in produtos_result])
+        if not self.access:
+            raise RuntimeError("Access não configurado no DatabaseController.")
 
-        # # --- INÍCIO DA CORREÇÃO ---
-        # if id_produtos:
-        #     # Cria a string de placeholders, ex: "(%s, %s, %s)"
-        #     placeholders = ', '.join(['%s'] * len(id_produtos))
+        con = getattr(self.access, "con", None)
+        if not con:
+            raise RuntimeError("Conexão (self.access.con) não disponível para transação segura.")
 
-        #     # 1. Limpa tabelas de logs/tracking usando a nova query formatada
-        #     #    Limpa tabelas filhas que dependem dos produtos
-        #     query_alteracoes = f"DELETE FROM alteracoes_agend WHERE id_prod_alt IN ({placeholders})"
-        #     # O método custom_i_u_query espera uma lista de tuplas, então passamos [id_produtos]
-        #     self.access.custom_i_u_query(query_alteracoes, [id_produtos])
+        con.start_con()
+        db = con.db
+        cur = con.cursor
 
-        #     query_compras = f"DELETE FROM compras_agend WHERE id_prod_compra IN ({placeholders})"
-        #     self.access.custom_i_u_query(query_compras, [id_produtos])
-            
-        #     # 2. Limpa as composições dos produtos
-        #     query_composicoes = f"DELETE FROM comp_agend WHERE id_prod_comp IN ({placeholders})"
-        #     self.access.custom_i_u_query(query_composicoes, [id_produtos])
+        try:
+            # Transação única (sem commits parciais)
+            db.start_transaction()
 
-        #     # 4. Limpa os produtos do agendamento (este DELETE estava correto, mas movemos para o final do bloco)
-        #     self.access.custom_i_u_query("DELETE FROM produtos_agend WHERE id_agend_prod = %s;", [(id_agend_bd,)])
-        # # --- FIM DA CORREÇÃO ---
+            # Lock do agendamento alvo para evitar corrida enquanto deleta
+            cur.execute(
+                "SELECT id_agend_ml FROM agendamento WHERE id_agend = %s FOR UPDATE;",
+                (id_agend_bd,)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Agendamento (id_agend={id_agend_bd}) não encontrado.")
 
+            id_agend_ml = row[0]
 
-        # if id_agend_ml:
-        #     # 3. Limpa tabelas que usam o id_agend_ml (esta parte já estava correta)
-        #     self.access.custom_i_u_query("DELETE FROM agendamento_produto_bipagem WHERE id_agend_ml = %s;", [(id_agend_ml,)])
-        #     self.access.custom_i_u_query("DELETE FROM relatorio_agend WHERE id_agend_ml = %s;", [(id_agend_ml,)])
-        
-        # # 5. Finalmente, exclui o agendamento principal (esta parte já estava correta)
-        # self.access.custom_i_u_query("DELETE FROM agendamento WHERE id_agend = %s;", [(id_agend_bd,)])
-        
-        # return True
-        
-        # LÓGICA CORRIGIDA APLICADA
-        if id_produtos:
-            placeholders = ', '.join(['%s'] * len(id_produtos))
-            self.access.custom_i_u_query(f"DELETE FROM alteracoes_agend WHERE id_prod_alt IN ({placeholders})", [id_produtos])
-            self.access.custom_i_u_query(f"DELETE FROM compras_agend WHERE id_prod_compra IN ({placeholders})", [id_produtos])
-            self.access.custom_i_u_query(f"DELETE FROM comp_agend WHERE id_prod_comp IN ({placeholders})", [id_produtos])
-            self.access.custom_i_u_query("DELETE FROM produtos_agend WHERE id_agend_prod = %s;", [(id_agend_bd,)])
+            # ==========================================================
+            # 1) Tabelas que dependem do id_agend_bd (INT)
+            # ==========================================================
 
-        if id_agend_ml:
-            self.access.custom_i_u_query("DELETE FROM agendamento_produto_bipagem WHERE id_agend_ml = %s;", [(id_agend_ml,)])
-            self.access.custom_i_u_query("DELETE FROM relatorio_agend WHERE id_agend_ml = %s;", [(id_agend_ml,)])
-        
-        self.access.custom_i_u_query("DELETE FROM agendamento WHERE id_agend = %s;", [(id_agend_bd,)])
-        
-        return True
+            # (a) bipagem / equivalentes (coluna id_agend_ml = INT no dump, na prática é id_agend_bd)
+            cur.execute("DELETE FROM agendamento_produto_bipagem_equivalentes WHERE id_agend_ml = %s;", (id_agend_bd,))
+            cur.execute("DELETE FROM agendamento_produto_bipagem WHERE id_agend_ml = %s;", (id_agend_bd,))
+
+            # (b) sistema antigo de caixas (se existir no seu ambiente)
+            # apaga itens das caixas daquele agendamento
+            cur.execute(
+                """
+                DELETE ci
+                FROM caixa_itens ci
+                JOIN caixas c ON c.id = ci.caixa_id
+                WHERE c.agendamento_id = %s;
+                """,
+                (id_agend_bd,)
+            )
+            # apaga as caixas do agendamento
+            cur.execute("DELETE FROM caixas WHERE agendamento_id = %s;", (id_agend_bd,))
+
+            # ==========================================================
+            # 2) Tabelas que dependem do id_agend_ml (VARCHAR)
+            # ==========================================================
+            if id_agend_ml:
+                # expedição / embalagem
+                cur.execute("DELETE FROM expedicao_caixas_bipadas WHERE id_agend_ml = %s;", (id_agend_ml,))
+                cur.execute("DELETE FROM embalagem_bipados WHERE id_agend_ml = %s;", (id_agend_ml,))
+
+                # pallets (itens -> pallets)
+                cur.execute("DELETE FROM embalagem_pallet_itens WHERE id_agend_ml = %s;", (id_agend_ml,))
+                cur.execute("DELETE FROM embalagem_pallets WHERE id_agend_ml = %s;", (id_agend_ml,))
+
+                # caixas (itens -> caixas)
+                # (mesmo que exista FK com CASCADE, deletar itens antes deixa robusto)
+                cur.execute("DELETE FROM embalagem_caixa_itens WHERE id_agend_ml = %s;", (id_agend_ml,))
+                cur.execute("DELETE FROM embalagem_caixas WHERE id_agend_ml = %s;", (id_agend_ml,))
+
+                # relatório do agendamento
+                cur.execute("DELETE FROM relatorio_agend WHERE id_agend_ml = %s;", (id_agend_ml,))
+
+            # JSON do agendamento (usa os dois em ambientes diferentes)
+            cur.execute(
+                "DELETE FROM agendamento_json WHERE id_agend = %s OR id_agend_ml = %s;",
+                (id_agend_bd, id_agend_ml)
+            )
+
+            # ==========================================================
+            # 2.1) Equivalências (confirmado: 100% por agendamento)
+            # - Faz checagens para não quebrar em ambientes com schema diferente
+            # ==========================================================
+            def _table_exists(table_name: str) -> bool:
+                # MySQL: checa no schema atual
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = DATABASE()
+                      AND table_name = %s
+                    LIMIT 1;
+                    """,
+                    (table_name,)
+                )
+                return cur.fetchone() is not None
+
+            def _has_col(table_name: str, col_name: str) -> bool:
+                # MySQL: checa no schema atual
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = DATABASE()
+                      AND table_name = %s
+                      AND column_name = %s
+                    LIMIT 1;
+                    """,
+                    (table_name, col_name)
+                )
+                return cur.fetchone() is not None
+
+            if _table_exists("equivalencias_produtos"):
+                conds = []
+                params = []
+
+                if _has_col("equivalencias_produtos", "id_agend"):
+                    conds.append("id_agend = %s")
+                    params.append(id_agend_bd)
+
+                if id_agend_ml and _has_col("equivalencias_produtos", "id_agend_ml"):
+                    conds.append("id_agend_ml = %s")
+                    params.append(id_agend_ml)
+
+                # Só executa se achou pelo menos uma coluna válida
+                if conds:
+                    cur.execute(
+                        f"DELETE FROM equivalencias_produtos WHERE {' OR '.join(conds)};",
+                        tuple(params)
+                    )
+
+            # ==========================================================
+            # 3) Histórico / comps / produtos (via JOIN para não estourar IN)
+            # ==========================================================
+            cur.execute(
+                """
+                DELETE al
+                FROM alteracoes_agend al
+                JOIN produtos_agend p ON p.id_prod = al.id_prod_alt
+                WHERE p.id_agend_prod = %s;
+                """,
+                (id_agend_bd,)
+            )
+
+            cur.execute(
+                """
+                DELETE ca
+                FROM compras_agend ca
+                JOIN produtos_agend p ON p.id_prod = ca.id_prod_compra
+                WHERE p.id_agend_prod = %s;
+                """,
+                (id_agend_bd,)
+            )
+
+            cur.execute(
+                """
+                DELETE c
+                FROM comp_agend c
+                JOIN produtos_agend p ON p.id_prod = c.id_prod_comp
+                WHERE p.id_agend_prod = %s;
+                """,
+                (id_agend_bd,)
+            )
+
+            cur.execute("DELETE FROM produtos_agend WHERE id_agend_prod = %s;", (id_agend_bd,))
+
+            # ==========================================================
+            # 4) Por último: agendamento
+            # ==========================================================
+            cur.execute("DELETE FROM agendamento WHERE id_agend = %s;", (id_agend_bd,))
+
+            db.commit()
+            return True
+
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            raise
+
+        finally:
+            try:
+                con.close_con()
+            except Exception:
+                pass
     
     def update_expedicao_inicio(self, id_agend_bd: int):
         if not self.access:
