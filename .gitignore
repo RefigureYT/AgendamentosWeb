@@ -25,3 +25,6 @@ mapa_visual.txt
 # Mapa MUITO ANTIGO (manual)
 tree_agend_content.ini.bkp
 tree_agend.ini.bkp
+
+# Variáveis de ambiente
+.env

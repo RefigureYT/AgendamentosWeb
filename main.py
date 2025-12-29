@@ -8,9 +8,14 @@ from base_jp_lab import Access, Caller
 from classes import AgendamentoController, DatabaseController
 from flask_cors import CORS
 import pandas as pd
+import os
+from datetime import timedelta
 from exceptions import ParametroInvalido, MetodoInvalido, LimiteRequests, ArquivoInvalido
 # Remova SocketIO se não for usar agora:
 # from flask_socketio import SocketIO, join_room, emit
+
+from dotenv import load_dotenv
+load_dotenv()
 
 ## Configuração de desenvolvimento e produção
 DEBUG=True  # Mude para False em produção
@@ -27,7 +32,23 @@ ALLOWED_EXTENSIONS = {"pdf", "csv", "xlsx"}
 app = Flask(__name__)
 CORS(app)
 
-app.secret_key = "test_key"  # TODO: mover para variável de ambiente
+# ✅ Secret + nome do cookie por ambiente (DEV vs PROD)
+if DEBUG:
+    app.secret_key = (os.getenv("AGW_SECRET_KEY_DEV") or "dev_test_key_change_me")
+    session_cookie_name = os.getenv("AGW_SESSION_COOKIE_NAME_DEV", "agw_session_dev_agendamentosweb_v1")
+else:
+    app.secret_key = (os.getenv("AGW_SECRET_KEY_PROD") or "prod_test_key_change_me")
+    session_cookie_name = os.getenv("AGW_SESSION_COOKIE_NAME_PROD", "agw_session_prod_agendamentosweb_v1")
+
+app.config.update(
+    SESSION_COOKIE_NAME=session_cookie_name,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=(not DEBUG),  # em prod (https) True
+    SESSION_COOKIE_PATH="/",
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+)
+
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 app.config["PG_POOL"] = ThreadedConnectionPool(
@@ -44,18 +65,27 @@ PG_POOL = app.config["PG_POOL"]
 # -------------------------------
 @app.before_request
 def require_login():
-    # libera apenas login, estáticos e nossas APIs REST de bipagem
     open_endpoints = {
-        'auth.login',               # rota de login
-        'static',                   # arquivos estáticos
-        'retirado.api_bipar',       # POST /api/bipar
-        'retirado.api_bipados_agend',  # GET /api/bipados/<id_agend>
-        'health_check',              # rota de health check
+        'auth.login',
+        'static',
+        'retirado.api_bipar',
+        'retirado.api_bipados_agend',
+        'health_check',
         'healthz'
     }
+
     ep = flask_request.endpoint or ''
+    path = flask_request.path or ''
+
     if ep not in open_endpoints and 'id_usuario' not in flask_session:
+        path = flask_request.path or ""
+
+        # ✅ API não redireciona (evita 200 com HTML do login em fetch)
+        if path.startswith("/api/"):
+            return jsonify(ok=False, error="Não autenticado"), 401
+
         return flask_redirect(flask_url_for('auth.login'))
+
 # -------------------------------
 
 # 1) conexão DB (mantenho como está; ideal: ler de env)

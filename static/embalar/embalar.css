@@ -823,3 +823,131 @@ body {
 }
 
 /* ===================== */
+
+/* ==========================================================
+   MODO REPORT (Embalar)
+   ========================================================== */
+
+/* 5) mata scrollbar horizontal e evita “pulo” */
+#lista-anuncios {
+  overflow-x: hidden !important;
+}
+#window-right {
+  overflow-x: hidden !important;
+}
+#lista-anuncios li.produto-item {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* 1) botão visível no header azul (antes de clicar) */
+.btn-report-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+
+  /* contraste no azul */
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  color: #ffffff;
+
+  cursor: pointer;
+  transition: background-color .12s ease, transform .12s ease, color .12s ease, border-color .12s ease;
+}
+.btn-report-mode:hover {
+  background: rgba(255, 255, 255, 0.32);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+.btn-report-mode:active { transform: translateY(1px); }
+.btn-report-mode:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 2px;
+}
+.btn-report-mode .icon-x { display: none; }
+
+.btn-report-mode.is-active {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #fff;
+}
+.btn-report-mode.is-active:hover { background: #b91c1c; }
+.btn-report-mode.is-active .icon-flag { display: none; }
+.btn-report-mode.is-active .icon-x { display: inline-block; }
+
+/* 2) flutuar APENAS no hover (sem scale pra não gerar scroll embaixo) */
+@keyframes reportHoverFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
+}
+
+#lista-anuncios li.produto-item.report-mode-item {
+  background: #fffafa !important;
+  border-color: #e5e1e1 !important;
+
+  cursor: pointer;
+  user-select: none;
+
+  /* 4) garante texto preto mesmo se o item era “concluído” (branco no verde) */
+  color: #0f172a !important;
+
+  /* 5) mantém estável: nada de animation/scale parado */
+  transform: none;
+  animation: none;
+
+  transition: background-color .12s ease, transform .12s ease, box-shadow .12s ease, border-color .12s ease, color .12s ease;
+}
+
+/* 4) força filhos a ficarem pretos também (título, sku, unidades, ícones) */
+#lista-anuncios li.produto-item.report-mode-item * {
+  color: #0f172a !important;
+}
+
+/* Esconde o ícone de concluído (check) no modo report */
+#lista-anuncios li.produto-item.report-mode-item.produto-concluido .produto-info i.bi-check-circle-fill {
+  display: none !important;
+}
+
+/* Garante o texto principal preto (casos onde estava forçado branco no concluído) */
+#lista-anuncios li.produto-item.report-mode-item .produto-info {
+  color: #0f172a !important;
+}
+#lista-anuncios li.produto-item.report-mode-item .produto-info * {
+  color: #0f172a !important;
+}
+
+#lista-anuncios li.produto-item.report-mode-item:hover {
+  background: #e5e1e1 !important;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .12);
+
+  /* flutua só no hover */
+  animation: reportHoverFloat 900ms ease-in-out infinite;
+}
+
+#lista-anuncios li.produto-item.report-mode-item:active {
+  transform: translateY(1px);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .10);
+}
+
+/* 3) produto-meta some o tempo TODO no modo report */
+#lista-anuncios li.produto-item.report-mode-item .produto-meta {
+  display: none !important;
+}
+
+/* 4) mesmo concluído: fundo claro + texto preto */
+#lista-anuncios li.produto-item.report-mode-item.produto-concluido {
+  background: #fffafa !important;
+  color: #0f172a !important;
+}
+
+/* Modal report: detalhe visual leve */
+#modalReport .modal-title {
+  color: #b91c1c;
+}
+#modalReport #report-observacao {
+  border-radius: 12px;
+  resize: vertical;
+  min-height: 110px;
+}

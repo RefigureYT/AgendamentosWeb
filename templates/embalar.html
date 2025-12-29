@@ -10,32 +10,47 @@
 
 <br>
 <div class="container">
+  {% set empresa_map = {0:"Nenhuma", 1:"Jaú Pesca", 2:"Jaú Fishing", 3:"L.T. Sports"} %}
+  {% set marketplace_map = {1:"Mercado Livre", 2:"Magalu", 3:"Shopee", 4:"Amazon"} %}
+  {% set empresa_nome = empresa_map.get(dados_agend.empresa, "Nenhuma") %}
+  {% set marketplace_nome = marketplace_map.get(dados_agend.id_mktp, "Nenhuma") %}
+
   <div class="header-bar mb-3 p-3 rounded"
        data-id-ml="{{ dados_agend.id_agend_ml }}"
        data-id-bd="{{ dados_agend.id_bd }}"
        data-empresa="{{ dados_agend.empresa }}"
+       data-empresa-label="{{ empresa_nome }}"
        data-id-mktp="{{ dados_agend.id_mktp }}"
+       data-marketplace-label="{{ marketplace_nome }}"
        data-centro="{{ dados_agend.centro_distribuicao or '' }}">
     <h5 class="mb-2">Embalagem</h5>
     <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
-      <div><strong>Empresa:</strong>
-        {% if dados_agend.empresa == 0 %}Nenhuma
-        {% elif dados_agend.empresa == 1 %}Jaú Pesca
-        {% elif dados_agend.empresa == 2 %}Jaú Fishing
-        {% elif dados_agend.empresa == 3 %}L.T. Sports
-        {% endif %}
-      </div>
+      <div><strong>Empresa:</strong> {{ empresa_nome }}</div>
       <div><strong>Agendamento:</strong> {{ dados_agend.id_agend_ml }}</div>
       <div><strong>Colaborador:</strong> {{ dados_agend.colaborador or 'Nenhum' }}</div>
       {% set data = dados_agend.entrada %}
       <div><strong>Data:</strong> {{ data.strftime('%d/%m/%y') }}</div>
       <div><strong>Hora:</strong> {{ data.strftime('%Hh%M') }}</div>
       <div><strong>Centro:</strong> {{ dados_agend.centro_distribuicao }}</div>
-      <div>
-        <strong>Bipados: </strong>
-        <span id="bipados-contabilizador">0</span>
-        /
-        <span id="bipados-total">0</span>
+      <div class="d-flex align-items-center gap-2">
+        <div class="me-1">
+          <strong>Bipados: </strong>
+          <span id="bipados-contabilizador">0</span>
+          /
+          <span id="bipados-total">0</span>
+        </div>
+
+        <button
+          id="btn-report-mode"
+          type="button"
+          class="btn-report-mode"
+          aria-pressed="false"
+          title="Entrar no modo Report"
+          aria-label="Modo Report"
+        >
+          <i class="bi bi-flag-fill icon-flag" aria-hidden="true"></i>
+          <i class="bi bi-x-lg icon-x" aria-hidden="true"></i>
+        </button>
       </div>
 
     </div>
@@ -447,6 +462,84 @@
     </div>
   </div>
 </div>
+
+  <!-- Modal: Report (Modo Report - Embalar) -->
+  <div class="modal fade" id="modalReport" tabindex="-1" aria-labelledby="tituloModalReport" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="tituloModalReport">
+            <span class="me-2">🚩</span> Reportar anúncio/produto
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="border rounded p-3 bg-light">
+            <div class="row g-2">
+              <div class="col-12 col-md-6">
+                <small class="text-muted">Empresa</small>
+                <div class="fw-semibold" id="report-empresa">—</div>
+              </div>
+              <div class="col-12 col-md-6">
+                <small class="text-muted">Marketplace</small>
+                <div class="fw-semibold" id="report-marketplace">—</div>
+              </div>
+
+              <div class="col-12 col-md-4">
+                <small class="text-muted">Etiqueta/ID</small>
+                <div class="fw-semibold" id="report-id">—</div>
+              </div>
+              <div class="col-12 col-md-4">
+                <small class="text-muted">Contexto</small>
+                <div class="fw-semibold" id="report-contexto">—</div>
+              </div>
+              <div class="col-12 col-md-4">
+                <small class="text-muted">EAN</small>
+                <div class="fw-semibold" id="report-ean">—</div>
+              </div>
+
+              <div class="col-12">
+                <small class="text-muted">Produto</small>
+                <div class="fw-semibold" id="report-nome">—</div>
+              </div>
+              <div class="col-12 col-md-6">
+                <small class="text-muted">SKU</small>
+                <div class="fw-semibold" id="report-sku">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <label for="report-tipo-tiny" class="form-label">Tipo (Tiny) *</label>
+            <select id="report-tipo-tiny" class="form-select">
+              <option value="">Selecione...</option>
+              <option value="SIMPLES">SIMPLES</option>
+              <option value="KIT">KIT</option>
+              <option value="PAI">PAI</option>
+              <option value="ANUNCIO">ANÚNCIO</option>
+            </select>
+            <div class="invalid-feedback">Selecione o tipo.</div>
+          </div>
+
+          <div class="mt-3">
+            <label for="report-observacao" class="form-label">Report *</label>
+            <textarea id="report-observacao" class="form-control" rows="5" placeholder="Descreva o problema..."></textarea>
+            <div class="invalid-feedback">Descreva o report.</div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            Cancelar
+          </button>
+          <button type="button" class="btn btn-primary" id="btnEnviarReport">
+            Enviar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 <!-- Dados para JS -->
 <div 

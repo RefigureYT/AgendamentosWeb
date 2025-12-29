@@ -155,15 +155,26 @@ def api_alteracoes_reports_list():
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
 
+        # created_by vem do login (mais seguro do que aceitar do front)
+        try:
+            created_by = int(session.get("id_usuario"))
+        except Exception:
+            return jsonify(ok=False, error="Sessão inválida (id_usuario)."), 401
+
         empresa_label = (data.get("empresa_label") or "").strip()
-        
+
         # id_emp é NOT NULL na tabela
         id_emp_raw = data.get("id_emp", None)
 
         # fallback: tenta inferir pelo label (caso o front não mande)
         if id_emp_raw is None:
             emp_norm = (empresa_label or "").strip().lower()
-            emp_norm = emp_norm.replace("á", "a").replace("ã", "a").replace("â", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("õ", "o").replace("ú", "u").replace("ç", "c")
+            emp_norm = (
+                emp_norm.replace("á", "a").replace("ã", "a").replace("â", "a")
+                        .replace("é", "e").replace("í", "i")
+                        .replace("ó", "o").replace("õ", "o")
+                        .replace("ú", "u").replace("ç", "c")
+            )
             if "jau pesca" in emp_norm:
                 id_emp_raw = 1
             elif "jau fishing" in emp_norm:
@@ -176,8 +187,15 @@ def api_alteracoes_reports_list():
         except Exception:
             return jsonify(ok=False, error='Campo "id_emp" é obrigatório e deve ser numérico.'), 400
 
+        # id_mktp (VOCÊ ESTAVA IGNORANDO NO INSERT)
+        id_mktp_raw = data.get("id_mktp", None)
+        try:
+            id_mktp = int(id_mktp_raw)
+        except Exception:
+            return jsonify(ok=False, error='Campo "id_mktp" é obrigatório e deve ser numérico.'), 400
+
         marketplace_label = (data.get("marketplace_label") or "").strip()
-        etiqueta_id = (data.get("etiqueta_id") or "").strip()  # aqui você está usando como "ID" do produto reportado
+        etiqueta_id = (data.get("etiqueta_id") or "").strip()
         produto = (data.get("produto") or "").strip()
         sku = (data.get("sku") or "").strip()
         ean = (data.get("ean") or "").strip()
@@ -216,7 +234,9 @@ def api_alteracoes_reports_list():
                         INSERT INTO {TBL_REPORTS} (
                           created_at,
                           sandbox,
+                          created_by,
                           id_emp,
+                          id_mktp,
                           empresa_label,
                           marketplace_label,
                           etiqueta_id,
@@ -230,16 +250,22 @@ def api_alteracoes_reports_list():
                           feito
                         )
                         VALUES (
-                        NOW(),
-                        %s,
-                        %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        '',
-                        false
+                          NOW(),
+                          %s,
+                          %s,
+                          %s,
+                          %s,
+                          %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                          '',
+                          false
                         )
                         RETURNING
                           id,
                           created_at,
+                          sandbox,
+                          created_by,
+                          id_emp,
+                          id_mktp,
                           empresa_label,
                           marketplace_label,
                           etiqueta_id,
@@ -254,7 +280,9 @@ def api_alteracoes_reports_list():
                         """,
                         (
                             get_sandbox(),
+                            created_by,
                             id_emp,
+                            id_mktp,
                             empresa_label,
                             marketplace_label,
                             etiqueta_id,
@@ -288,7 +316,10 @@ def api_alteracoes_reports_list():
 
             finally:
                 _pg_putconn(pool, conn)
-                
+
+    # ======================================================
+    # GET - LISTAR REPORTS
+    # ======================================================
     q = (request.args.get("q") or "").strip()
     show_feitos = (request.args.get("show_feitos") or "0").strip() in ("1", "true", "True")
 
@@ -296,11 +327,9 @@ def api_alteracoes_reports_list():
     params = [get_sandbox()]
 
     if show_feitos:
-        # Mostrar somente FEITO e ENGANO (não trazer pendentes junto)
         where.append("(feito = true OR COALESCE(obs, '') ILIKE %s)")
         params.append("ENGANO:%")
     else:
-        # Mostrar somente PENDENTE (exclui ENGANO)
         where.append("feito = false")
         where.append("COALESCE(obs, '') NOT ILIKE %s")
         params.append("ENGANO:%")
@@ -335,6 +364,10 @@ def api_alteracoes_reports_list():
                     SELECT
                       id,
                       created_at,
+                      sandbox,
+                      created_by,
+                      id_emp,
+                      id_mktp,
                       empresa_label,
                       marketplace_label,
                       etiqueta_id,
@@ -394,13 +427,11 @@ def api_alteracoes_reports_update(report_id: int):
         if acao == "engano" and not obs:
             return jsonify(ok=False, error='Para "engano" a observação é obrigatória'), 400
 
-        # "corrigido" sempre vira feito=True
         if acao == "corrigido":
             feito = True
             if not obs:
                 obs = "CORRIGIDO."
 
-        # prefixa para ficar claro no histórico, sem criar coluna extra
         prefix = "CORRIGIDO: " if acao == "corrigido" else "ENGANO: "
         if obs and not obs.upper().startswith(("CORRIGIDO:", "ENGANO:")):
             obs = prefix + obs
@@ -420,6 +451,10 @@ def api_alteracoes_reports_update(report_id: int):
                     RETURNING
                       id,
                       created_at,
+                      sandbox,
+                      created_by,
+                      id_emp,
+                      id_mktp,
                       empresa_label,
                       marketplace_label,
                       etiqueta_id,

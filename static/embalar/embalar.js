@@ -1091,6 +1091,268 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   const contadorFinalizadosEl = document.getElementById("finalizadosP");
   const listaPrincipalEl = document.getElementById("lista-anuncios");
 
+  // ==========================================================
+  // MODO REPORT (Embalar)
+  // ==========================================================
+  const btnReportMode = document.getElementById("btn-report-mode");
+  const headerBarEl = document.querySelector(".header-bar");
+
+  const modalReportEl = document.getElementById("modalReport");
+  const modalReport = modalReportEl
+    ? bootstrap.Modal.getOrCreateInstance(modalReportEl, { backdrop: "static", keyboard: true })
+    : null;
+
+  const reportDom = {
+    empresa: document.getElementById("report-empresa"),
+    marketplace: document.getElementById("report-marketplace"),
+    id: document.getElementById("report-id"),
+    contexto: document.getElementById("report-contexto"),
+    nome: document.getElementById("report-nome"),
+    sku: document.getElementById("report-sku"),
+    ean: document.getElementById("report-ean"),
+    tipo: document.getElementById("report-tipo-tiny"),
+    obs: document.getElementById("report-observacao"),
+    btnEnviar: document.getElementById("btnEnviarReport"),
+  };
+
+  let reportModeAtivo = false;
+
+  function _toast(icon, title, text = "", ms = 2600) {
+    if (window.Swal && Swal.fire) {
+      Swal.fire({
+        icon,
+        title,
+        text,
+        toast: true,
+        position: "top-end",
+        showConfirmButton: false,
+        timer: ms,
+        timerProgressBar: true,
+      });
+    } else {
+      alert(`${title}${text ? "\n" + text : ""}`);
+    }
+  }
+
+  function _headerData() {
+    const ds = headerBarEl?.dataset || {};
+    return {
+      id_emp: Number(ds.empresa || 0),
+      empresa_label: (ds.empresaLabel || "").toString().trim(),
+      id_mktp: Number(ds.idMktp || 0),
+      marketplace_label: (ds.marketplaceLabel || "").toString().trim(),
+      agendamento: (ds.idMl || "").toString().trim(), // data-id-ml = id_agend_ml
+    };
+  }
+
+  function _applyReportModeClasses() {
+    if (!listaPrincipalEl) return;
+
+    listaPrincipalEl.querySelectorAll("li.produto-item").forEach((li) => {
+      li.classList.toggle("report-mode-item", reportModeAtivo);
+
+      if (reportModeAtivo) {
+        li.setAttribute("role", "button");
+        li.tabIndex = 0;
+      } else {
+        li.removeAttribute("role");
+        li.removeAttribute("tabindex");
+      }
+    });
+  }
+
+  function _setReportMode(on) {
+    reportModeAtivo = !!on;
+
+    if (btnReportMode) {
+      btnReportMode.classList.toggle("is-active", reportModeAtivo);
+      btnReportMode.setAttribute("aria-pressed", reportModeAtivo ? "true" : "false");
+      btnReportMode.title = reportModeAtivo ? "Sair do modo Report" : "Entrar no modo Report";
+      btnReportMode.setAttribute("aria-label", btnReportMode.title);
+    }
+
+    _applyReportModeClasses();
+  }
+
+  function _resetReportForm() {
+    if (reportDom.tipo) {
+      reportDom.tipo.value = "";
+      reportDom.tipo.classList.remove("is-invalid");
+    }
+    if (reportDom.obs) {
+      reportDom.obs.value = "";
+      reportDom.obs.classList.remove("is-invalid");
+    }
+  }
+
+  function _openReportModalFromLi(li) {
+    if (!modalReportEl || !modalReport) {
+      _toast("error", "Modal de report não encontrado");
+      return;
+    }
+
+    const h = _headerData();
+
+    const sku = (li?.dataset?.originalSku || "").toString().trim();
+    const nome = (li?.dataset?.nome || "").toString().trim();
+    const idMl = (li?.dataset?.idMl || "").toString().trim();
+    const gtin = (li?.dataset?.gtin || "").toString().trim();
+
+    if (!sku || !idMl || !nome) {3
+      _toast("error", "Dados insuficientes", "SKU/ID/Nome não encontrados no item clicado.");
+      return;
+    }
+
+    if (reportDom.empresa) reportDom.empresa.textContent = h.empresa_label || "—";
+    if (reportDom.marketplace) reportDom.marketplace.textContent = h.marketplace_label || "—";
+    if (reportDom.id) reportDom.id.textContent = idMl || "—";
+    if (reportDom.contexto) reportDom.contexto.textContent = "Anúncio";
+    if (reportDom.nome) reportDom.nome.textContent = nome || "—";
+    if (reportDom.sku) reportDom.sku.textContent = sku || "—";
+    if (reportDom.ean) reportDom.ean.textContent = gtin || "—";
+
+    // guarda ids numéricos (pra enviar depois)
+    modalReportEl.dataset.idEmp = String(h.id_emp || 0);
+    modalReportEl.dataset.idMktp = String(h.id_mktp || 0);
+
+    _resetReportForm();
+    modalReport.show();
+    setTimeout(() => reportDom.tipo?.focus(), 150);
+  }
+
+  async function _whoAmI() {
+    try {
+      const r = await fetch("/api/me", { credentials: "same-origin" });
+      if (!r.ok) return null;
+      const j = await r.json().catch(() => null);
+      return j?.authenticated ? j.user : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function _enviarReport() {
+    const tipoTinyEl = reportDom.tipo;
+    const obsEl = reportDom.obs;
+
+    const tipo = (tipoTinyEl?.value || "").trim();
+    const reportTxt = (obsEl?.value || "").trim();
+
+    let ok = true;
+    if (!tipo) { tipoTinyEl?.classList.add("is-invalid"); ok = false; } else { tipoTinyEl?.classList.remove("is-invalid"); }
+    if (!reportTxt) { obsEl?.classList.add("is-invalid"); ok = false; } else { obsEl?.classList.remove("is-invalid"); }
+
+    if (!ok) {
+      _toast("warning", "Preencha os campos obrigatórios");
+      return;
+    }
+
+    const empresa_label = (reportDom.empresa?.textContent || "").trim();
+    const marketplace_label = (reportDom.marketplace?.textContent || "").trim();
+    const etiqueta_id = (reportDom.id?.textContent || "").trim();
+    const produto = (reportDom.nome?.textContent || "").trim();
+    const sku = (reportDom.sku?.textContent || "").trim();
+    const eanRaw = (reportDom.ean?.textContent || "").trim();
+    const ean = (eanRaw === "—") ? "" : eanRaw;
+
+    const id_emp = Number(modalReportEl?.dataset?.idEmp || 0);
+    const id_mktp = Number(modalReportEl?.dataset?.idMktp || 0);
+
+    const user = await _whoAmI();
+    const colaborador = (user?.nome_display_usuario || user?.nome_usuario || "").toString().trim();
+
+    if (!colaborador) {
+      _toast("error", "Não consegui identificar o colaborador", "Verifique se você está logado.");
+      return;
+    }
+
+    if (!id_emp || !id_mktp || !empresa_label || !marketplace_label || !etiqueta_id || !produto || !sku) {
+      _toast("error", "Faltando dados do report", "empresa/marketplace/id/produto/sku/id_emp/id_mktp.");
+      return;
+    }
+
+    const payload = {
+      id_emp,
+      id_mktp,
+      empresa_label,
+      marketplace_label,
+      etiqueta_id,
+      produto,
+      sku,
+      ean,
+      tipo: tipo.toUpperCase(),
+      report: reportTxt,
+      colaborador,
+    };
+
+    const btn = reportDom.btnEnviar;
+    const oldText = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = "Enviando..."; }
+
+    try {
+      const resp = await fetch("/api/alteracoes/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      const data = await resp.json().catch(() => ({}));
+
+      if (!resp.ok || !data.ok) {
+        const msg = data?.error || (resp.status === 401 ? "Não autenticado. Faça login novamente." : `Erro ao enviar report (HTTP ${resp.status}).`);
+        _toast("error", "Falha ao enviar", msg, 4500);
+        return;
+      }
+
+      modalReport.hide();
+      _toast("success", "Report enviado");
+    } catch (e) {
+      _toast("error", "Falha de rede", e?.message || String(e), 4500);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = oldText || "Enviar"; }
+    }
+  }
+
+  if (btnReportMode) {
+    btnReportMode.addEventListener("click", () => _setReportMode(!reportModeAtivo));
+  }
+
+  if (listaPrincipalEl) {
+    // CAPTURE: evita disparar ações normais do clique quando estiver no modo report
+    listaPrincipalEl.addEventListener("click", (ev) => {
+      if (!reportModeAtivo) return;
+      const li = ev.target.closest("li.produto-item");
+      if (!li || !listaPrincipalEl.contains(li)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      _openReportModalFromLi(li);
+    }, true);
+
+    listaPrincipalEl.addEventListener("keydown", (ev) => {
+      if (!reportModeAtivo) return;
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      const li = ev.target.closest("li.produto-item");
+      if (!li || !listaPrincipalEl.contains(li)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      _openReportModalFromLi(li);
+    }, true);
+
+    // Se a lista for re-renderizada, reaplica classes no modo report
+    const obs = new MutationObserver(() => {
+      if (reportModeAtivo) _applyReportModeClasses();
+    });
+    obs.observe(listaPrincipalEl, { childList: true });
+  }
+
+  if (reportDom.btnEnviar) {
+    reportDom.btnEnviar.addEventListener("click", _enviarReport);
+  }
+  if (modalReportEl) {
+    modalReportEl.addEventListener("hidden.bs.modal", _resetReportForm);
+  }
+
   // Delegação de clique para o botão de reabrir caixa
   if (caixasContainer) {
     caixasContainer.addEventListener("click", (ev) => {
@@ -1513,6 +1775,9 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     atualizarPainelEsquerdo();
   }
 
+  // ===================================================================
+  // LÓGICA DO MODAL DE CONFIRMAÇÃO DE ANÚNCIO
+  // ===================================================================
   function abrirModalConfirmacao(prod) {
     if (!prod) {
       console.error("Tentativa de abrir modal de confirmação sem um produto válido.");

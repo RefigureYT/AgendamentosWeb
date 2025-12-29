@@ -7,6 +7,29 @@ let tempoEstimadoSegundos = 0;
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
+/**
+ * Toast padrão (IGUAL ao Embalar) — SweetAlert2
+ * Ex: _toast('success', 'Report enviado')
+ */
+function _toast(type, message) {
+  const Toast = Swal.mixin({
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 2200,
+    timerProgressBar: true,
+    didOpen: (toast) => {
+      toast.addEventListener('mouseenter', Swal.stopTimer);
+      toast.addEventListener('mouseleave', Swal.resumeTimer);
+    }
+  });
+
+  Toast.fire({
+    icon: type,
+    title: message
+  });
+}
+
 // --- Helpers p/ imagem da composição (modal) ---
 const PLACEHOLDER_IMG = "/static/resources/sem_img.webp";
 const _compImageCache = new Map();
@@ -888,9 +911,11 @@ async function enviarReport() {
 
   const infoAgend = document.getElementById('infoAgend')?.dataset || {};
   const id_emp = Number(infoAgend.empresa || 0);
+  const id_mktp = parseInt(document.getElementById("infoAgend").dataset.empresa, 10);
 
   const payload = {
     id_emp, // <-- NOVO (NOT NULL no banco)
+    id_mktp,
     empresa_label,
     marketplace_label,
     etiqueta_id,
@@ -928,7 +953,7 @@ async function enviarReport() {
 
     // sucesso
     fecharModalReport();
-    notify.success('Report enviado', { duration: 3500 });
+    _toast('success', 'Report enviado');
 
   } catch (e) {
     notify.error(`Falha de rede ao enviar report: ${e?.message || e}`, { duration: 4500 });
@@ -2070,22 +2095,21 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
 (() => {
   const STATE = { ready: false, container: null, queue: [] };
 
-  // garante DOM pronto
   function onReady() {
     STATE.ready = true;
     STATE.container = ensureContainer();
-    // entrega toasts que chegaram antes do DOM
+
     for (const { msg, opts, resolve } of STATE.queue.splice(0)) {
       resolve(_notify(msg, opts));
     }
   }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', onReady, { once: true });
   } else {
     onReady();
   }
 
-  // cria ou reutiliza o container (.toast-container)
   function ensureContainer() {
     let el = document.querySelector('.toast-container');
     if (!el) {
@@ -2096,8 +2120,15 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
     return el;
   }
 
-  // cria a estrutura do toast e controla vida/animacoes
-  function _notify(message, { type = 'info', duration = 2000 } = {}) {
+  function iconHtml(type) {
+    // usa Bootstrap Icons (você já usa `bi`)
+    if (type === 'success') return '<i class="bi bi-check2" style="font-size:18px"></i>';
+    if (type === 'error') return '<i class="bi bi-x-lg" style="font-size:16px"></i>';
+    if (type === 'warning') return '<i class="bi bi-exclamation-lg" style="font-size:18px"></i>';
+    return '<i class="bi bi-info-lg" style="font-size:18px"></i>';
+  }
+
+  function _notify(message, { type = 'info', duration = 2200 } = {}) {
     const container = STATE.container || ensureContainer();
 
     const toast = document.createElement('div');
@@ -2105,31 +2136,38 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
     toast.setAttribute('role', 'status');
     toast.setAttribute('aria-live', 'polite');
 
+    const icon = document.createElement('div');
+    icon.className = 'toast__icon';
+    icon.innerHTML = iconHtml(type);
+
+    const msg = document.createElement('div');
+    msg.className = 'toast__message';
+    msg.textContent = String(message ?? '');
+
     const btnClose = document.createElement('button');
     btnClose.className = 'toast__close';
     btnClose.type = 'button';
     btnClose.setAttribute('aria-label', 'Fechar notificação');
     btnClose.textContent = '×';
 
-    const msg = document.createElement('div');
-    msg.className = 'toast__message';
-    msg.textContent = String(message ?? '');
-
     const progress = document.createElement('div');
     progress.className = 'toast__progress';
 
-    toast.appendChild(btnClose);
+    toast.appendChild(icon);
     toast.appendChild(msg);
+    toast.appendChild(btnClose);
     toast.appendChild(progress);
+
+    // no topo, o mais recente fica em cima
     container.prepend(toast);
 
-    // anima entrada
+    // anima entrada (igual vibe Embalar)
     requestAnimationFrame(() => {
       toast.style.opacity = '1';
       toast.style.transform = 'translateY(0)';
     });
 
-    // barra de progresso reversa controlada por JS (independe de @keyframes)
+    // progresso (de 100% -> 0%)
     let removed = false;
     let start = Date.now();
     let remaining = Math.max(0, duration);
@@ -2139,10 +2177,8 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
       progress.style.width = `${pct}%`;
     }
 
-    // estado inicial
     progress.style.transition = 'none';
     setProgressWidth(remaining);
-    // dispara transição -> 0%
     requestAnimationFrame(() => {
       progress.style.transition = `width ${remaining}ms linear`;
       setProgressWidth(0);
@@ -2151,21 +2187,20 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
     const remove = () => {
       if (removed) return;
       removed = true;
-      toast.style.transition = 'transform .18s ease, opacity .18s ease';
-      toast.style.transform = 'translateY(-6px)';
+      toast.style.transition = 'opacity .18s ease, transform .18s ease';
       toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-8px)';
       setTimeout(() => toast.remove(), 180);
     };
 
     let timer = setTimeout(remove, remaining);
 
-    // fechar manual
     btnClose.addEventListener('click', () => {
       clearTimeout(timer);
       remove();
     });
 
-    // pausar/resumir no hover
+    // pausar no hover (opcional, mas fica top)
     let paused = false;
     const pause = () => {
       if (paused || removed) return;
@@ -2173,8 +2208,6 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
       clearTimeout(timer);
       const elapsed = Date.now() - start;
       remaining = Math.max(0, remaining - elapsed);
-      // congela barra
-      const nowPct = (remaining / duration) * 100;
       progress.style.transition = 'none';
       setProgressWidth(remaining);
     };
@@ -2182,7 +2215,6 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
       if (!paused || removed) return;
       paused = false;
       start = Date.now();
-      // retoma transição do ponto atual
       requestAnimationFrame(() => {
         progress.style.transition = `width ${remaining}ms linear`;
         setProgressWidth(0);
@@ -2196,26 +2228,17 @@ async function transferirEstoque(id_deposito, id_prod, un_prod, tipo, token, obs
     return toast;
   }
 
-  // API pública: retorna o elemento do toast
   function notify(message, opts) {
     if (STATE.ready) return _notify(message, opts);
-    // se chamado antes do DOM, enfileira e devolve uma pseudo-promise de elemento
     return new Promise((resolve) => STATE.queue.push({ msg: message, opts, resolve }));
   }
 
-  // helpers
   notify.success = (m, o = {}) => notify(m, { ...o, type: 'success' });
   notify.error = (m, o = {}) => notify(m, { ...o, type: 'error' });
   notify.info = (m, o = {}) => notify(m, { ...o, type: 'info' });
   notify.warn = (m, o = {}) => notify(m, { ...o, type: 'warning' });
 
-  // expõe global
   window.notify = notify;
-
-  // notify('Operação concluída!');
-  // notify.success('Estoque transferido!', { duration: 3000 });
-  // notify.error('Saldo insuficiente para Saída.');
-  // notify('Processando...\nAguarde.', { type: 'info', duration: 5000 });
 })();
 
 async function editarProdutoCompLapis(sku) {

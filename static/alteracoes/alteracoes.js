@@ -73,19 +73,12 @@
     }
 
     function toastCopied() {
-        const div = document.createElement("div");
-        div.textContent = "Copiado!";
-        div.style.position = "fixed";
-        div.style.right = "18px";
-        div.style.bottom = "18px";
-        div.style.zIndex = "9999";
-        div.style.padding = "10px 12px";
-        div.style.borderRadius = "12px";
-        div.style.color = "#fff";
-        div.style.background = "rgba(0,0,0,0.85)";
-        div.style.fontWeight = "700";
-        document.body.appendChild(div);
-        setTimeout(() => div.remove(), 900);
+        if (window.notify && typeof window.notify.success === "function") {
+            window.notify.success("Copiado!");
+            return;
+        }
+        // fallback (caso o notify ainda não exista por algum motivo)
+        console.log("Copiado!");
     }
 
     async function copyText(text) {
@@ -349,5 +342,154 @@
         copyText(txt);
     });
 
-    document.addEventListener("DOMContentLoaded", reload);
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", reload);
+    } else {
+        reload();
+    }
+})();
+
+(() => {
+    // Só evita duplicar se já for o NOSSO toast
+    if (window.notify && window.notify.__jpToast) return;
+
+    const STATE = { queue: [], isShowing: false };
+
+    function getContainer() {
+        let el = document.querySelector(".jp-toast-container");
+        if (!el) {
+            el = document.createElement("div");
+            el.className = "jp-toast-container";
+            document.body.appendChild(el);
+        }
+        return el;
+    }
+
+    function iconHtml(type) {
+        switch (type) {
+            case "success": return `<i class="bi bi-check2-circle"></i>`;
+            case "error": return `<i class="bi bi-x-circle"></i>`;
+            case "warning": return `<i class="bi bi-exclamation-triangle"></i>`;
+            default: return `<i class="bi bi-info-circle"></i>`;
+        }
+    }
+
+    function makeToast({ type = "success", title = "", message = "", duration = 2200 }) {
+        const container = getContainer();
+
+        const toast = document.createElement("div");
+        toast.className = `jp-toast jp-toast--${type}`;
+        toast.innerHTML = `
+      <div class="jp-toast__left">
+        <div class="jp-toast__icon">${iconHtml(type)}</div>
+        <div class="jp-toast__content">
+          <div class="jp-toast__title"></div>
+          <div class="jp-toast__message" style="display:none;"></div>
+        </div>
+      </div>
+      <button class="jp-toast__close" type="button" aria-label="Fechar">
+        <i class="bi bi-x"></i>
+      </button>
+      <div class="jp-toast__progress"><span></span></div>
+    `;
+
+        const titleEl = toast.querySelector(".jp-toast__title");
+        const msgEl = toast.querySelector(".jp-toast__message");
+        const closeBtn = toast.querySelector(".jp-toast__close");
+        const barSpan = toast.querySelector(".jp-toast__progress span");
+
+        titleEl.textContent = title || message || "";
+        if (message && title) {
+            msgEl.style.display = "";
+            msgEl.textContent = message;
+        }
+
+        let start = performance.now();
+        let raf = null;
+        let pausedAt = null;
+        let remaining = duration;
+        let total = duration;
+
+        function setProgress(p) {
+            barSpan.style.transform = `scaleX(${Math.max(0, Math.min(1, p))})`;
+        }
+
+        function tick(now) {
+            const elapsed = now - start;
+            const p = 1 - (elapsed / total);
+            setProgress(p);
+
+            if (elapsed >= total) {
+                hide();
+                return;
+            }
+            raf = requestAnimationFrame(tick);
+        }
+
+        function show() {
+            container.appendChild(toast);
+            requestAnimationFrame(() => toast.classList.add("jp-toast--show"));
+            setProgress(1);
+            raf = requestAnimationFrame(tick);
+        }
+
+        function hide() {
+            if (raf) cancelAnimationFrame(raf);
+            toast.classList.remove("jp-toast--show");
+            toast.classList.add("jp-toast--hide");
+            setTimeout(() => {
+                toast.remove();
+                STATE.isShowing = false;
+                dequeue();
+            }, 220);
+        }
+
+        function pause() {
+            if (pausedAt != null) return;
+            pausedAt = performance.now();
+            if (raf) cancelAnimationFrame(raf);
+            const elapsed = pausedAt - start;
+            remaining = Math.max(0, total - elapsed);
+        }
+
+        function resume() {
+            if (pausedAt == null) return;
+            const now = performance.now();
+            total = remaining;
+            start = now;
+            pausedAt = null;
+            if (total <= 0) {
+                hide();
+                return;
+            }
+            raf = requestAnimationFrame(tick);
+        }
+
+        closeBtn.addEventListener("click", hide);
+        toast.addEventListener("mouseenter", pause);
+        toast.addEventListener("mouseleave", resume);
+
+        return { show, hide };
+    }
+
+    function enqueue(opts) {
+        STATE.queue.push(opts);
+        dequeue();
+    }
+
+    function dequeue() {
+        if (STATE.isShowing) return;
+        const next = STATE.queue.shift();
+        if (!next) return;
+        STATE.isShowing = true;
+        makeToast(next).show();
+    }
+
+    window.notify = {
+        __jpToast: true,
+        success: (msg, opts = {}) => enqueue({ type: "success", message: msg, ...opts }),
+        info: (msg, opts = {}) => enqueue({ type: "info", message: msg, ...opts }),
+        warning: (msg, opts = {}) => enqueue({ type: "warning", message: msg, ...opts }),
+        error: (msg, opts = {}) => enqueue({ type: "error", message: msg, ...opts }),
+    };
 })();

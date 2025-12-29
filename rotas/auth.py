@@ -55,6 +55,7 @@ def login():
     # Autenticação ok
     user_id, _, display_name, _, role = rows[0]
     session.clear()
+    session.permanent = True  # ✅ usa PERMANENT_SESSION_LIFETIME do main.py
     session['id_usuario']           = user_id
     session['nome_display_usuario'] = display_name
     session['role'] = role

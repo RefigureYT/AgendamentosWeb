@@ -291,34 +291,114 @@ body {
 }
 
 /* ===== Toasts ===== */
+/* =============== TOAST (estilo Embalar) =============== */
 .toast-container {
   position: fixed;
-  inset: auto 16px 16px auto;
-  /* bottom-right */
+
+  /* igual vibe do Embalar: abaixo do navbar e no topo-direita */
+  top: 86px;
+  right: 16px;
+
+  left: auto;
+  transform: none;
+
+  z-index: 99999;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 10px;
-  z-index: 9999;
+
   pointer-events: none;
-  /* só o toast recebe clique */
+  width: min(520px, calc(100vw - 24px));
+}
+
+/* no celular, ocupa a largura e não “estoura” */
+@media (max-width: 576px) {
+  .toast-container {
+    top: 74px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    align-items: stretch;
+  }
+  .toast {
+    width: 100%;
+  }
 }
 
 .toast {
   pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
   background: #fff;
-  color: #0f172a;
-  border: 1px solid #e5e7eb;
-  border-left: 6px solid var(--accent, #3b82f6);
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.15);
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 10px;
   padding: 12px 14px;
-  max-width: min(420px, calc(100vw - 40px));
-  width: fit-content;
-  font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+
+  box-shadow: 0 10px 20px rgba(0,0,0,.12);
+
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity .22s ease, transform .22s ease;
+
   position: relative;
   overflow: hidden;
 }
+
+.toast__icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.toast__message {
+  font-size: 13px;
+  line-height: 1.25;
+  color: inherit;
+  opacity: .95;
+}
+
+.toast__close {
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  padding: 6px 8px;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.toast__close:hover { background: rgba(15, 23, 42, .06); }
+
+.toast__progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  opacity: .9;
+}
+
+/* cores por tipo */
+.toast--success .toast__icon { background: rgba(34, 197, 94, .14); color: #16a34a; }
+.toast--success .toast__progress { background: #22c55e; }
+
+.toast--error .toast__icon { background: rgba(239, 68, 68, .14); color: #dc2626; }
+.toast--error .toast__progress { background: #ef4444; }
+
+.toast--info .toast__icon { background: rgba(59, 130, 246, .14); color: #2563eb; }
+.toast--info .toast__progress { background: #3b82f6; }
+
+.toast--warning .toast__icon { background: rgba(245, 158, 11, .18); color: #d97706; }
+.toast--warning .toast__progress { background: #f59e0b; }
+
+.produto-item.concluido .produto-info i.bi-check-circle-fill { display: none !important; }
+.produto-item.concluido .produto-info { color: #000 !important; }
 
 .toast--info {
   --accent: #3b82f6;
@@ -905,4 +985,8 @@ body {
 /* quando a confirmação estiver aberta, esconda os botões do rodapé */
 #modal-equivalente .modal-content.confirming .modal-actions {
   display: none;
+}
+
+.swal2-container {
+  z-index: 999999 !important;
 }
