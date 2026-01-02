@@ -9,6 +9,7 @@ from classes import AgendamentoController, DatabaseController
 from flask_cors import CORS
 import pandas as pd
 import os
+import threading
 from datetime import timedelta
 from exceptions import ParametroInvalido, MetodoInvalido, LimiteRequests, ArquivoInvalido
 # Remova SocketIO se não for usar agora:
@@ -21,7 +22,7 @@ except ModuleNotFoundError:
     pass
 
 ## Configuração de desenvolvimento e produção
-DEBUG=False  # Mude para False em produção
+DEBUG=True  # Mude para False em produção
 PORT= 44523 if DEBUG == True else 8345 # 8345 se produção
 ## FIM Configuração
 
@@ -54,11 +55,49 @@ app.config.update(
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
-app.config["PG_POOL"] = ThreadedConnectionPool(
-    minconn=1,
-    maxconn=10,
-    dsn=PG_DSN,
-)
+# -----------------------------------------------------------------------------
+# Postgres pool "lazy" (cria conexões só quando o worker realmente usar)
+# - Evita conexão pré-fork (uWSGI preload), que causa "server closed connection..."
+# - Ativa keepalive para reduzir conexões stales
+# -----------------------------------------------------------------------------
+_pg_pool_lock = threading.Lock()
+_pg_pool_real = None
+
+def _get_pg_pool_real():
+    global _pg_pool_real
+    if _pg_pool_real is not None:
+        return _pg_pool_real
+
+    with _pg_pool_lock:
+        if _pg_pool_real is None:
+            _pg_pool_real = ThreadedConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=PG_DSN,
+                connect_timeout=5,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
+                application_name="AgendamentosWeb",
+            )
+    return _pg_pool_real
+
+class LazyPGPool:
+    def getconn(self):
+        return _get_pg_pool_real().getconn()
+
+    def putconn(self, conn, close=False):
+        return _get_pg_pool_real().putconn(conn, close=close)
+
+    def closeall(self):
+        p = _get_pg_pool_real()
+        try:
+            p.closeall()
+        except Exception:
+            pass
+
+app.config["PG_POOL"] = LazyPGPool()
 
 # Exporta também como variável para outros módulos poderem importar direto
 PG_POOL = app.config["PG_POOL"]

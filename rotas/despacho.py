@@ -2,6 +2,9 @@ from flask import Blueprint, jsonify, request, render_template, current_app, ses
 from psycopg2.extras import RealDictCursor
 import psycopg2
 import re
+import time
+import random
+import uuid
 
 def _pg_discard(pool, conn) -> None:
     """Remove conexão quebrada do pool."""
@@ -28,6 +31,50 @@ def _pg_putconn(pool, conn) -> None:
         _pg_discard(pool, conn)
         return
     pool.putconn(conn)
+
+PG_MAX_RETRIES = 10
+PG_BASE_SLEEP = 0.05
+PG_MAX_SLEEP = 1.0
+
+def _pg_sleep_backoff(attempt: int) -> None:
+    # 0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.0...
+    delay = PG_BASE_SLEEP * (2 ** (attempt - 1))
+    if delay > PG_MAX_SLEEP:
+        delay = PG_MAX_SLEEP
+    # jitter leve pra evitar thundering herd
+    delay *= (0.8 + random.random() * 0.4)
+    time.sleep(delay)
+
+def _pg_select_all_with_retry(pool, sql: str, params=None, *, max_retries: int = PG_MAX_RETRIES):
+    last_exc = None
+
+    for attempt in range(1, max_retries + 1):
+        conn = None
+        handled = False
+
+        try:
+            conn = pool.getconn()
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, params)
+                return cur.fetchall() or []
+
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            last_exc = e
+            _pg_discard(pool, conn)  # descarta do pool
+            handled = True
+
+            if attempt >= max_retries:
+                raise
+
+            _pg_sleep_backoff(attempt)
+            continue
+
+        finally:
+            if conn and not handled:
+                _pg_putconn(pool, conn)
+
+    # segurança (não deve chegar aqui)
+    raise last_exc
 
 bp_despacho = Blueprint('despacho', __name__)
 
@@ -59,38 +106,25 @@ def _iso_row(row: dict) -> dict:
 def api_despacho_crossdocking_nfe():
     """
     POST /api/despacho/crossdocking/nfe
-    JSON esperado:
-      {
-        "id_mktp": <int>,
-        "chave_acesso_nfe": "44_digitos"
-      }
-
-    Insere em: agendamentosweb.despacho_crossdocking
-      - id (auto)
-      - id_mktp (obrigatório)
-      - chave_acesso_nfe (obrigatório)
-      - numero_nota (auto pelo banco)
-      - data_despacho (auto pelo banco)
-      - hora_despacho (auto pelo banco)
     """
     if 'id_usuario' not in session:
         return jsonify(ok=False, error='Não autenticado'), 401
 
     data = request.get_json(silent=True) or {}
 
-    # valida id_mktp (qualquer int positivo)
+    # valida id_mktp
     try:
         id_mktp = int(data.get("id_mktp"))
         if id_mktp <= 0:
-            raise ValueError("id_mktp precisa ser positivo")
+            raise ValueError()
     except Exception:
         return jsonify(ok=False, error='Parâmetro "id_mktp" é obrigatório e deve ser inteiro positivo'), 400
 
-    # valida id_emp (empresa) - deve ser > 0 e existir
+    # valida id_emp
     try:
         id_emp = int(data.get("id_emp"))
         if id_emp <= 0:
-            raise ValueError("id_emp precisa ser positivo")
+            raise ValueError()
     except Exception:
         return jsonify(ok=False, error='Parâmetro "id_emp" é obrigatório e deve ser inteiro positivo'), 400
 
@@ -101,24 +135,32 @@ def api_despacho_crossdocking_nfe():
 
     pool = current_app.config.get("PG_POOL")
     if not pool:
-        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 500
+        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 503
 
-    conn = pool.getconn()
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # confirma se a empresa existe (e bloqueia id_emp=0)
-            cur.execute(f"SELECT 1 FROM {TBL_EMP} WHERE id_emp = %s AND id_emp > 0", (id_emp,))
-            if not cur.fetchone():
-                return jsonify(ok=False, error="Empresa inválida ou não cadastrada."), 400
-            
-            # confirma se o marketplace existe
-            cur.execute(f"SELECT 1 FROM {TBL_MKTP} WHERE id_mktp = %s", (id_mktp,))
-            if not cur.fetchone():
-                return jsonify(ok=False, error="Marketplace inválido ou não cadastrado."), 400
+    last_exc = None
 
-            try:
+    for attempt in range(1, PG_MAX_RETRIES + 1):
+        conn = None
+        discarded = False
+
+        try:
+            conn = pool.getconn()
+
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # confirma empresa
+                cur.execute(f"SELECT 1 FROM {TBL_EMP} WHERE id_emp = %s AND id_emp > 0", (id_emp,))
+                if not cur.fetchone():
+                    return jsonify(ok=False, error="Empresa inválida ou não cadastrada."), 400
+
+                # confirma marketplace
+                cur.execute(f"SELECT 1 FROM {TBL_MKTP} WHERE id_mktp = %s", (id_mktp,))
+                if not cur.fetchone():
+                    return jsonify(ok=False, error="Marketplace inválido ou não cadastrado."), 400
+
                 sandbox = get_sandbox()
 
+                # Importante: se você quer manter 409 quando já existe, deixa assim.
+                # (Não dá retry "cego" em duplicidade; isso é regra de negócio, não falha de conexão.)
                 cur.execute(
                     f"""
                     INSERT INTO {TBL_DESPACHO}
@@ -136,23 +178,43 @@ def api_despacho_crossdocking_nfe():
 
                 return jsonify(ok=True, row=_iso_row(row)), 200
 
-            except Exception as e:
-                conn.rollback()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            last_exc = e
+            _pg_discard(pool, conn)
+            discarded = True
 
-                # Duplicidade (unique) no Postgres
-                if getattr(e, "pgcode", None) == "23505":
-                    return jsonify(ok=False, error="NF-e já cadastrada no banco"), 409
+            if attempt >= PG_MAX_RETRIES:
+                err_id = uuid.uuid4().hex[:10]
+                current_app.logger.exception(f"[{err_id}] Postgres desconectou em /api/despacho/crossdocking/nfe após {PG_MAX_RETRIES} tentativas")
+                return jsonify(
+                    ok=False,
+                    error="Falha ao consultar o banco. Contate um administrador.",
+                    error_id=err_id
+                ), 503
 
-                current_app.logger.exception("Falha ao inserir em agendamentosweb.despacho_crossdocking")
-                return jsonify(ok=False, error=str(e)), 500
-    finally:
-        try:
-            conn.rollback()  # encerra transação do SELECT (evita idle in transaction)
-        except Exception:
-            pass
-        pool.putconn(conn)
+            _pg_sleep_backoff(attempt)
+            continue
 
+        except Exception as e:
+            # Duplicidade (unique) no Postgres
+            if getattr(e, "pgcode", None) == "23505":
+                return jsonify(ok=False, error="NF-e já cadastrada no banco"), 409
 
+            try:
+                if conn:
+                    conn.rollback()
+            except Exception:
+                pass
+
+            current_app.logger.exception("Falha ao inserir em agendamentosweb.despacho_crossdocking")
+            return jsonify(ok=False, error=str(e)), 500
+
+        finally:
+            if conn and not discarded:
+                _pg_putconn(pool, conn)
+
+    # Segurança
+    raise last_exc
 
 @bp_despacho.route('/api/despacho/marketplaces', methods=['GET'])
 def api_despacho_marketplaces():
@@ -166,27 +228,26 @@ def api_despacho_marketplaces():
 
     pool = current_app.config.get("PG_POOL")
     if not pool:
-        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 500
+        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 503
 
-    conn = pool.getconn()
+    sql = f"""
+        SELECT id_mktp, nome_mktp
+        FROM {TBL_MKTP}
+        ORDER BY id_mktp ASC
+    """
+
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                f"""
-                SELECT id_mktp, nome_mktp
-                FROM {TBL_MKTP}
-                ORDER BY id_mktp ASC
-                """
-            )
-            rows = cur.fetchall() or []
-            return jsonify(ok=True, items=rows), 200
-    finally:
-        try:
-            conn.rollback()  # encerra transação do SELECT (evita idle in transaction)
-        except Exception:
-            pass
-        pool.putconn(conn)
+        rows = _pg_select_all_with_retry(pool, sql, None, max_retries=10)
+        return jsonify(ok=True, items=rows), 200
 
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        err_id = uuid.uuid4().hex[:10]
+        current_app.logger.exception(f"[{err_id}] Postgres desconectou em /api/despacho/marketplaces após 10 tentativas")
+        return jsonify(
+            ok=False,
+            error="Falha ao consultar o banco. Contate um administrador.",
+            error_id=err_id
+        ), 503
 
 @bp_despacho.route('/api/despacho/empresas', methods=['GET'])
 def api_despacho_empresas():
@@ -201,35 +262,27 @@ def api_despacho_empresas():
 
     pool = current_app.config.get("PG_POOL")
     if not pool:
-        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 500
+        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 503
 
-    # 1 retry: se pegar conexão morta do pool, descarta e tenta de novo
-    for attempt in (1, 2):
-        conn = None
-        try:
-            conn = pool.getconn()
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    f"""
-                    SELECT id_emp, nome_emp
-                    FROM {TBL_EMP}
-                    WHERE id_emp > 0
-                    ORDER BY id_emp ASC
-                    """
-                )
-                rows = cur.fetchall() or []
-                return jsonify(ok=True, items=rows), 200
+    sql = f"""
+        SELECT id_emp, nome_emp
+        FROM {TBL_EMP}
+        WHERE id_emp <> 0
+        ORDER BY id_emp ASC
+    """
 
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            _pg_discard(pool, conn)
-            conn = None
-            if attempt == 1:
-                continue
-            current_app.logger.exception("Postgres caiu em /api/despacho/empresas")
-            return jsonify(ok=False, error="Falha de conexão com o Postgres"), 503
+    try:
+        rows = _pg_select_all_with_retry(pool, sql, None, max_retries=10)
+        return jsonify(ok=True, items=rows), 200
 
-        finally:
-            _pg_putconn(pool, conn)
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        err_id = uuid.uuid4().hex[:10]
+        current_app.logger.exception(f"[{err_id}] Postgres desconectou em /api/despacho/empresas após 10 tentativas")
+        return jsonify(
+            ok=False,
+            error="Falha ao consultar o banco. Contate um administrador.",
+            error_id=err_id
+        ), 503
 
 @bp_despacho.route('/api/despacho/crossdocking/consultar', methods=['POST'])
 def api_despacho_crossdocking_consultar():
@@ -397,50 +450,47 @@ def api_despacho_crossdocking_consultar():
 
     pool = current_app.config.get("PG_POOL")
     if not pool:
-        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 500
+        return jsonify(ok=False, error="PG_POOL não configurado no main.py"), 503
 
-    conn = pool.getconn()
+    sql = f"""
+        SELECT
+            d.id,
+            COALESCE(m.nome_mktp, '-') AS marketplace,
+            COALESCE(e.nome_emp, '-')  AS empresa,
+            d.chave_acesso_nfe,
+            d.numero_nota,
+            d.data_despacho,
+            d.hora_despacho
+        FROM {TBL_DESPACHO} d
+        LEFT JOIN {TBL_MKTP} m
+               ON m.id_mktp = d.id_mktp
+        LEFT JOIN {TBL_EMP} e
+               ON e.id_emp = d.id_emp
+        {where_sql}
+        ORDER BY
+            d.data_despacho DESC NULLS LAST,
+            d.hora_despacho DESC NULLS LAST,
+            d.id DESC
+        LIMIT {limit}
+    """
+
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                f"""
-                SELECT
-                    d.id,
-                    COALESCE(m.nome_mktp, '-') AS marketplace,
-                    COALESCE(e.nome_emp, '-')  AS empresa,
-                    d.chave_acesso_nfe,
-                    d.numero_nota,
-                    d.data_despacho,
-                    d.hora_despacho
-                FROM {TBL_DESPACHO} d
-                LEFT JOIN {TBL_MKTP} m
-                       ON m.id_mktp = d.id_mktp
-                LEFT JOIN {TBL_EMP} e
-                       ON e.id_emp = d.id_emp
-                {where_sql}
-                ORDER BY
-                    d.data_despacho DESC NULLS LAST,
-                    d.hora_despacho DESC NULLS LAST,
-                    d.id DESC
-                LIMIT {limit}
-                """,
-                tuple(params)
-            )
-            rows = cur.fetchall() or []
-            rows = [_iso_row(r) for r in rows]
-            return jsonify(ok=True, count=len(rows), items=rows), 200
-    finally:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        pool.putconn(conn)
+        rows = _pg_select_all_with_retry(pool, sql, tuple(params), max_retries=PG_MAX_RETRIES)
+        rows = [_iso_row(r) for r in rows]
+        return jsonify(ok=True, count=len(rows), items=rows), 200
 
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        err_id = uuid.uuid4().hex[:10]
+        current_app.logger.exception(f"[{err_id}] Postgres desconectou em /api/despacho/crossdocking/consultar após {PG_MAX_RETRIES} tentativas")
+        return jsonify(
+            ok=False,
+            error="Falha ao consultar o banco. Contate um administrador.",
+            error_id=err_id
+        ), 503
 
 @bp_despacho.route('/despacho')
 def despacho_crossdocking():
     return render_template("despacho.html")
-
 
 @bp_despacho.route('/despacho/consultar')
 def despacho_consultar():
