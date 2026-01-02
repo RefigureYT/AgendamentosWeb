@@ -88,6 +88,11 @@ function abrirModalColaborador() {
 // Continua agendamento já iniciado
 function continuePhase(ele) {
     const [_, id, tipo] = ele.id.split('--');
+
+    // Expedição (5) oculta: não deixa navegar via botão
+    // (mas se digitar a URL manualmente continua funcionando)
+    if (String(tipo) === "5") return;
+
     window.location.href = `/retirado?id=${id}&tipo=${tipo}&mudar=True`;
 }
 // function continuePhase(ele) {
@@ -134,15 +139,19 @@ function setFiltros() {
     cards.forEach(card => card.classList.remove('hidden-class'));
 
     const emp = $('#inp_emp_pedido').val();
-    const status = $('#inp_status_pedido').val();
+    const statusRaw = $('#inp_status_pedido').val();
     const mktp = $('#inp_mktp_filtro').val();
     const num = ($('#inp_num_pedido').val() || '').trim();
+
+    const status = String(statusRaw ?? '');
+    const isTodos = status === 'Todos';
+    const isPendentes = status === 'Pendentes';
 
     cards.forEach(card => {
         const classes = card.classList;
 
         // só filtra quem tem metadados de classe esperados
-        const isFilterable = [...classes].some(c =>
+        const isFilterable = Array.from(classes).some(c =>
             c.startsWith('emp-') || c.startsWith('tipo-') || c.startsWith('id_mktp-') || c.startsWith('id-')
         );
         if (!isFilterable) return; // ignora placeholders
@@ -150,12 +159,27 @@ function setFiltros() {
         if (emp !== 'Todas' && !classes.contains(`emp-${emp}`)) {
             return card.classList.add('hidden-class');
         }
-        if (status !== 'Todos' && !classes.contains(`tipo-${status}`)) {
-            return card.classList.add('hidden-class');
+
+        // STATUS:
+        // - Todos: não filtra por tipo
+        // - Pendentes: mostra tudo EXCETO Finalizado (tipo-2)
+        // - Demais: filtra por tipo-{id}
+        if (!isTodos) {
+            if (isPendentes) {
+                if (classes.contains('tipo-2')) {
+                    return card.classList.add('hidden-class');
+                }
+            } else {
+                if (!classes.contains(`tipo-${status}`)) {
+                    return card.classList.add('hidden-class');
+                }
+            }
         }
+
         if (mktp !== 'Todas' && !classes.contains(`id_mktp-${mktp}`)) {
             return card.classList.add('hidden-class');
         }
+
         if (num) {
             const textoPedido = card.querySelector('.pedido-numero')?.textContent.trim() || '';
             if (!textoPedido.includes(num)) {
@@ -1349,3 +1373,12 @@ async function carregarInfoEmpresaModal(idAgend) {
 
     document.addEventListener("DOMContentLoaded", updateFonteUI);
 })();
+
+// Aplica o filtro padrão já na primeira renderização
+window.addEventListener("DOMContentLoaded", () => {
+    try {
+        setFiltros();
+    } catch (e) {
+        console.error("Falha ao aplicar filtros iniciais:", e);
+    }
+});

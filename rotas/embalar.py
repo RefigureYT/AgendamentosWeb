@@ -902,3 +902,142 @@ def excluir_caixa():
         except Exception:
             pass
         conn.close()
+
+# ===================== FINALIZAR EMBALAGEM (MOVER PARA FINALIZADOS) =====================
+@bp_embalar.route("/embalar/finalizar/<int:id_agend_bd>", methods=["POST"])
+def finalizar_embalagem(id_agend_bd):
+    """
+    Front chama: POST /embalar/finalizar/<idAgendamento>
+    e espera: { ok: true }
+    """
+    ag_ctrl = current_app.config.get("AG_CTRL")
+    if not ag_ctrl:
+        return jsonify(ok=False, error="AG_CTRL não configurado no app.config"), 500
+
+    # 1) Carrega agendamento (pra pegar id_agend_ml)
+    ag_ctrl.clear_agendamentos()
+    ag_ctrl.insert_agendamento(id_bd=id_agend_bd)
+    ag = ag_ctrl.get_last_made_agendamento()
+    if not ag:
+        return jsonify(ok=False, error="Agendamento não encontrado"), 404
+
+    ag_ctrl.create_agendamento_from_bd_data(ag)
+    if not getattr(ag, "id_agend_ml", None):
+        return jsonify(ok=False, error="id_agend_ml não encontrado no agendamento"), 500
+
+    conn = None
+    cur = None
+
+    try:
+        conn = mysql.connector.connect(**_db_config)
+        cur = conn.cursor()
+
+        # 2) Monta caixas + itens (formato compatível com o modal do relatório)
+        cur.execute(
+            """
+            SELECT caixa_num, codigo_unico_caixa
+            FROM embalagem_caixas
+            WHERE id_agend_ml = %s
+            ORDER BY caixa_num
+            """,
+            (ag.id_agend_ml,),
+        )
+        caixas_rows = cur.fetchall()
+
+        caixas = []
+        for caixa_num, codigo_unico in caixas_rows:
+            cur.execute(
+                """
+                SELECT sku, quantidade
+                FROM embalagem_caixa_itens
+                WHERE id_agend_ml = %s AND caixa_num = %s
+                ORDER BY sku
+                """,
+                (ag.id_agend_ml, caixa_num),
+            )
+            itens_rows = cur.fetchall()
+            itens = [{"sku": sku, "quantidade": int(qtd or 0)} for (sku, qtd) in itens_rows]
+
+            caixas.append(
+                {
+                    "caixa_numero": int(caixa_num),
+                    "codigo_unico": codigo_unico,
+                    "itens": itens,
+                }
+            )
+
+        termino = datetime.now()
+        termino_str = termino.strftime("%Y-%m-%d %H:%M:%S")
+
+        relatorio_embalagem = {
+            "termino_embalagem": termino_str,
+            "detalhes_embalagem": {
+                "total_caixas": len(caixas),
+                "caixas": caixas,
+            },
+        }
+
+        # 3) Puxa relatório existente (se tiver) e faz merge
+        cur.execute(
+            "SELECT relatorio FROM relatorio_agend WHERE id_agend_ml = %s",
+            (ag.id_agend_ml,),
+        )
+        row = cur.fetchone()
+
+        payload = {}
+        if row and row[0]:
+            try:
+                payload = json.loads(row[0])
+            except Exception:
+                payload = {}
+
+        payload.setdefault("Informacoes", {})
+        payload["Informacoes"]["DataTerminoEmbalagem"] = termino_str
+
+        # (Opcional) permanência baseada no primeiro inicio_embalagem das caixas
+        cur.execute(
+            "SELECT MIN(inicio_embalagem) FROM embalagem_caixas WHERE id_agend_ml = %s",
+            (ag.id_agend_ml,),
+        )
+        inicio_emb = cur.fetchone()[0]
+        if inicio_emb:
+            payload["Informacoes"]["PermanenciaEmbalagem"] = str(termino - inicio_emb)
+        else:
+            payload["Informacoes"]["PermanenciaEmbalagem"] = ""
+
+        payload["RelatorioEmbalagem"] = relatorio_embalagem
+
+        # 4) UPSERT do relatório
+        cur.execute(
+            """
+            INSERT INTO relatorio_agend (id_agend_ml, relatorio)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE relatorio = VALUES(relatorio)
+            """,
+            (ag.id_agend_ml, json.dumps(payload, ensure_ascii=False)),
+        )
+        conn.commit()
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print("Erro ao finalizar embalagem:", e)
+        return jsonify(ok=False, error=str(e)), 500
+
+    finally:
+        try:
+            if cur:
+                cur.close()
+        finally:
+            if conn:
+                conn.close()
+
+    # 5) Move o agendamento para FINALIZADOS (tipo = 2)
+    try:
+        ag.set_tipo(2)
+        ag_ctrl.update_agendamento(ag)
+    except Exception as e:
+        print("Relatório salvo, mas falha ao atualizar tipo do agendamento:", e)
+        return jsonify(ok=False, error="Relatório salvo, mas falhou ao mover para Finalizados"), 500
+
+    return jsonify(ok=True)

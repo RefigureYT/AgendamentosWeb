@@ -1198,7 +1198,8 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
     const idMl = (li?.dataset?.idMl || "").toString().trim();
     const gtin = (li?.dataset?.gtin || "").toString().trim();
 
-    if (!sku || !idMl || !nome) {3
+    if (!sku || !idMl || !nome) {
+      3
       _toast("error", "Dados insuficientes", "SKU/ID/Nome não encontrados no item clicado.");
       return;
     }
@@ -3606,68 +3607,68 @@ A etiqueta de <b>volume do Mercado Livre</b> não pode ser gerada automaticament
   });
 
   async function handleFinalizarEmbalagem(event) {
-    event.preventDefault();
+    if (event?.preventDefault) event.preventDefault();
 
-    const headerBar = document.querySelector('.header-bar');
-    const idAgendamento = headerBar.dataset.idBd; // Pega o ID do agendamento do header da página
+    // pega o ID do BD direto do header da página (data-id-bd)
+    const headerBar = document.querySelector(".header-bar");
+    const idAgendamento = headerBar?.dataset?.idBd;
 
-    // Pede confirmação ao usuário
-    const result = await Swal.fire({
-      title: 'Finalizar Embalagem?',
-      text: "O relatório será gerado e o pedido movido para a Expedição. Deseja continuar?",
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonColor: '#28a745',
-      cancelButtonColor: '#6c757d',
-      confirmButtonText: 'Sim, finalizar!',
-      cancelButtonText: 'Cancelar'
-    });
-
-    if (!result.isConfirmed) {
+    if (!idAgendamento) {
+      await Swal.fire({
+        icon: "error",
+        title: "Erro",
+        text: "idAgendamento não encontrado na página (data-id-bd). Recarregue a tela ou chame um admin.",
+      });
       return;
     }
 
-    // **1) Gera uma etiqueta ZPL para cada caixa já fechada**
-    //    (supondo que cada objeto em `caixas` tenha `startTime` e `endTime` definidos)
-    caixas
-      .filter(cx => cx.fechada && cx.startTime && cx.endTime)
-      .forEach(cx => gerarEtiquetaCaixa(cx.id));
-
-    // 2) Mostra o loading
-    Swal.fire({
-      title: 'Processando...',
-      text: 'Gerando relatório e atualizando o status.',
-      allowOutsideClick: false,
-      didOpen: () => Swal.showLoading()
+    const result = await Swal.fire({
+      title: "Finalizar?",
+      text: "Finalizar e mover para Finalizados?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Sim, finalizar!",
+      cancelButtonText: "Cancelar",
     });
 
-    // 3) Envia para o backend finalizar o agendamento
+    if (!result.isConfirmed) return;
+
     try {
-      const response = await fetch(`/embalar/finalizar/${idAgendamento}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await response.json();
-      if (response.ok && data.success) {
-        await Swal.fire({
-          icon: 'success',
-          title: 'Sucesso!',
-          text: data.message,
-          timer: 2000,
-          timerProgressBar: true,
-        });
-        window.location.href = '/agendamentos/ver?atualizado=ok';
-      } else {
-        throw new Error(data.message || 'Ocorreu um erro no servidor.');
-      }
-    } catch (error) {
       Swal.fire({
-        icon: 'error',
-        title: 'Erro',
-        text: `Falha ao finalizar a embalagem: ${error.message}`,
+        title: "Processando...",
+        text: "Gerando relatório e atualizando o status. Aguarde...",
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading(),
       });
+
+      const resp = await fetch(`/embalar/finalizar/${idAgendamento}`, { method: "POST" });
+
+      // evita crash se vier HTML/erro sem JSON
+      const data = await resp.json().catch(() => ({}));
+
+      // aceita tanto {success:true} quanto {ok:true}
+      const deuCerto = resp.ok && (data.success === true || data.ok === true);
+
+      if (!deuCerto) {
+        throw new Error(data.message || data.error || "Falha ao finalizar");
+      }
+
+      await Swal.fire({
+        icon: "success",
+        title: "Finalizado!",
+        text: "O pedido foi movido para Finalizados.",
+        timer: 1600,
+        timerProgressBar: true,
+      });
+
+      // mantém o padrão antigo de querystring (se você já usa isso no backend/front)
+      window.location.href = "/agendamentos/ver?atualizado=ok";
+    } catch (err) {
+      console.error(err);
+      Swal.fire("Erro", err?.message || "Erro ao finalizar", "error");
     }
   }
+
   // Sincroniza a cada 1 segundos
 
   function funcoesDisponiveis() {

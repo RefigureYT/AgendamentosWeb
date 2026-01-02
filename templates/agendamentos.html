@@ -23,12 +23,12 @@
       <div class="col">
         <label class="form-label">Status</label>
         <select id="inp_status_pedido" class="form-select" onchange="setFiltros()">
-          <option selected>Todos</option>
+          <option selected>Pendentes</option>
           <option value="1">Limpeza</option>
           <option value="3">Conferência</option>
           <option value="4">Embalar</option>
-          <option value="5">Expedição</option>
           <option value="2">Finalizado</option>
+          <option>Todos</option>
         </select>
       </div>
       <div class="col">
@@ -280,13 +280,12 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <select id="nome_tipo" class="form-select mb-3">
-            <option selected disabled>Selecione o agendamento</option>
-            <option value="1">Limpeza</option>
-            <option value="3">Conferência</option>
-            <option value="4">Embalar</option>
-            <option value="5">Expedição</option>
-          </select>
+            <select id="nome_tipo" class="form-select mb-3">
+              <option value="1">Limpeza</option>
+              <option value="3">Conferência</option>
+              <option value="4">Embalar</option>
+              <option value="2">Finalizado</option>
+            </select>
           <button class="btn btn-secondary" onclick="abrirModalUpload()">OK</button>
         </div>
       </div>
