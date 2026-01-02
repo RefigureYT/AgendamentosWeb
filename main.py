@@ -14,11 +14,14 @@ from exceptions import ParametroInvalido, MetodoInvalido, LimiteRequests, Arquiv
 # Remova SocketIO se não for usar agora:
 # from flask_socketio import SocketIO, join_room, emit
 
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except ModuleNotFoundError:
+    pass
 
 ## Configuração de desenvolvimento e produção
-DEBUG=True  # Mude para False em produção
+DEBUG=False  # Mude para False em produção
 PORT= 44523 if DEBUG == True else 8345 # 8345 se produção
 ## FIM Configuração
 

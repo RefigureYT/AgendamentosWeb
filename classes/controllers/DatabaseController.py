@@ -337,10 +337,31 @@ class DatabaseController:
             "SELECT * FROM excel_uploads WHERE uuid = %s;", (uuid,)
         )[0]
 
-    
     def test_connection(self):
         return self.access
-    
+
+    def delete_alteracoes_by_agendamento(self, id_agendamento: int):
+        return self.access.custom_i_u_query(
+            """
+            DELETE al
+            FROM alteracoes_agend al
+            JOIN produtos_agend p ON p.id_prod = al.id_prod_alt
+            WHERE p.id_agend_prod = %s;
+            """,
+            [(id_agendamento,)]
+        )
+
+    def delete_compras_by_agendamento(self, id_agendamento: int):
+        return self.access.custom_i_u_query(
+            """
+            DELETE ca
+            FROM compras_agend ca
+            JOIN produtos_agend p ON p.id_prod = ca.id_prod_compra
+            WHERE p.id_agend_prod = %s;
+            """,
+            [(id_agendamento,)]
+        )
+
     def delete_composicoes_by_agendamento(self, id_agendamento: int):
         return self.access.custom_i_u_query(
             """
@@ -350,14 +371,16 @@ class DatabaseController:
                 FROM produtos_agend 
                 WHERE id_agend_prod = %s
             );
-            """, [(id_agendamento,)]
+            """,
+            [(id_agendamento,)]
         )
 
     def delete_produtos_by_agendamento(self, id_agendamento: int):
         return self.access.custom_i_u_query(
-            "DELETE FROM produtos_agend WHERE id_agend_prod = %s;", [(id_agendamento,)]
+            "DELETE FROM produtos_agend WHERE id_agend_prod = %s;",
+            [(id_agendamento,)]
         )
-        
+            
     def exists_agendamento_ml(self, ml_id: str) -> bool:
         """Verifica se um agendamento com um id_agend_ml específico já existe."""
         # CORREÇÃO: Usa um placeholder (%s) em vez de f-string para segurança.

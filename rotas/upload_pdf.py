@@ -164,7 +164,9 @@ def upload():
             _safe_set(agendamento_original, "id_tipo", tipo)
             _safe_set(agendamento_original, "centro_distribuicao", centro_final)
 
-            # 4) limpa produtos e composições antigos no BD
+            # 4) limpa tabelas filhas + produtos e composições antigos no BD (ordem importa por causa das FKs)
+            agendamento_controller.db_controller.delete_alteracoes_by_agendamento(id_bd)
+            agendamento_controller.db_controller.delete_compras_by_agendamento(id_bd)
             agendamento_controller.db_controller.delete_composicoes_by_agendamento(id_bd)
             agendamento_controller.db_controller.delete_produtos_by_agendamento(id_bd)
 
